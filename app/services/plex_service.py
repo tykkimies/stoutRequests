@@ -259,7 +259,9 @@ class PlexService:
     def check_media_in_library(self, tmdb_id: int, media_type: str) -> bool:
         """Check if media exists in Plex library using TMDB ID"""
         try:
-            plex = PlexServer(self.plex_url, self.plex_token)
+            clean_url = str(self.plex_url).encode('ascii', errors='ignore').decode('ascii').strip()
+            clean_token = str(self.plex_token).encode('ascii', errors='ignore').decode('ascii').strip()
+            plex = PlexServer(clean_url, clean_token)
 
             for library in plex.library.sections():
                 if media_type == "movie" and library.type == "movie":
@@ -303,8 +305,11 @@ class PlexService:
                 return []
             
             print(f"🔍 Connecting to Plex: {self.plex_url}")
-            plex = PlexServer(self.plex_url, self.plex_token)
-            print(f"🔍 Connected to Plex server: {plex.friendlyName}")
+            clean_url = str(self.plex_url).encode('ascii', errors='ignore').decode('ascii').strip()
+            clean_token = str(self.plex_token).encode('ascii', errors='ignore').decode('ascii').strip()
+            plex = PlexServer(clean_url, clean_token)
+            safe_name = str(plex.friendlyName).encode('ascii', errors='ignore').decode('ascii').strip()
+            print(f"🔍 Connected to Plex server: {safe_name}")
             
             # Get recently added items from all libraries
             recent_items = plex.library.recentlyAdded()  # Get all recent items
@@ -429,17 +434,23 @@ class PlexService:
                 return []
             
             print("🔗 Connecting to Plex server...")
-            plex = PlexServer(self.plex_url, self.plex_token)
-            print(f"✅ Connected to Plex server: {plex.friendlyName}")
+            # Ensure URL and token are properly encoded for HTTP headers
+            clean_url = str(self.plex_url).encode('ascii', errors='ignore').decode('ascii').strip()
+            clean_token = str(self.plex_token).encode('ascii', errors='ignore').decode('ascii').strip()
+            
+            plex = PlexServer(clean_url, clean_token)
+            safe_name = str(plex.friendlyName).encode('ascii', errors='ignore').decode('ascii').strip()
+            print(f"✅ Connected to Plex server: {safe_name}")
             
             libraries = []
             
             print("📚 Fetching library sections...")
             for section in plex.library.sections():
-                print(f"  📖 Section: {section.title} ({section.type})")
+                safe_title = str(section.title).encode('ascii', errors='ignore').decode('ascii').strip()
+                print(f"  📖 Section: {safe_title} ({section.type})")
                 if section.type in ['movie', 'show']:
                     library_info = {
-                        'title': section.title,
+                        'title': section.title,  # Keep original title for data
                         'type': section.type,
                         'key': section.key,
                         'agent': getattr(section, 'agent', 'Unknown'),

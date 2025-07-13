@@ -22,6 +22,15 @@ class PlexSyncService:
             self.session = session
             self._owns_session = False
     
+    def safe_print(self, message: str):
+        """Safely print message with proper encoding handling"""
+        try:
+            # Remove or replace problematic characters
+            safe_msg = str(message).encode('ascii', errors='ignore').decode('ascii')
+            print(safe_msg if safe_msg.strip() else "[Non-ASCII characters removed]")
+        except Exception:
+            print("[Encoding error in message]")
+    
     def __del__(self):
         if hasattr(self, '_owns_session') and self._owns_session and hasattr(self, 'session'):
             self.session.close()
@@ -43,8 +52,12 @@ class PlexSyncService:
                 print("❌ Plex not configured, skipping sync")
                 return {'error': 'Plex not configured'}
             
-            plex = PlexServer(config['url'], config['token'])
-            print(f"🔗 Connected to Plex server: {plex.friendlyName}")
+            # Ensure URL and token are properly encoded for HTTP headers
+            clean_url = str(config['url']).encode('ascii', errors='ignore').decode('ascii').strip()
+            clean_token = str(config['token']).encode('ascii', errors='ignore').decode('ascii').strip()
+            
+            plex = PlexServer(clean_url, clean_token)
+            self.safe_print(f"🔗 Connected to Plex server: {plex.friendlyName}")
             
             stats = {
                 'movies_processed': 0,
@@ -69,15 +82,15 @@ class PlexSyncService:
                 if section.type in ['movie', 'show']:
                     # Check if this library should be synced
                     if not settings.should_sync_library(section.title):
-                        print(f"⏭️  Skipping {section.title} ({section.type}) library (not in sync preferences)")
+                        self.safe_print(f"⏭️  Skipping {section.title} ({section.type}) library (not in sync preferences)")
                         continue
                     
-                    print(f"📚 Processing {section.title} ({section.type}) library...")
+                    self.safe_print(f"📚 Processing {section.title} ({section.type}) library...")
                     
                     try:
                         # Get all items in this section
                         all_items = section.all()
-                        print(f"   Found {len(all_items)} items in {section.title}")
+                        self.safe_print(f"   Found {len(all_items)} items in {section.title}")
                         
                         for item in all_items:
                             try:
@@ -100,7 +113,7 @@ class PlexSyncService:
                                 
                                 # Skip items we can't match at all
                                 if not tmdb_id:
-                                    print(f"⚠️ Skipping {item.title} - no TMDB ID and no title/year match found")
+                                    self.safe_print(f"⚠️ Skipping {item.title} - no TMDB ID and no title/year match found")
                                     continue
                                 
                                 # Determine media type
@@ -115,7 +128,7 @@ class PlexSyncService:
                                     # Update existing item
                                     existing_item = existing_items[plex_key]
                                     existing_item.tmdb_id = tmdb_id
-                                    existing_item.title = item.title
+                                    existing_item.title = str(item.title).encode('utf-8', errors='replace').decode('utf-8').strip()
                                     existing_item.media_type = media_type
                                     existing_item.year = getattr(item, 'year', None)
                                     existing_item.rating_key = item.ratingKey
@@ -137,9 +150,9 @@ class PlexSyncService:
                                     
                                     if existing_tmdb_item:
                                         # Update the existing TMDB item with new Plex info (prefer newer data)
-                                        print(f"🔄 Updating existing TMDB item {tmdb_id} ({media_type}) with new Plex key {plex_key}")
+                                        self.safe_print(f"🔄 Updating existing TMDB item {tmdb_id} ({media_type}) with new Plex key {plex_key}")
                                         existing_tmdb_item.plex_key = plex_key
-                                        existing_tmdb_item.title = item.title
+                                        existing_tmdb_item.title = str(item.title).encode('utf-8', errors='replace').decode('utf-8').strip()
                                         existing_tmdb_item.year = getattr(item, 'year', None)
                                         existing_tmdb_item.rating_key = item.ratingKey
                                         existing_tmdb_item.library_section_id = section.key
@@ -151,7 +164,7 @@ class PlexSyncService:
                                         new_item = PlexLibraryItem(
                                             plex_key=plex_key,
                                             tmdb_id=tmdb_id,
-                                            title=item.title,
+                                            title=str(item.title).encode('utf-8', errors='replace').decode('utf-8').strip(),
                                             media_type=media_type,
                                             year=getattr(item, 'year', None),
                                             rating_key=item.ratingKey,
@@ -169,16 +182,16 @@ class PlexSyncService:
                                     stats['shows_processed'] += 1
                                     
                             except Exception as item_error:
-                                print(f"⚠️ Error processing item {getattr(item, 'title', 'Unknown')}: {item_error}")
+                                self.safe_print(f"⚠️ Error processing item {getattr(item, 'title', 'Unknown')}: {item_error}")
                                 continue
                                 
                     except Exception as section_error:
-                        print(f"❌ Error processing section {section.title}: {section_error}")
+                        self.safe_print(f"❌ Error processing section {section.title}: {section_error}")
                         continue
             
             # Remove items that are no longer in Plex
             for plex_key, item in existing_items.items():
-                print(f"🗑️ Removing item no longer in Plex: {item.title}")
+                self.safe_print(f"🗑️ Removing item no longer in Plex: {item.title}")
                 self.session.delete(item)
                 stats['items_removed'] += 1
             
@@ -383,7 +396,7 @@ class PlexSyncService:
             }
             
         except Exception as e:
-            print(f"Error getting sync stats: {e}")
+            self.safe_print(f"Error getting sync stats: {e}")
             return {'error': str(e)}
     
     def debug_show_sync(self, tmdb_id: int) -> Dict[str, any]:
@@ -422,7 +435,9 @@ class PlexSyncService:
                     debug_info['plex_connection'] = 'No Plex config found'
                     return debug_info
                 
-                plex = PlexServer(config['url'], config['token'])
+                clean_url = str(config['url']).encode('ascii', errors='ignore').decode('ascii').strip()
+                clean_token = str(config['token']).encode('ascii', errors='ignore').decode('ascii').strip()
+                plex = PlexServer(clean_url, clean_token)
                 debug_info['plex_connection'] = f"Connected to {plex.friendlyName}"
                 
                 # Check all TV libraries
@@ -500,7 +515,9 @@ class PlexSyncService:
                     debug_info['plex_connection'] = 'No Plex config found'
                     return debug_info
                 
-                plex = PlexServer(config['url'], config['token'])
+                clean_url = str(config['url']).encode('ascii', errors='ignore').decode('ascii').strip()
+                clean_token = str(config['token']).encode('ascii', errors='ignore').decode('ascii').strip()
+                plex = PlexServer(clean_url, clean_token)
                 debug_info['plex_connection'] = f"Connected to {plex.friendlyName}"
                 
                 # Get TV library

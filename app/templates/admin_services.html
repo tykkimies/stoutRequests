@@ -1,0 +1,1308 @@
+<!-- Enhanced Services Tab Content -->
+<div class="space-y-6">
+    <!-- Services Header -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h3 class="text-lg font-medium text-gray-900">Media Services Configuration</h3>
+                <p class="text-sm text-gray-500 mt-1">Configure one or more Radarr and Sonarr instances for automated media management</p>
+            </div>
+            <div class="flex space-x-2">
+                <button onclick="migrateLegacyServices()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Migrate Legacy
+                </button>
+                <button onclick="showAddServiceModal()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Add Service
+                </button>
+            </div>
+        </div>
+        
+        <!-- Service Instances List -->
+        <div id="services-list" hx-get="{{ base_url }}/admin/services/instances" hx-trigger="load" hx-target="this">
+            <div class="flex justify-center py-8">
+                <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Legacy TMDB Settings (keeping this separate as it's not service instance based) -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-6">TMDB Configuration</h3>
+        <form hx-post="{{ base_url }}/admin/settings/update-media" hx-target="#tmdb-feedback">
+            <input type="hidden" name="plex_url" value="{{ settings.plex_url or '' }}">
+            <input type="hidden" name="plex_token" value="{{ settings.plex_token or '' }}">
+            <input type="hidden" name="plex_client_id" value="{{ settings.plex_client_id or 'stout-requests' }}">
+            <input type="hidden" name="radarr_url" value="{{ settings.radarr_url or '' }}">
+            <input type="hidden" name="radarr_api_key" value="{{ settings.radarr_api_key or '' }}">
+            <input type="hidden" name="sonarr_url" value="{{ settings.sonarr_url or '' }}">
+            <input type="hidden" name="sonarr_api_key" value="{{ settings.sonarr_api_key or '' }}">
+            
+            <div class="grid grid-cols-1 gap-6">
+                <div>
+                    <label for="tmdb_api_key" class="block text-sm font-medium text-gray-700">TMDB API Key</label>
+                    <input type="password" name="tmdb_api_key" id="tmdb_api_key" 
+                           value="{{ '•' * 20 if settings.tmdb_api_key else '' }}"
+                           placeholder="Your TMDB API key"
+                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    <p class="mt-1 text-sm text-gray-500">
+                        Required for movie and TV show metadata. 
+                        <a href="https://www.themoviedb.org/settings/api" target="_blank" class="text-orange-600 hover:text-orange-500">Get your API key</a>
+                    </p>
+                </div>
+            </div>
+            
+            <div class="mt-6 flex justify-end">
+                <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Save TMDB Settings
+                </button>
+            </div>
+        </form>
+        <div id="tmdb-feedback" class="mt-4"></div>
+    </div>
+</div>
+
+<!-- Edit Service Modal -->
+<div id="edit-service-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-2/3 lg:w-1/2 shadow-lg rounded-md bg-white">
+        <div class="mt-3">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-medium text-gray-900">Edit Service Instance</h3>
+                <button onclick="hideEditServiceModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <form id="edit-service-form" class="space-y-4">
+                <input type="hidden" id="edit-instance-id" name="instance_id">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="edit-service-type" class="block text-sm font-medium text-gray-700">Service Type</label>
+                        <select name="service_type" id="edit-service-type" disabled 
+                                class="mt-1 block w-full border-gray-300 rounded-md shadow-sm bg-gray-100 cursor-not-allowed"
+                                onchange="updateEditServiceDefaults()">
+                            <option value="radarr">Radarr (Movies)</option>
+                            <option value="sonarr">Sonarr (TV Shows)</option>
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">Service type cannot be changed after creation</p>
+                    </div>
+                    
+                    <div>
+                        <label for="edit-service-name" class="block text-sm font-medium text-gray-700">Instance Name</label>
+                        <input type="text" name="name" id="edit-service-name" required 
+                               placeholder="e.g., Radarr 4K, Sonarr Anime"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                        <p class="mt-1 text-xs text-gray-500">Give this instance a descriptive name</p>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label for="edit-service-hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                        <input type="text" name="hostname" id="edit-service-hostname" required 
+                               placeholder="localhost or 192.168.1.100"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                    
+                    <div>
+                        <label for="edit-service-port" class="block text-sm font-medium text-gray-700">Port</label>
+                        <input type="number" name="port" id="edit-service-port" required 
+                               placeholder="7878"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                    
+                    <div>
+                        <label for="edit-service-ssl" class="block text-sm font-medium text-gray-700">Connection</label>
+                        <select name="use_ssl" id="edit-service-ssl" 
+                                class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <option value="false">HTTP</option>
+                            <option value="true">HTTPS (SSL)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="edit-service-base-url" class="block text-sm font-medium text-gray-700">Base URL (Optional)</label>
+                        <input type="text" name="base_url" id="edit-service-base-url" 
+                               placeholder="e.g., radarr, sonarr"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                        <p class="mt-1 text-xs text-gray-500">For reverse proxy setups (e.g., domain.com/radarr)</p>
+                    </div>
+                    
+                    <div>
+                        <label for="edit-service-api-key" class="block text-sm font-medium text-gray-700">API Key</label>
+                        <input type="password" name="api_key" id="edit-service-api-key" 
+                               placeholder="API key is saved - leave blank to keep current"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                </div>
+                
+                <div class="flex items-center">
+                    <input type="checkbox" name="is_enabled" id="edit-service-enabled" 
+                           class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                    <label for="edit-service-enabled" class="ml-2 text-sm text-gray-700">Enable this service instance</label>
+                </div>
+                
+                <!-- Advanced Settings Section -->
+                <div class="border-t pt-4">
+                    <button type="button" onclick="toggleEditAdvancedSettings()" class="flex items-center text-sm text-gray-600 hover:text-gray-800">
+                        <svg id="edit-advanced-chevron" class="w-4 h-4 mr-1 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        Advanced Settings
+                    </button>
+                    
+                    <div id="edit-advanced-settings" class="hidden mt-4 space-y-4 bg-gray-50 p-4 rounded-md">
+                        <div id="edit-radarr-settings" class="hidden">
+                            <h4 class="text-sm font-medium text-gray-900 mb-3">Radarr Settings</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="edit-radarr-quality-profile" class="block text-sm font-medium text-gray-700">Default Quality Profile</label>
+                                    <select name="quality_profile_id" id="edit-radarr-quality-profile" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Select Quality Profile</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="edit-radarr-minimum-availability" class="block text-sm font-medium text-gray-700">Minimum Availability</label>
+                                    <select name="minimum_availability" id="edit-radarr-minimum-availability" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="announced">Announced</option>
+                                        <option value="inCinemas" selected>In Cinemas</option>
+                                        <option value="released">Released</option>
+                                        <option value="preDB">PreDB</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <!-- Automation Settings -->
+                            <div class="mt-4 space-y-3">
+                                <h5 class="text-sm font-medium text-gray-800">Automation Options</h5>
+                                <div class="space-y-2">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_scan" id="edit-radarr-enable-scan" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-radarr-enable-scan" class="ml-2 text-sm text-gray-700">
+                                            Enable Scan
+                                            <span class="text-xs text-gray-500 block">Automatically refresh metadata and check for files</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_automatic_search" id="edit-radarr-enable-automatic-search" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-radarr-enable-automatic-search" class="ml-2 text-sm text-gray-700">
+                                            Enable Automatic Search
+                                            <span class="text-xs text-gray-500 block">Automatically search for movies when added</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="monitored" id="edit-radarr-monitored" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-radarr-monitored" class="ml-2 text-sm text-gray-700">
+                                            Monitor by Default
+                                            <span class="text-xs text-gray-500 block">Monitor new movies for available releases</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="edit-sonarr-settings" class="hidden">
+                            <h4 class="text-sm font-medium text-gray-900 mb-3">Sonarr Settings</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="edit-sonarr-quality-profile" class="block text-sm font-medium text-gray-700">Default Quality Profile</label>
+                                    <select name="quality_profile_id" id="edit-sonarr-quality-profile" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Select Quality Profile</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="edit-sonarr-language-profile" class="block text-sm font-medium text-gray-700">Language Profile ID</label>
+                                    <input type="number" name="language_profile_id" id="edit-sonarr-language-profile" value="1" 
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="edit-sonarr-minimum-availability" class="block text-sm font-medium text-gray-700">Minimum Availability</label>
+                                    <select name="minimum_availability" id="edit-sonarr-minimum-availability" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="announced">Announced</option>
+                                        <option value="inCinemas" selected>In Cinemas</option>
+                                        <option value="released">Released</option>
+                                        <option value="preDB">PreDB</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <!-- Automation Settings -->
+                            <div class="mt-4 space-y-3">
+                                <h5 class="text-sm font-medium text-gray-800">Automation Options</h5>
+                                <div class="space-y-2">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_scan" id="edit-sonarr-enable-scan" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-sonarr-enable-scan" class="ml-2 text-sm text-gray-700">
+                                            Enable Scan
+                                            <span class="text-xs text-gray-500 block">Automatically refresh metadata and check for files</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_automatic_search" id="edit-sonarr-enable-automatic-search" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-sonarr-enable-automatic-search" class="ml-2 text-sm text-gray-700">
+                                            Enable Automatic Search
+                                            <span class="text-xs text-gray-500 block">Automatically search for shows when added</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="monitored" id="edit-sonarr-monitored" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-sonarr-monitored" class="ml-2 text-sm text-gray-700">
+                                            Monitor by Default
+                                            <span class="text-xs text-gray-500 block">Monitor new shows for available releases</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="season_folder" id="edit-sonarr-season-folder" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-sonarr-season-folder" class="ml-2 text-sm text-gray-700">
+                                            Use Season Folders
+                                            <span class="text-xs text-gray-500 block">Organize episodes into season folders</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label for="edit-service-root-folder" class="block text-sm font-medium text-gray-700">Default Root Folder</label>
+                            <select name="root_folder_path" id="edit-service-root-folder" 
+                                    class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                <option value="">Select Root Folder</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="edit-service-base-url-advanced" class="block text-sm font-medium text-gray-700">Base URL (Optional)</label>
+                            <input type="text" name="base_url" id="edit-service-base-url-advanced" 
+                                   placeholder="e.g., radarr, sonarr (for reverse proxy setups)"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <p class="mt-1 text-xs text-gray-500">Only needed for reverse proxy setups (e.g., http://domain.com/radarr)</p>
+                        </div>
+                        
+                        <div>
+                            <label for="edit-service-tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                            <select name="tags" id="edit-service-tags" multiple 
+                                    class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                <!-- Will be populated dynamically -->
+                            </select>
+                            <p class="mt-1 text-xs text-gray-500">Hold Ctrl/Cmd to select multiple tags</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end space-x-3 pt-4">
+                    <button type="button" onclick="hideEditServiceModal()" 
+                            class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="testEditServiceConnection()" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Test Connection
+                    </button>
+                    <button type="submit" 
+                            class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Update Service
+                    </button>
+                </div>
+            </form>
+            
+            <div id="edit-service-feedback" class="mt-4 hidden">
+                <!-- Feedback messages will appear here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Service Modal -->
+<div id="add-service-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-2/3 lg:w-1/2 shadow-lg rounded-md bg-white">
+        <div class="mt-3">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-medium text-gray-900">Add New Service Instance</h3>
+                <button onclick="hideAddServiceModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <form id="add-service-form" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="service-type" class="block text-sm font-medium text-gray-700">Service Type</label>
+                        <select name="service_type" id="service-type" required 
+                                class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500"
+                                onchange="updateServiceDefaults()">
+                            <option value="">Select Service Type</option>
+                            <option value="radarr">Radarr (Movies)</option>
+                            <option value="sonarr">Sonarr (TV Shows)</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label for="service-name" class="block text-sm font-medium text-gray-700">Instance Name</label>
+                        <input type="text" name="name" id="service-name" required 
+                               placeholder="e.g., Radarr 4K, Sonarr Anime"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                        <p class="mt-1 text-xs text-gray-500">Give this instance a descriptive name</p>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label for="service-hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                        <input type="text" name="hostname" id="service-hostname" required 
+                               placeholder="localhost or 192.168.1.100"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                    
+                    <div>
+                        <label for="service-port" class="block text-sm font-medium text-gray-700">Port</label>
+                        <input type="number" name="port" id="service-port" required 
+                               placeholder="7878"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                    
+                    <div>
+                        <label for="service-ssl" class="block text-sm font-medium text-gray-700">Connection</label>
+                        <select name="use_ssl" id="service-ssl" 
+                                class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <option value="false">HTTP</option>
+                            <option value="true">HTTPS (SSL)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="service-base-url" class="block text-sm font-medium text-gray-700">Base URL (Optional)</label>
+                        <input type="text" name="base_url" id="service-base-url" 
+                               placeholder="e.g., radarr, sonarr"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                        <p class="mt-1 text-xs text-gray-500">For reverse proxy setups (e.g., domain.com/radarr)</p>
+                    </div>
+                    
+                    <div>
+                        <label for="service-api-key" class="block text-sm font-medium text-gray-700">API Key</label>
+                        <input type="password" name="api_key" id="service-api-key" required 
+                               placeholder="Your service API key"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                </div>
+                
+                <div class="flex items-center">
+                    <input type="checkbox" name="is_enabled" id="service-enabled" checked 
+                           class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                    <label for="service-enabled" class="ml-2 text-sm text-gray-700">Enable this service instance</label>
+                </div>
+                
+                <!-- Advanced Settings Section -->
+                <div class="border-t pt-4">
+                    <button type="button" onclick="toggleAdvancedSettings()" class="flex items-center text-sm text-gray-600 hover:text-gray-800">
+                        <svg id="advanced-chevron" class="w-4 h-4 mr-1 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        Advanced Settings
+                    </button>
+                    
+                    <div id="advanced-settings" class="hidden mt-4 space-y-4 bg-gray-50 p-4 rounded-md">
+                        <div id="radarr-settings" class="hidden">
+                            <h4 class="text-sm font-medium text-gray-900 mb-3">Radarr Settings</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="radarr-quality-profile" class="block text-sm font-medium text-gray-700">Default Quality Profile</label>
+                                    <select name="quality_profile_id" id="radarr-quality-profile" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Select Quality Profile</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="radarr-minimum-availability" class="block text-sm font-medium text-gray-700">Minimum Availability</label>
+                                    <select name="minimum_availability" id="radarr-minimum-availability" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="announced">Announced</option>
+                                        <option value="inCinemas" selected>In Cinemas</option>
+                                        <option value="released">Released</option>
+                                        <option value="preDB">PreDB</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <!-- Automation Settings -->
+                            <div class="mt-4 space-y-3">
+                                <h5 class="text-sm font-medium text-gray-800">Automation Options</h5>
+                                <div class="space-y-2">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_scan" id="radarr-enable-scan" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="radarr-enable-scan" class="ml-2 text-sm text-gray-700">
+                                            Enable Scan
+                                            <span class="text-xs text-gray-500 block">Automatically refresh metadata and check for files</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_automatic_search" id="radarr-enable-automatic-search" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="radarr-enable-automatic-search" class="ml-2 text-sm text-gray-700">
+                                            Enable Automatic Search
+                                            <span class="text-xs text-gray-500 block">Automatically search for movies when added</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="monitored" id="radarr-monitored" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="radarr-monitored" class="ml-2 text-sm text-gray-700">
+                                            Monitor by Default
+                                            <span class="text-xs text-gray-500 block">Monitor new movies for available releases</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="sonarr-settings" class="hidden">
+                            <h4 class="text-sm font-medium text-gray-900 mb-3">Sonarr Settings</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="sonarr-quality-profile" class="block text-sm font-medium text-gray-700">Default Quality Profile</label>
+                                    <select name="quality_profile_id" id="sonarr-quality-profile" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Select Quality Profile</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr-language-profile" class="block text-sm font-medium text-gray-700">Language Profile ID</label>
+                                    <input type="number" name="language_profile_id" id="sonarr-language-profile" value="1" 
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr-minimum-availability" class="block text-sm font-medium text-gray-700">Minimum Availability</label>
+                                    <select name="minimum_availability" id="sonarr-minimum-availability" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="announced">Announced</option>
+                                        <option value="inCinemas" selected>In Cinemas</option>
+                                        <option value="released">Released</option>
+                                        <option value="preDB">PreDB</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <!-- Automation Settings -->
+                            <div class="mt-4 space-y-3">
+                                <h5 class="text-sm font-medium text-gray-800">Automation Options</h5>
+                                <div class="space-y-2">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_scan" id="sonarr-enable-scan" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="sonarr-enable-scan" class="ml-2 text-sm text-gray-700">
+                                            Enable Scan
+                                            <span class="text-xs text-gray-500 block">Automatically refresh metadata and check for files</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_automatic_search" id="sonarr-enable-automatic-search" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="sonarr-enable-automatic-search" class="ml-2 text-sm text-gray-700">
+                                            Enable Automatic Search
+                                            <span class="text-xs text-gray-500 block">Automatically search for shows when added</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="monitored" id="sonarr-monitored" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="sonarr-monitored" class="ml-2 text-sm text-gray-700">
+                                            Monitor by Default
+                                            <span class="text-xs text-gray-500 block">Monitor new shows for available releases</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="season_folder" id="sonarr-season-folder" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="sonarr-season-folder" class="ml-2 text-sm text-gray-700">
+                                            Use Season Folders
+                                            <span class="text-xs text-gray-500 block">Organize episodes into season folders</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label for="service-root-folder" class="block text-sm font-medium text-gray-700">Default Root Folder</label>
+                            <select name="root_folder_path" id="service-root-folder" 
+                                    class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                <option value="">Select Root Folder</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="service-base-url" class="block text-sm font-medium text-gray-700">Base URL (Optional)</label>
+                            <input type="text" name="base_url" id="service-base-url" 
+                                   placeholder="e.g., radarr, sonarr (for reverse proxy setups)"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <p class="mt-1 text-xs text-gray-500">Only needed for reverse proxy setups (e.g., http://domain.com/radarr)</p>
+                        </div>
+                        
+                        <div>
+                            <label for="service-tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                            <select name="tags" id="service-tags" multiple 
+                                    class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                <!-- Will be populated dynamically -->
+                            </select>
+                            <p class="mt-1 text-xs text-gray-500">Hold Ctrl/Cmd to select multiple tags</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end space-x-3 pt-4">
+                    <button type="button" onclick="hideAddServiceModal()" 
+                            class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="testServiceConnection()" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Test Connection
+                    </button>
+                    <button type="submit" 
+                            class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Add Service
+                    </button>
+                </div>
+            </form>
+            
+            <div id="add-service-feedback" class="mt-4 hidden">
+                <!-- Feedback messages will appear here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Service management functions
+function showAddServiceModal() {
+    document.getElementById('add-service-modal').classList.remove('hidden');
+    document.getElementById('add-service-form').reset();
+    document.getElementById('advanced-settings').classList.add('hidden');
+    document.getElementById('radarr-settings').classList.add('hidden');
+    document.getElementById('sonarr-settings').classList.add('hidden');
+}
+
+function hideAddServiceModal() {
+    document.getElementById('add-service-modal').classList.add('hidden');
+    document.getElementById('add-service-feedback').classList.add('hidden');
+}
+
+function updateServiceDefaults() {
+    const serviceType = document.getElementById('service-type').value;
+    const nameInput = document.getElementById('service-name');
+    const hostnameInput = document.getElementById('service-hostname');
+    const portInput = document.getElementById('service-port');
+    
+    // Update default values based on service type
+    if (serviceType === 'radarr') {
+        if (!nameInput.value) nameInput.value = 'Radarr';
+        if (!hostnameInput.value) hostnameInput.value = 'localhost';
+        if (!portInput.value) portInput.value = '7878';
+        document.getElementById('radarr-settings').classList.remove('hidden');
+        document.getElementById('sonarr-settings').classList.add('hidden');
+    } else if (serviceType === 'sonarr') {
+        if (!nameInput.value) nameInput.value = 'Sonarr';
+        if (!hostnameInput.value) hostnameInput.value = 'localhost';
+        if (!portInput.value) portInput.value = '8989';
+        document.getElementById('sonarr-settings').classList.remove('hidden');
+        document.getElementById('radarr-settings').classList.add('hidden');
+    } else {
+        document.getElementById('radarr-settings').classList.add('hidden');
+        document.getElementById('sonarr-settings').classList.add('hidden');
+    }
+}
+
+function toggleAdvancedSettings() {
+    const advancedDiv = document.getElementById('advanced-settings');
+    const chevron = document.getElementById('advanced-chevron');
+    
+    if (advancedDiv.classList.contains('hidden')) {
+        advancedDiv.classList.remove('hidden');
+        chevron.style.transform = 'rotate(90deg)';
+    } else {
+        advancedDiv.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+    }
+}
+
+async function testServiceConnection() {
+    const form = document.getElementById('add-service-form');
+    const formData = new FormData(form);
+    const serviceData = {
+        service_type: formData.get('service_type'),
+        hostname: formData.get('hostname'),
+        port: formData.get('port'),
+        use_ssl: formData.get('use_ssl'),
+        base_url: formData.get('base_url'),
+        api_key: formData.get('api_key')
+    };
+    
+    if (!serviceData.service_type || !serviceData.hostname || !serviceData.port || !serviceData.api_key) {
+        showServiceFeedback('Please fill in service type, hostname, port, and API key before testing', 'error');
+        return;
+    }
+    
+    try {
+        showServiceFeedback('Testing connection...', 'info');
+        
+        // Test connection without creating instance
+        const response = await fetch('{{ base_url }}/admin/services/test-connection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+                service_type: serviceData.service_type,
+                hostname: serviceData.hostname,
+                port: serviceData.port,
+                use_ssl: serviceData.use_ssl,
+                base_url: serviceData.base_url,
+                api_key: serviceData.api_key
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            const testResult = result.test_result;
+            if (testResult.status === 'connected') {
+                showServiceFeedback(`✅ Connection successful! Version: ${testResult.version}`, 'success');
+                // Load dropdowns with service data
+                await loadServiceDropdowns(result, serviceData);
+            } else {
+                showServiceFeedback(`❌ Connection failed: ${testResult.message}`, 'error');
+            }
+        } else {
+            showServiceFeedback(`❌ Test failed: ${result.detail}`, 'error');
+        }
+    } catch (error) {
+        showServiceFeedback(`❌ Network error: ${error.message}`, 'error');
+    }
+}
+
+async function loadServiceDropdowns(testResultData, serviceData) {
+    try {
+        console.log('Loading service dropdowns with data:', testResultData);
+        
+        // Populate Quality Profiles
+        const qualityProfileSelect = document.getElementById(`${serviceData.service_type}-quality-profile`);
+        if (qualityProfileSelect && testResultData.quality_profiles) {
+            // Clear existing options except first
+            qualityProfileSelect.innerHTML = '<option value="">Select Quality Profile</option>';
+            
+            testResultData.quality_profiles.forEach(profile => {
+                const option = document.createElement('option');
+                option.value = profile.id;
+                option.textContent = profile.name;
+                qualityProfileSelect.appendChild(option);
+            });
+            
+            console.log(`Loaded ${testResultData.quality_profiles.length} quality profiles`);
+        }
+        
+        // Populate Root Folders
+        const rootFolderSelect = document.getElementById('service-root-folder');
+        if (rootFolderSelect && testResultData.root_folders) {
+            // Clear existing options except first
+            rootFolderSelect.innerHTML = '<option value="">Select Root Folder</option>';
+            
+            testResultData.root_folders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder.path;
+                option.textContent = `${folder.path} (${folder.freeSpace || 'Unknown'} free)`;
+                rootFolderSelect.appendChild(option);
+            });
+            
+            console.log(`Loaded ${testResultData.root_folders.length} root folders`);
+        }
+        
+        // Populate Tags
+        const tagsSelect = document.getElementById('service-tags');
+        if (tagsSelect && testResultData.tags) {
+            // Clear existing options
+            tagsSelect.innerHTML = '';
+            
+            testResultData.tags.forEach(tag => {
+                const option = document.createElement('option');
+                option.value = tag.id;
+                option.textContent = tag.label;
+                tagsSelect.appendChild(option);
+            });
+            
+            console.log(`Loaded ${testResultData.tags.length} tags`);
+        }
+        
+        // Show advanced settings if they weren't already visible
+        const advancedDiv = document.getElementById('advanced-settings');
+        if (advancedDiv && advancedDiv.classList.contains('hidden')) {
+            toggleAdvancedSettings();
+        }
+        
+        showServiceFeedback(`✅ Loaded service configuration options successfully!`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading service dropdowns:', error);
+        showServiceFeedback(`⚠️ Connected but failed to load configuration options: ${error.message}`, 'warning');
+    }
+}
+
+function showServiceFeedback(message, type) {
+    const feedbackDiv = document.getElementById('add-service-feedback');
+    const colorClasses = {
+        'success': 'bg-green-50 border-green-200 text-green-700',
+        'error': 'bg-red-50 border-red-200 text-red-700',
+        'info': 'bg-blue-50 border-blue-200 text-blue-700'
+    };
+    
+    feedbackDiv.innerHTML = `
+        <div class="p-3 border rounded-md ${colorClasses[type] || colorClasses.info}">
+            <p class="text-sm">${message}</p>
+        </div>
+    `;
+    feedbackDiv.classList.remove('hidden');
+    
+    // Auto-hide success messages
+    if (type === 'success') {
+        setTimeout(() => {
+            feedbackDiv.classList.add('hidden');
+        }, 5000);
+    }
+}
+
+// Handle add service form submission
+document.addEventListener('DOMContentLoaded', function() {
+    const addServiceForm = document.getElementById('add-service-form');
+    if (addServiceForm) {
+        addServiceForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const serviceData = {
+                name: formData.get('name'),
+                service_type: formData.get('service_type'),
+                hostname: formData.get('hostname'),
+                port: formData.get('port'),
+                use_ssl: formData.get('use_ssl'),
+                api_key: formData.get('api_key'),
+                is_enabled: formData.get('is_enabled') === 'on',
+                settings: {}
+            };
+            
+            // Store connection details in settings
+            if (formData.get('hostname')) serviceData.settings.hostname = formData.get('hostname');
+            if (formData.get('port')) serviceData.settings.port = parseInt(formData.get('port'));
+            if (formData.get('use_ssl')) serviceData.settings.use_ssl = formData.get('use_ssl') === 'true';
+            if (formData.get('base_url')) serviceData.settings.base_url = formData.get('base_url');
+            
+            // Collect advanced settings
+            if (serviceData.service_type === 'radarr') {
+                if (formData.get('quality_profile_id')) serviceData.settings.quality_profile_id = parseInt(formData.get('quality_profile_id'));
+                if (formData.get('minimum_availability')) serviceData.settings.minimum_availability = formData.get('minimum_availability');
+                if (formData.get('root_folder_path')) serviceData.settings.root_folder_path = formData.get('root_folder_path');
+                
+                // Automation settings - read from specific add modal checkboxes
+                const enableScanChecked = document.getElementById('radarr-enable-scan').checked;
+                const enableAutoSearchChecked = document.getElementById('radarr-enable-automatic-search').checked;
+                const monitoredChecked = document.getElementById('radarr-monitored').checked;
+                
+                console.log('DEBUG: Radarr automation checkbox states:', {
+                    enable_scan: enableScanChecked,
+                    enable_automatic_search: enableAutoSearchChecked,
+                    monitored: monitoredChecked
+                });
+                serviceData.settings.enable_scan = enableScanChecked;
+                serviceData.settings.enable_automatic_search = enableAutoSearchChecked;
+                serviceData.settings.monitored = monitoredChecked;
+            } else if (serviceData.service_type === 'sonarr') {
+                if (formData.get('quality_profile_id')) serviceData.settings.quality_profile_id = parseInt(formData.get('quality_profile_id'));
+                if (formData.get('language_profile_id')) serviceData.settings.language_profile_id = parseInt(formData.get('language_profile_id'));
+                if (formData.get('minimum_availability')) serviceData.settings.minimum_availability = formData.get('minimum_availability');
+                if (formData.get('root_folder_path')) serviceData.settings.root_folder_path = formData.get('root_folder_path');
+                
+                // Automation settings - read from specific add modal checkboxes
+                const enableScanChecked = document.getElementById('sonarr-enable-scan').checked;
+                const enableAutoSearchChecked = document.getElementById('sonarr-enable-automatic-search').checked;
+                const monitoredChecked = document.getElementById('sonarr-monitored').checked;
+                const seasonFolderChecked = document.getElementById('sonarr-season-folder').checked;
+                
+                console.log('DEBUG: Sonarr automation checkbox states:', {
+                    enable_scan: enableScanChecked,
+                    enable_automatic_search: enableAutoSearchChecked,
+                    monitored: monitoredChecked,
+                    season_folder: seasonFolderChecked
+                });
+                serviceData.settings.enable_scan = enableScanChecked;
+                serviceData.settings.enable_automatic_search = enableAutoSearchChecked;
+                serviceData.settings.monitored = monitoredChecked;
+                serviceData.settings.season_folder = seasonFolderChecked;
+            }
+            
+            // Handle tags (multi-select)
+            const selectedTags = Array.from(document.getElementById('service-tags').selectedOptions).map(option => parseInt(option.value));
+            if (selectedTags.length > 0) {
+                serviceData.settings.tags = selectedTags;
+            }
+            
+            try {
+                console.log('DEBUG: Final serviceData being sent:', serviceData);
+                showServiceFeedback('Creating service instance...', 'info');
+                
+                const response = await fetch('{{ base_url }}/admin/services/instances', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify(serviceData)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showServiceFeedback(result.message, 'success');
+                    
+                    // Reset form and refresh services list
+                    this.reset();
+                    htmx.ajax('GET', '{{ base_url }}/admin/services/instances', '#services-list');
+                    
+                    // Hide modal after 2 seconds
+                    setTimeout(() => {
+                        hideAddServiceModal();
+                    }, 2000);
+                } else {
+                    showServiceFeedback(result.detail || 'Failed to create service instance', 'error');
+                }
+            } catch (error) {
+                showServiceFeedback(`Network error: ${error.message}`, 'error');
+            }
+        });
+    }
+});
+
+async function migrateLegacyServices() {
+    if (!confirm('This will migrate your current Radarr and Sonarr settings to the new service instances format. Continue?')) {
+        return;
+    }
+    
+    try {
+        showToast('Migrating legacy services...', 'info');
+        
+        const response = await fetch('{{ base_url }}/admin/services/migrate-legacy', {
+            method: 'GET',
+            credentials: 'include'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(result.message, 'success');
+            // Refresh services list
+            htmx.ajax('GET', '{{ base_url }}/admin/services/instances', '#services-list');
+        } else {
+            showToast(result.detail || 'Migration failed', 'error');
+        }
+    } catch (error) {
+        showToast(`Migration error: ${error.message}`, 'error');
+    }
+}
+
+// Edit service functions
+function showEditServiceModal() {
+    document.getElementById('edit-service-modal').classList.remove('hidden');
+    document.getElementById('edit-advanced-settings').classList.add('hidden');
+    document.getElementById('edit-radarr-settings').classList.add('hidden');
+    document.getElementById('edit-sonarr-settings').classList.add('hidden');
+}
+
+function hideEditServiceModal() {
+    document.getElementById('edit-service-modal').classList.add('hidden');
+    document.getElementById('edit-service-feedback').classList.add('hidden');
+}
+
+function updateEditServiceDefaults() {
+    const serviceType = document.getElementById('edit-service-type').value;
+    
+    // Show/hide service-specific settings
+    if (serviceType === 'radarr') {
+        const radarrDiv = document.getElementById('edit-radarr-settings');
+        const sonarrDiv = document.getElementById('edit-sonarr-settings');
+        
+        if (radarrDiv) {
+            radarrDiv.classList.remove('hidden');
+            // Force remove the hidden class more aggressively in case of caching issues
+            radarrDiv.className = radarrDiv.className.replace(/\bhidden\b/g, '').trim();
+            radarrDiv.style.display = 'block';
+        }
+        if (sonarrDiv) {
+            sonarrDiv.classList.add('hidden');
+            sonarrDiv.style.display = 'none';
+        }
+    } else if (serviceType === 'sonarr') {
+        const radarrDiv = document.getElementById('edit-radarr-settings');
+        const sonarrDiv = document.getElementById('edit-sonarr-settings');
+        
+        if (sonarrDiv) {
+            sonarrDiv.classList.remove('hidden');
+            // Force remove the hidden class more aggressively in case of caching issues
+            sonarrDiv.className = sonarrDiv.className.replace(/\bhidden\b/g, '').trim();
+            sonarrDiv.style.display = 'block';
+        }
+        if (radarrDiv) {
+            radarrDiv.classList.add('hidden');
+            radarrDiv.style.display = 'none';
+        }
+    } else {
+        // Hide both
+        const radarrDiv = document.getElementById('edit-radarr-settings');
+        const sonarrDiv = document.getElementById('edit-sonarr-settings');
+        if (radarrDiv) {
+            radarrDiv.classList.add('hidden');
+            radarrDiv.style.display = 'none';
+        }
+        if (sonarrDiv) {
+            sonarrDiv.classList.add('hidden');
+            sonarrDiv.style.display = 'none';
+        }
+    }
+}
+
+function toggleEditAdvancedSettings() {
+    const advancedDiv = document.getElementById('edit-advanced-settings');
+    const chevron = document.getElementById('edit-advanced-chevron');
+    
+    if (advancedDiv.classList.contains('hidden')) {
+        advancedDiv.classList.remove('hidden');
+        chevron.style.transform = 'rotate(90deg)';
+    } else {
+        advancedDiv.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+    }
+}
+
+async function testEditServiceConnection() {
+    const form = document.getElementById('edit-service-form');
+    const formData = new FormData(form);
+    const instanceId = formData.get('instance_id');
+    
+    const serviceData = {
+        service_type: formData.get('service_type') || document.getElementById('edit-service-type').value,
+        hostname: formData.get('hostname'),
+        port: formData.get('port'),
+        use_ssl: formData.get('use_ssl'),
+        base_url: formData.get('base_url'),
+        api_key: formData.get('api_key')
+    };
+    
+    // If API key is blank, we'll need to get the existing one from the instance
+    if (!serviceData.api_key && instanceId) {
+        showEditServiceFeedback('Using existing API key for test...', 'info');
+        // For test purposes, we'll use a different approach - test the existing instance directly
+        try {
+            const response = await fetch(`{{ base_url }}/admin/services/instances/${instanceId}/test`, {
+                method: 'POST',
+                credentials: 'include'
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                const testResult = result.test_result;
+                if (testResult.status === 'connected') {
+                    showEditServiceFeedback(`✅ Connection successful! Version: ${testResult.version || 'Unknown'}`, 'success');
+                } else {
+                    showEditServiceFeedback(`❌ Connection failed: ${testResult.message}`, 'error');
+                }
+            } else {
+                showEditServiceFeedback(result.detail || 'Test failed', 'error');
+            }
+        } catch (error) {
+            showEditServiceFeedback(`Test error: ${error.message}`, 'error');
+        }
+        return;
+    }
+    
+    if (!serviceData.service_type || !serviceData.hostname || !serviceData.port || !serviceData.api_key) {
+        showEditServiceFeedback('Please fill in hostname, port, and API key before testing', 'error');
+        return;
+    }
+    
+    try {
+        showEditServiceFeedback('Testing connection...', 'info');
+        
+        // Test connection without creating instance
+        const response = await fetch('{{ base_url }}/admin/services/test-connection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+                service_type: serviceData.service_type,
+                hostname: serviceData.hostname,
+                port: serviceData.port,
+                use_ssl: serviceData.use_ssl,
+                base_url: serviceData.base_url,
+                api_key: serviceData.api_key
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            const testResult = result.test_result;
+            if (testResult.status === 'connected') {
+                showEditServiceFeedback(`✅ Connection successful! Version: ${testResult.version}`, 'success');
+                // Load dropdowns with service data
+                await loadEditServiceDropdowns(result, serviceData);
+            } else {
+                showEditServiceFeedback(`❌ Connection failed: ${testResult.message}`, 'error');
+            }
+        } else {
+            showEditServiceFeedback(`❌ Test failed: ${result.detail}`, 'error');
+        }
+    } catch (error) {
+        showEditServiceFeedback(`❌ Network error: ${error.message}`, 'error');
+    }
+}
+
+async function loadEditServiceDropdowns(testResultData, serviceData) {
+    try {
+        console.log('Loading edit service dropdowns with data:', testResultData);
+        
+        // Populate Quality Profiles
+        const qualityProfileSelect = document.getElementById(`edit-${serviceData.service_type}-quality-profile`);
+        if (qualityProfileSelect && testResultData.quality_profiles) {
+            // Clear existing options except first
+            qualityProfileSelect.innerHTML = '<option value="">Select Quality Profile</option>';
+            
+            testResultData.quality_profiles.forEach(profile => {
+                const option = document.createElement('option');
+                option.value = profile.id;
+                option.textContent = profile.name;
+                qualityProfileSelect.appendChild(option);
+            });
+            
+            console.log(`Loaded ${testResultData.quality_profiles.length} quality profiles for edit`);
+        }
+        
+        // Populate Root Folders
+        const rootFolderSelect = document.getElementById('edit-service-root-folder');
+        if (rootFolderSelect && testResultData.root_folders) {
+            // Clear existing options except first
+            rootFolderSelect.innerHTML = '<option value="">Select Root Folder</option>';
+            
+            testResultData.root_folders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder.path;
+                option.textContent = `${folder.path} (${folder.freeSpace || 'Unknown'} free)`;
+                rootFolderSelect.appendChild(option);
+            });
+            
+            console.log(`Loaded ${testResultData.root_folders.length} root folders for edit`);
+        }
+        
+        // Populate Tags
+        const tagsSelect = document.getElementById('edit-service-tags');
+        if (tagsSelect && testResultData.tags) {
+            // Clear existing options
+            tagsSelect.innerHTML = '';
+            
+            testResultData.tags.forEach(tag => {
+                const option = document.createElement('option');
+                option.value = tag.id;
+                option.textContent = tag.label;
+                tagsSelect.appendChild(option);
+            });
+            
+            console.log(`Loaded ${testResultData.tags.length} tags for edit`);
+        }
+        
+        // Show advanced settings if they weren't already visible
+        const advancedDiv = document.getElementById('edit-advanced-settings');
+        if (advancedDiv && advancedDiv.classList.contains('hidden')) {
+            toggleEditAdvancedSettings();
+        }
+        
+        showEditServiceFeedback(`✅ Loaded service configuration options successfully!`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading edit service dropdowns:', error);
+        showEditServiceFeedback(`⚠️ Connected but failed to load configuration options: ${error.message}`, 'warning');
+    }
+}
+
+function showEditServiceFeedback(message, type) {
+    const feedbackDiv = document.getElementById('edit-service-feedback');
+    const colorClasses = {
+        'success': 'bg-green-50 border-green-200 text-green-700',
+        'error': 'bg-red-50 border-red-200 text-red-700',
+        'info': 'bg-blue-50 border-blue-200 text-blue-700'
+    };
+    
+    feedbackDiv.innerHTML = `
+        <div class="p-3 border rounded-md ${colorClasses[type] || colorClasses.info}">
+            <p class="text-sm">${message}</p>
+        </div>
+    `;
+    feedbackDiv.classList.remove('hidden');
+    
+    // Auto-hide success messages
+    if (type === 'success') {
+        setTimeout(() => {
+            feedbackDiv.classList.add('hidden');
+        }, 5000);
+    }
+}
+
+// Handle edit service form submission
+document.addEventListener('DOMContentLoaded', function() {
+    const editServiceForm = document.getElementById('edit-service-form');
+    if (editServiceForm) {
+        editServiceForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const instanceId = formData.get('instance_id');
+            const serviceType = document.getElementById('edit-service-type').value;
+            
+            // Build URL from components if hostname/port provided
+            let url;
+            if (formData.get('hostname') && formData.get('port')) {
+                const use_ssl = formData.get('use_ssl') === 'true' || formData.get('use_ssl') === true;
+                const protocol = use_ssl ? 'https' : 'http';
+                url = `${protocol}://${formData.get('hostname')}:${formData.get('port')}`;
+            } else {
+                url = formData.get('url');
+            }
+            
+            const serviceData = {
+                name: formData.get('name'),
+                url: url,
+                is_enabled: formData.get('is_enabled') === 'on',
+                settings: {}
+            };
+            
+            // Only include API key if it's provided (not blank)
+            const apiKey = formData.get('api_key');
+            if (apiKey && apiKey.trim() !== '') {
+                serviceData.api_key = apiKey;
+            }
+            
+            // Store connection details in settings
+            if (formData.get('hostname')) serviceData.settings.hostname = formData.get('hostname');
+            if (formData.get('port')) serviceData.settings.port = parseInt(formData.get('port'));
+            if (formData.get('use_ssl')) serviceData.settings.use_ssl = formData.get('use_ssl') === 'true';
+            if (formData.get('base_url')) serviceData.settings.base_url = formData.get('base_url');
+            
+            // Collect advanced settings
+            if (serviceType === 'radarr') {
+                if (formData.get('quality_profile_id')) serviceData.settings.quality_profile_id = parseInt(formData.get('quality_profile_id'));
+                if (formData.get('minimum_availability')) serviceData.settings.minimum_availability = formData.get('minimum_availability');
+                if (formData.get('root_folder_path')) serviceData.settings.root_folder_path = formData.get('root_folder_path');
+                
+                // Automation settings
+                serviceData.settings.enable_scan = formData.get('enable_scan') === 'on';
+                serviceData.settings.enable_automatic_search = formData.get('enable_automatic_search') === 'on';
+                serviceData.settings.monitored = formData.get('monitored') === 'on';
+            } else if (serviceType === 'sonarr') {
+                if (formData.get('quality_profile_id')) serviceData.settings.quality_profile_id = parseInt(formData.get('quality_profile_id'));
+                if (formData.get('language_profile_id')) serviceData.settings.language_profile_id = parseInt(formData.get('language_profile_id'));
+                if (formData.get('minimum_availability')) serviceData.settings.minimum_availability = formData.get('minimum_availability');
+                if (formData.get('root_folder_path')) serviceData.settings.root_folder_path = formData.get('root_folder_path');
+                
+                // Automation settings
+                serviceData.settings.enable_scan = formData.get('enable_scan') === 'on';
+                serviceData.settings.enable_automatic_search = formData.get('enable_automatic_search') === 'on';
+                serviceData.settings.monitored = formData.get('monitored') === 'on';
+                serviceData.settings.season_folder = formData.get('season_folder') === 'on';
+            }
+            
+            // Handle tags (multi-select)
+            const selectedTags = Array.from(document.getElementById('edit-service-tags').selectedOptions).map(option => parseInt(option.value));
+            if (selectedTags.length > 0) {
+                serviceData.settings.tags = selectedTags;
+            }
+            
+            try {
+                showEditServiceFeedback('Updating service instance...', 'info');
+                
+                const response = await fetch(`{{ base_url }}/admin/services/instances/${instanceId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify(serviceData)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showEditServiceFeedback(result.message, 'success');
+                    
+                    // Refresh services list
+                    htmx.ajax('GET', '{{ base_url }}/admin/services/instances', '#services-list');
+                    
+                    // Hide modal after 2 seconds
+                    setTimeout(() => {
+                        hideEditServiceModal();
+                    }, 2000);
+                } else {
+                    showEditServiceFeedback(result.detail || 'Failed to update service instance', 'error');
+                }
+            } catch (error) {
+                showEditServiceFeedback(`Network error: ${error.message}`, 'error');
+            }
+        });
+    }
+});
+
+// Click outside modal to close
+document.addEventListener('click', function(e) {
+    const addModal = document.getElementById('add-service-modal');
+    const editModal = document.getElementById('edit-service-modal');
+    
+    if (e.target === addModal) {
+        hideAddServiceModal();
+    }
+    if (e.target === editModal) {
+        hideEditServiceModal();
+    }
+});
+</script>

@@ -1,0 +1,574 @@
+<!-- Service Instances List Template -->
+{% if instances %}
+<div class="space-y-4">
+    {% for instance in instances %}
+    <div class="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <!-- Service Type Icon -->
+                <div class="flex-shrink-0">
+                    {% if instance.service_type == 'radarr' %}
+                    <div class="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001-1v-8M7 8h10"></path>
+                        </svg>
+                    </div>
+                    {% elif instance.service_type == 'sonarr' %}
+                    <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                    {% else %}
+                    <div class="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
+                        </svg>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <!-- Service Info -->
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <h4 class="text-lg font-medium text-gray-900">{{ instance.name }}</h4>
+                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full 
+                                     {% if instance.service_type == 'radarr' %}bg-yellow-100 text-yellow-800
+                                     {% elif instance.service_type == 'sonarr' %}bg-purple-100 text-purple-800
+                                     {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ instance.service_type.title() }}
+                        </span>
+                        
+                        <!-- Status Indicator -->
+                        {% set test_result = instance['last_test_result'] %}
+                        {% if test_result %}
+                            {% set result_data = test_result if test_result is mapping else {} %}
+                            {% if result_data.get('status') == 'connected' %}
+                            <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                ✓ Connected
+                            </span>
+                            {% elif result_data.get('status') == 'error' %}
+                            <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                ✗ Error
+                            </span>
+                            {% else %}
+                            <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
+                                ? Unknown
+                            </span>
+                            {% endif %}
+                        {% else %}
+                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
+                            Not Tested
+                        </span>
+                        {% endif %}
+                    </div>
+                    
+                    <p class="text-sm text-gray-500 mt-1">{{ instance.url }}</p>
+                    
+                    <!-- Test Result Details -->
+                    {% if test_result and result_data.get('message') %}
+                    <p class="text-xs {% if result_data.get('status') == 'connected' %}text-green-600{% else %}text-red-600{% endif %} mt-1">
+                        {{ result_data.get('message')[:100] }}{% if result_data.get('message')|length > 100 %}...{% endif %}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Automation Toggle Buttons -->
+            {% set settings = instance.settings if instance.settings else {} %}
+            <!-- DEBUG: Settings content - {{ settings }} -->
+            <div class="mt-3 pt-3 border-t border-gray-100">
+                <div class="space-y-2">
+                    <!-- Enable Scan Toggle -->
+                    <!-- DEBUG: enable_scan = {{ settings.get('enable_scan') }} -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="text-xs font-medium text-gray-700">Enable Scan</div>
+                            <div class="text-xs text-gray-500">Auto refresh metadata and check for files</div>
+                        </div>
+                        <button type="button"
+                                onclick="toggleAutomationSetting({{ instance.id }}, 'enable_scan', this.dataset.enabled === 'false')"
+                                data-enabled="{{ 'true' if settings.get('enable_scan') else 'false' }}"
+                                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 {% if settings.get('enable_scan') %}bg-blue-600{% else %}bg-gray-200{% endif %}">
+                            <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform {% if settings.get('enable_scan') %}translate-x-5{% else %}translate-x-1{% endif %}"></span>
+                        </button>
+                    </div>
+                    
+                    <!-- Enable Automatic Search Toggle -->
+                    <!-- DEBUG: enable_automatic_search = {{ settings.get('enable_automatic_search') }} -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="text-xs font-medium text-gray-700">Auto Search</div>
+                            <div class="text-xs text-gray-500">Automatically search when content added</div>
+                        </div>
+                        <button type="button"
+                                onclick="toggleAutomationSetting({{ instance.id }}, 'enable_automatic_search', this.dataset.enabled === 'false')"
+                                data-enabled="{{ 'true' if settings.get('enable_automatic_search') else 'false' }}"
+                                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 {% if settings.get('enable_automatic_search') %}bg-green-600{% else %}bg-gray-200{% endif %}">
+                            <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform {% if settings.get('enable_automatic_search') %}translate-x-5{% else %}translate-x-1{% endif %}"></span>
+                        </button>
+                    </div>
+                    
+                    <!-- Monitor by Default Toggle -->
+                    <!-- DEBUG: monitored = {{ settings.get('monitored') }} -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="text-xs font-medium text-gray-700">Monitor Default</div>
+                            <div class="text-xs text-gray-500">Monitor new content for releases</div>
+                        </div>
+                        <button type="button"
+                                onclick="toggleAutomationSetting({{ instance.id }}, 'monitored', this.dataset.enabled === 'false')"
+                                data-enabled="{{ 'true' if settings.get('monitored') else 'false' }}"
+                                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 {% if settings.get('monitored') %}bg-purple-600{% else %}bg-gray-200{% endif %}">
+                            <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform {% if settings.get('monitored') %}translate-x-5{% else %}translate-x-1{% endif %}"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Actions -->
+            <div class="flex items-center space-x-2">
+                <!-- Enable/Disable Toggle -->
+                <label class="inline-flex items-center">
+                    <input type="checkbox" 
+                           {% if instance.is_enabled %}checked{% endif %}
+                           onchange="toggleServiceInstance({{ instance.id }})"
+                           class="form-checkbox h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                    <span class="ml-2 text-sm text-gray-700">Enabled</span>
+                </label>
+                
+                <!-- Test Connection Button -->
+                <button onclick="testServiceInstance({{ instance.id }})" 
+                        class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm font-medium transition-colors">
+                    Test
+                </button>
+                
+                <!-- Edit Button -->
+                <button onclick="editServiceInstance({{ instance.id }})" 
+                        class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded text-sm font-medium transition-colors">
+                    Edit
+                </button>
+                
+                <!-- Delete Button -->
+                <button onclick="deleteServiceInstance({{ instance.id }}, '{{ instance.name }}')" 
+                        class="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded text-sm font-medium transition-colors">
+                    Delete
+                </button>
+            </div>
+        </div>
+        
+        <!-- Expanded Details (Hidden by default) -->
+        <div id="service-details-{{ instance.id }}" class="hidden mt-4 pt-4 border-t border-gray-200">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                <div>
+                    <dt class="font-medium text-gray-900">Created</dt>
+                    <dd class="text-gray-600">{{ instance.created_at.strftime('%Y-%m-%d %H:%M') if instance.created_at else 'Unknown' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium text-gray-900">Last Updated</dt>
+                    <dd class="text-gray-600">{{ instance.updated_at.strftime('%Y-%m-%d %H:%M') if instance.updated_at else 'Never' }}</dd>
+                </div>
+                <div>
+                    <dt class="font-medium text-gray-900">Last Tested</dt>
+                    <dd class="text-gray-600">{{ instance.last_tested_at.strftime('%Y-%m-%d %H:%M') if instance.last_tested_at else 'Never' }}</dd>
+                </div>
+                
+                {% set settings = instance.settings if instance.settings else {} %}
+                {% if settings %}
+                <div class="md:col-span-2 lg:col-span-3">
+                    <dt class="font-medium text-gray-900">Configuration</dt>
+                    <dd class="text-gray-600 mt-1">
+                        <div class="bg-gray-50 rounded p-2 text-xs font-mono">
+                            {% for key, value in settings.items() %}
+                            <div>{{ key }}: {{ value }}</div>
+                            {% endfor %}
+                        </div>
+                    </dd>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Toggle Details Button -->
+        <div class="mt-4 text-center">
+            <button onclick="toggleServiceDetails({{ instance.id }})" 
+                    class="text-sm text-gray-500 hover:text-gray-700">
+                <span id="details-toggle-{{ instance.id }}">Show Details</span>
+            </button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% else %}
+<!-- Empty State -->
+<div class="text-center py-12">
+    <div class="w-24 h-24 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+        <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
+        </svg>
+    </div>
+    <h3 class="text-lg font-medium text-gray-900 mb-2">No Services Configured</h3>
+    <p class="text-gray-500 mb-4">Add your first Radarr or Sonarr instance to get started with automated media management.</p>
+    <div class="space-x-2">
+        <button onclick="migrateLegacyServices()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+            Migrate Legacy Settings
+        </button>
+        <button onclick="showAddServiceModal()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+            Add Service
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<script>
+function toggleServiceDetails(instanceId) {
+    const detailsDiv = document.getElementById(`service-details-${instanceId}`);
+    const toggleSpan = document.getElementById(`details-toggle-${instanceId}`);
+    
+    if (detailsDiv.classList.contains('hidden')) {
+        detailsDiv.classList.remove('hidden');
+        toggleSpan.textContent = 'Hide Details';
+    } else {
+        detailsDiv.classList.add('hidden');
+        toggleSpan.textContent = 'Show Details';
+    }
+}
+
+async function toggleServiceInstance(instanceId) {
+    try {
+        const response = await fetch(`{{ base_url }}/admin/services/instances/${instanceId}/toggle`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(result.message, 'success');
+        } else {
+            showToast(result.detail || 'Failed to toggle service', 'error');
+            // Refresh to revert checkbox state
+            htmx.ajax('GET', '{{ base_url }}/admin/services/instances', '#services-list');
+        }
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+        // Refresh to revert checkbox state
+        htmx.ajax('GET', '{{ base_url }}/admin/services/instances', '#services-list');
+    }
+}
+
+async function testServiceInstance(instanceId) {
+    try {
+        showToast('Testing connection...', 'info');
+        
+        const response = await fetch(`{{ base_url }}/admin/services/instances/${instanceId}/test`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            const testResult = result.test_result;
+            if (testResult.status === 'connected') {
+                showToast(`✅ ${result.instance_name}: Connection successful!`, 'success');
+            } else {
+                showToast(`❌ ${result.instance_name}: ${testResult.message}`, 'error');
+            }
+            
+            // Refresh services list to show updated test results
+            htmx.ajax('GET', '{{ base_url }}/admin/services/instances', '#services-list');
+        } else {
+            showToast(result.detail || 'Test failed', 'error');
+        }
+    } catch (error) {
+        showToast(`Test error: ${error.message}`, 'error');
+    }
+}
+
+async function editServiceInstance(instanceId) {
+    try {
+        // Fetch service instance data using HTMX endpoint to get full instance data
+        const response = await fetch(`{{ base_url }}/admin/services/instances`, {
+            method: 'GET',
+            headers: {
+                'HX-Request': 'true'  // This tells the server we want the full data, not JSON
+            },
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            showToast('Failed to load service instance data', 'error');
+            return;
+        }
+        
+        // Since we're getting HTMX response, we need to get the raw instance via a different approach
+        // Let's get the instances via JSON but get the real API key from the database
+        const jsonResponse = await fetch(`{{ base_url }}/admin/services/instances`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+        
+        const result = await jsonResponse.json();
+        const instance = result.instances.find(inst => inst.id === instanceId);
+        
+        if (!instance) {
+            showToast('Service instance not found', 'error');
+            return;
+        }
+        
+        // Populate edit form with instance data
+        document.getElementById('edit-instance-id').value = instance.id;
+        
+        // Debug: Check what service type we're trying to set
+        console.log('DEBUG: Setting service type to:', instance.service_type);
+        
+        // Extract the actual service type value (handle both "radarr" and "ServiceType.RADARR" formats)
+        let serviceTypeValue = instance.service_type;
+        if (typeof serviceTypeValue === 'string' && serviceTypeValue.includes('.')) {
+            // Handle "ServiceType.RADARR" format - extract the part after the dot and lowercase it
+            serviceTypeValue = serviceTypeValue.split('.')[1].toLowerCase();
+        }
+        console.log('DEBUG: Extracted service type value:', serviceTypeValue);
+        
+        const serviceTypeSelect = document.getElementById('edit-service-type');
+        serviceTypeSelect.value = serviceTypeValue;
+        
+        // Force selection of the correct option for disabled select
+        Array.from(serviceTypeSelect.options).forEach(option => {
+            option.selected = option.value === serviceTypeValue;
+        });
+        
+        console.log('DEBUG: Service type after setting:', serviceTypeSelect.value);
+        
+        document.getElementById('edit-service-name').value = instance.name;
+        
+        // Trigger the display of correct advanced settings section
+        updateEditServiceDefaults();
+        
+        // Also show the advanced settings section (it starts hidden)
+        const advancedSettingsDiv = document.getElementById('edit-advanced-settings');
+        if (advancedSettingsDiv && advancedSettingsDiv.classList.contains('hidden')) {
+            toggleEditAdvancedSettings();
+        }
+        // Leave API key empty for security but indicate it's saved
+        document.getElementById('edit-service-api-key').value = '';
+        document.getElementById('edit-service-api-key').placeholder = 'API key is saved - leave blank to keep current';
+        document.getElementById('edit-service-enabled').checked = instance.is_enabled;
+        
+        // Parse URL to components if possible
+        try {
+            const url = new URL(instance.url);
+            document.getElementById('edit-service-hostname').value = url.hostname;
+            document.getElementById('edit-service-port').value = url.port || (url.protocol === 'https:' ? '443' : '80');
+            document.getElementById('edit-service-ssl').value = url.protocol === 'https:' ? 'true' : 'false';
+        } catch (e) {
+            // If URL parsing fails, just show the full URL
+            console.warn('Could not parse URL:', instance.url);
+            document.getElementById('edit-service-hostname').value = '';
+            document.getElementById('edit-service-port').value = '';
+            document.getElementById('edit-service-ssl').value = 'false';
+        }
+        
+        // Populate settings if available
+        const settings = instance.settings || {};
+        if (settings.base_url) {
+            document.getElementById('edit-service-base-url').value = settings.base_url;
+            // Also populate the advanced base URL field
+            document.getElementById('edit-service-base-url-advanced').value = settings.base_url;
+        }
+        
+        // Show appropriate service-specific settings
+        if (typeof updateEditServiceDefaults === 'function') {
+            updateEditServiceDefaults();
+        }
+        
+        // Populate advanced settings if available
+        if (instance.service_type === 'radarr') {
+            if (settings.quality_profile_id) {
+                document.getElementById('edit-radarr-quality-profile').value = settings.quality_profile_id;
+            }
+            if (settings.minimum_availability) {
+                document.getElementById('edit-radarr-minimum-availability').value = settings.minimum_availability;
+            }
+            
+            // Automation settings
+            document.getElementById('edit-radarr-enable-scan').checked = settings.enable_scan !== false;
+            document.getElementById('edit-radarr-enable-automatic-search').checked = settings.enable_automatic_search !== false;
+            document.getElementById('edit-radarr-monitored').checked = settings.monitored !== false;
+        } else if (instance.service_type === 'sonarr') {
+            if (settings.quality_profile_id) {
+                document.getElementById('edit-sonarr-quality-profile').value = settings.quality_profile_id;
+            }
+            if (settings.language_profile_id) {
+                document.getElementById('edit-sonarr-language-profile').value = settings.language_profile_id;
+            }
+            if (settings.minimum_availability) {
+                document.getElementById('edit-sonarr-minimum-availability').value = settings.minimum_availability;
+            }
+            
+            // Automation settings
+            document.getElementById('edit-sonarr-enable-scan').checked = settings.enable_scan !== false;
+            document.getElementById('edit-sonarr-enable-automatic-search').checked = settings.enable_automatic_search !== false;
+            document.getElementById('edit-sonarr-monitored').checked = settings.monitored !== false;
+            document.getElementById('edit-sonarr-season-folder').checked = settings.season_folder !== false;
+        }
+        
+        if (settings.root_folder_path) {
+            document.getElementById('edit-service-root-folder').value = settings.root_folder_path;
+        }
+        
+        // Set tags if available
+        if (settings.tags && Array.isArray(settings.tags)) {
+            const tagsSelect = document.getElementById('edit-service-tags');
+            Array.from(tagsSelect.options).forEach(option => {
+                option.selected = settings.tags.includes(parseInt(option.value));
+            });
+        }
+        
+        // Show the modal
+        if (typeof showEditServiceModal === 'function') {
+            showEditServiceModal();
+        } else {
+            // Fallback if function not available
+            document.getElementById('edit-service-modal').classList.remove('hidden');
+        }
+        
+    } catch (error) {
+        showToast(`Error loading service instance: ${error.message}`, 'error');
+    }
+}
+
+async function deleteServiceInstance(instanceId, instanceName) {
+    if (!confirm(`Are you sure you want to delete the service instance "${instanceName}"? This action cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`{{ base_url }}/admin/services/instances/${instanceId}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(result.message, 'success');
+            // Refresh services list
+            htmx.ajax('GET', '{{ base_url }}/admin/services/instances', '#services-list');
+        } else {
+            showToast(result.detail || 'Failed to delete service', 'error');
+        }
+    } catch (error) {
+        showToast(`Delete error: ${error.message}`, 'error');
+    }
+}
+
+async function toggleAutomationSetting(instanceId, settingName, newValue) {
+    const button = event.target.closest('button'); // Get the toggle button
+    const originalEnabled = button.dataset.enabled === 'true';
+    
+    console.log(`Toggle called: instanceId=${instanceId}, setting=${settingName}, newValue=${newValue}, originalEnabled=${originalEnabled}`);
+    
+    try {
+        // Show immediate feedback
+        updateToggleButton(button, newValue);
+        
+        // Get current instance data first
+        const response = await fetch(`{{ base_url }}/admin/services/instances`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to load current settings');
+        }
+        
+        const result = await response.json();
+        const instance = result.instances.find(inst => inst.id === instanceId);
+        
+        if (!instance) {
+            throw new Error('Service instance not found');
+        }
+        
+        console.log(`Instance found:`, instance);
+        console.log(`Current settings:`, instance.settings);
+        
+        // Update the specific setting
+        const currentSettings = instance.settings || {};
+        currentSettings[settingName] = newValue;
+        
+        console.log(`Updated settings:`, currentSettings);
+        
+        // Send update request with only the specific setting that changed
+        const updateData = {
+            settings: {}
+        };
+        updateData.settings[settingName] = newValue;
+        
+        const updateResponse = await fetch(`{{ base_url }}/admin/services/instances/${instanceId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(updateData)
+        });
+        
+        if (!updateResponse.ok) {
+            const errorText = await updateResponse.text();
+            console.error('Update failed:', errorText);
+            throw new Error(`Server error: ${updateResponse.status}`);
+        }
+        
+        const updateResult = await updateResponse.json();
+        
+        const settingDisplayNames = {
+            'enable_scan': 'Enable Scan',
+            'enable_automatic_search': 'Auto Search',
+            'monitored': 'Monitor Default'
+        };
+        
+        const settingDisplay = settingDisplayNames[settingName] || settingName;
+        const statusText = newValue ? 'enabled' : 'disabled';
+        showToast(`${settingDisplay} ${statusText} for ${instance.name}`, 'success');
+        
+    } catch (error) {
+        console.error('Toggle error:', error);
+        showToast(`Error updating automation setting: ${error.message}`, 'error');
+        
+        // Revert the button state on error
+        updateToggleButton(button, originalEnabled);
+    }
+}
+
+function updateToggleButton(button, isEnabled) {
+    button.dataset.enabled = isEnabled.toString();
+    
+    // Update button colors
+    if (isEnabled) {
+        button.classList.remove('bg-gray-200');
+        if (button.classList.contains('focus:ring-blue-500')) {
+            button.classList.add('bg-blue-600');
+        } else if (button.classList.contains('focus:ring-green-500')) {
+            button.classList.add('bg-green-600');
+        } else if (button.classList.contains('focus:ring-purple-500')) {
+            button.classList.add('bg-purple-600');
+        }
+    } else {
+        button.classList.add('bg-gray-200');
+        button.classList.remove('bg-blue-600', 'bg-green-600', 'bg-purple-600');
+    }
+    
+    // Update toggle position
+    const toggle = button.querySelector('span');
+    if (isEnabled) {
+        toggle.classList.remove('translate-x-1');
+        toggle.classList.add('translate-x-5');
+    } else {
+        toggle.classList.remove('translate-x-5');
+        toggle.classList.add('translate-x-1');
+    }
+}
+</script>

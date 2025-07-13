@@ -740,6 +740,7 @@ async def get_sync_status(
 
 @router.post("/sync/trigger")
 async def trigger_sync(
+    request: Request,
     current_user: User = Depends(get_current_admin_user_flexible),
     session: Session = Depends(get_session)
 ):
@@ -748,15 +749,15 @@ async def trigger_sync(
         sync_service = PlexSyncService(session)
         result = await sync_service.sync_library()
         
-        # Get current base_url for HTML responses  
-        current_base_url = SettingsService.get_base_url(session)
-        
-        # Return HTMX-friendly HTML response
-        from fastapi.responses import HTMLResponse
-        if result.get('error'):
-            return HTMLResponse(f"""
-                <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
-                     hx-get="{current_base_url}/admin/clear-feedback" 
+        # Content negotiation
+        if request.headers.get("HX-Request"):
+            # HTMX web client - return HTML
+            current_base_url = SettingsService.get_base_url(session)
+            from fastapi.responses import HTMLResponse
+            if result.get('error'):
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
+                         hx-get="{current_base_url}/admin/clear-feedback" 
                      hx-trigger="load delay:5s" 
                      hx-swap="outerHTML">
                     <div class="flex">
@@ -767,45 +768,58 @@ async def trigger_sync(
                     </div>
                 </div>
             """)
+            else:
+                # HTMX success case
+                stats = result
+                movies = stats.get('movies_processed', 0)
+                shows = stats.get('shows_processed', 0) 
+                added = stats.get('items_added', 0)
+                updated = stats.get('items_updated', 0)
+                
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
+                         hx-get="{current_base_url}/admin/clear-feedback" 
+                         hx-trigger="load delay:5s" 
+                         hx-swap="outerHTML">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div class="ml-3 text-sm text-green-700">
+                                <p><strong>Library sync completed!</strong></p>
+                                <p>Processed {movies} movies and {shows} TV shows. Added {added}, updated {updated} items.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div hx-get="{current_base_url}/admin/library/content" hx-target="#libraries-frame" hx-trigger="load delay:1s" style="display: none;"></div>
+                """)
         else:
-            stats = result
-            movies = stats.get('movies_processed', 0)
-            shows = stats.get('shows_processed', 0) 
-            added = stats.get('items_added', 0)
-            updated = stats.get('items_updated', 0)
-            
+            # API client - return JSON
+            if result.get('error'):
+                return {"success": False, "error": result.get('error')}
+            else:
+                return {"success": True, "data": result}
+    except Exception as e:
+        if request.headers.get("HX-Request"):
+            # HTMX web client - return HTML
+            current_base_url = SettingsService.get_base_url(session)
+            from fastapi.responses import HTMLResponse
             return HTMLResponse(f"""
-                <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
                      hx-get="{current_base_url}/admin/clear-feedback" 
                      hx-trigger="load delay:5s" 
                      hx-swap="outerHTML">
                     <div class="flex">
-                        <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
                         </svg>
-                        <div class="ml-3 text-sm text-green-700">
-                            <p><strong>Library sync completed!</strong></p>
-                            <p>Processed {movies} movies and {shows} TV shows. Added {added}, updated {updated} items.</p>
-                        </div>
+                        <p class="ml-3 text-sm text-red-700">Sync failed: {str(e)}</p>
                     </div>
                 </div>
-                <div hx-get="{current_base_url}/admin/library/content" hx-target="#libraries-frame" hx-trigger="load delay:1s" style="display: none;"></div>
             """)
-    except Exception as e:
-        from fastapi.responses import HTMLResponse
-        return HTMLResponse(f"""
-            <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
-                 hx-get="{current_base_url}/admin/clear-feedback" 
-                 hx-trigger="load delay:5s" 
-                 hx-swap="outerHTML">
-                <div class="flex">
-                    <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
-                    </svg>
-                    <p class="ml-3 text-sm text-red-700">Sync failed: {str(e)}</p>
-                </div>
-            </div>
-        """)
+        else:
+            # API client - return JSON error
+            return {"success": False, "error": f"Sync failed: {str(e)}"}
 
 
 @router.get("/library", response_class=HTMLResponse)

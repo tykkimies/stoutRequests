@@ -14,6 +14,7 @@ from .api.search import router as search_router
 from .api.requests import router as requests_router
 from .api.admin import router as admin_router
 from .api.setup import router as setup_router
+from .api.services import router as services_router
 from app.api import setup
 from .models import User
 from .services.plex_sync_service import PlexSyncService
@@ -37,6 +38,7 @@ app.include_router(search_router)
 app.include_router(requests_router)
 app.include_router(admin_router)
 app.include_router(setup_router)
+app.include_router(services_router)
 # app.include_router(setup.router)
 
 # Setup templates
@@ -1076,10 +1078,9 @@ async def media_detail(
         return HTMLResponse('<div class="text-center py-8 text-red-600">Invalid media type.</div>')
     
     from .services.tmdb_service import TMDBService
-    from .services.plex_service import PlexService
+    from .services.plex_sync_service import PlexSyncService
     
     tmdb_service = TMDBService(session)
-    plex_service = PlexService(session)
     
     try:
         # Get basic media information from TMDB
@@ -1096,12 +1097,11 @@ async def media_detail(
             }
             return create_template_response("error.html", context)
         
-        # Check if media is available in Plex
-        is_in_plex = plex_service.check_media_in_library(media_id, media_type)
-        
-        # For TV shows, we should also check for partial availability
-        # TODO: Implement partial detection for TV shows with missing seasons/episodes
-        plex_status = 'in_plex' if is_in_plex else 'not_in_plex'
+        # Check if media is available in Plex using fast database lookup (same as discovery page)
+        sync_service = PlexSyncService(session)
+        status_map = sync_service.check_items_status([media_id], media_type)
+        plex_status = status_map.get(media_id, 'available')
+        is_in_plex = plex_status == 'in_plex'
         
         # Check for existing requests for this media
         from .models.media_request import MediaRequest, RequestStatus
@@ -1113,9 +1113,20 @@ async def media_detail(
         existing_request = session.exec(existing_request_statement).first()
         request_status = existing_request.status if existing_request else None
         
-        # Add poster URL
+        # Add poster URL and status information
         if media.get('poster_path'):
             media['poster_url'] = f"{tmdb_service.image_base_url}{media['poster_path']}"
+        
+        # Add status information to the main media object
+        media['in_plex'] = is_in_plex
+        media['status'] = plex_status
+        if existing_request:
+            if existing_request.status == RequestStatus.PENDING:
+                media['request_status'] = 'requested_pending'
+            elif existing_request.status == RequestStatus.APPROVED:
+                media['request_status'] = 'requested_approved' 
+            elif existing_request.status == RequestStatus.DOWNLOADING:
+                media['request_status'] = 'requested_downloading'
         
         # Get additional data
         if media_type == 'movie':
@@ -1127,13 +1138,42 @@ async def media_detail(
             recommendations = tmdb_service.get_tv_recommendations(media_id)
             credits = tmdb_service.get_tv_credits(media_id)
         
-        # Add Plex availability status to similar and recommended items
+        # Add Plex availability status to similar and recommended items using fast lookup
         for item_list in [similar.get('results', []) if similar else [], recommendations.get('results', []) if recommendations else []]:
-            for item in item_list:
-                item['media_type'] = media_type  # Ensure media type is set
-                item['in_plex'] = plex_service.check_media_in_library(item['id'], media_type)
-                # Set status for consistency with other templates
-                item['status'] = 'in_plex' if item['in_plex'] else 'available'
+            if item_list:
+                # Batch check Plex status for all items
+                tmdb_ids = [item['id'] for item in item_list]
+                plex_status_map = sync_service.check_items_status(tmdb_ids, media_type)
+                
+                for item in item_list:
+                    item['media_type'] = media_type  # Ensure media type is set
+                    
+                    # Get Plex status from batch lookup
+                    item_plex_status = plex_status_map.get(item['id'], 'available')
+                    item['in_plex'] = item_plex_status == 'in_plex'
+                    
+                    # Check for existing requests for similar/recommended items
+                    item_request_statement = select(MediaRequest).where(
+                        MediaRequest.tmdb_id == item['id'],
+                        MediaRequest.media_type == media_type,
+                        MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.DOWNLOADING])
+                    )
+                    item_existing_request = session.exec(item_request_statement).first()
+                    
+                    # Set status for consistency with other templates
+                    if item_plex_status == 'in_plex':
+                        item['status'] = 'in_plex'
+                    elif item_plex_status == 'partial_plex':
+                        item['status'] = 'partial_plex'
+                    elif item_existing_request:
+                        if item_existing_request.status == RequestStatus.PENDING:
+                            item['status'] = 'requested_pending'
+                        elif item_existing_request.status == RequestStatus.APPROVED:
+                            item['status'] = 'requested_approved'
+                        elif item_existing_request.status == RequestStatus.DOWNLOADING:
+                            item['status'] = 'requested_downloading'
+                    else:
+                        item['status'] = 'available'
         
         context = {
             "request": request,
