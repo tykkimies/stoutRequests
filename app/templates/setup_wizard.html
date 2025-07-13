@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup - Stout Requests</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    
+    <style>
+        .bg-gradient-dark {
+            background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+        }
+        .step-indicator {
+            transition: all 0.3s ease;
+        }
+        .step-active {
+            background-color: #ea580c;
+            color: white;
+        }
+        .step-completed {
+            background-color: #059669;
+            color: white;
+        }
+        .step-pending {
+            background-color: #e5e7eb;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <div class="bg-gradient-dark shadow-lg">
+        <div class="max-w-4xl mx-auto px-4 py-6">
+            <div class="text-center">
+                <h1 class="text-3xl font-bold text-white">🍺 Stout Requests</h1>
+                <p class="text-gray-300 mt-2">First-time setup wizard</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-4xl mx-auto px-4 py-8">
+        <!-- Step Indicator -->
+        <div class="flex justify-center mb-8">
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center">
+                    <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
+                        {% if step == '1' %}step-active{% elif step in ['2', '3'] %}step-completed{% else %}step-pending{% endif %}">
+                        1
+                    </div>
+                    <span class="ml-2 text-sm font-medium text-gray-700">Plex Setup</span>
+                </div>
+                <div class="w-8 h-px bg-gray-300"></div>
+                <div class="flex items-center">
+                    <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
+                        {% if step == '2' %}step-active{% elif step == '3' %}step-completed{% else %}step-pending{% endif %}">
+                        2
+                    </div>
+                    <span class="ml-2 text-sm font-medium text-gray-700">Optional Config</span>
+                </div>
+                <div class="w-8 h-px bg-gray-300"></div>
+                <div class="flex items-center">
+                    <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
+                        {% if step == '3' %}step-active{% else %}step-pending{% endif %}">
+                        3
+                    </div>
+                    <span class="ml-2 text-sm font-medium text-gray-700">Complete</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Messages -->
+        {% if request.query_params.get('error') %}
+        <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div class="flex">
+                <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                </svg>
+                <p class="ml-3 text-sm text-red-700">{{ request.query_params.get('error') }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Step 1: Basic Configuration -->
+        {% if step == '1' %}
+        <div class="bg-white rounded-lg shadow-lg p-8">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl font-bold text-gray-900">Let's get started!</h2>
+                <p class="text-gray-600 mt-2">Sign in with your Plex account to automatically discover your servers.<br>
+                <strong>Movie/TV search is built-in</strong> - no additional setup required!</p>
+            </div>
+
+            <!-- Plex OAuth Login -->
+            <div class="border border-gray-200 rounded-lg p-8 text-center">
+                <div class="mb-6">
+                    <div class="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">Connect Your Plex Account</h3>
+                    <p class="text-gray-600 mb-6">We'll automatically discover your Plex servers and let you choose which one to use</p>
+                </div>
+
+                <div id="plex-oauth-content">
+                    <button 
+                        type="button"
+                        class="bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-md text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                        hx-get="{{ base_url }}/setup/plex-oauth"
+                        hx-target="#plex-oauth-content"
+                        hx-swap="innerHTML"
+                    >
+                        <svg class="w-5 h-5 mr-2 inline" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"></path>
+                        </svg>
+                        Sign in with Plex
+                    </button>
+                    <p class="mt-3 text-sm text-gray-500">
+                        You'll be redirected to Plex.tv to authorize this application
+                    </p>
+                </div>
+            </div>
+
+        </div>
+        {% endif %}
+        
+        <!-- Step 1.5: Server Selection -->
+        {% if step == '1.5' %}
+        <div class="bg-white rounded-lg shadow-lg p-8">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl font-bold text-gray-900">Choose Your Plex Server</h2>
+                <p class="text-gray-600 mt-2">Select which Plex server you'd like to use with Stout Requests.<br>
+                That's it - your app will be ready to use!</p>
+            </div>
+
+            {% if request.query_params.get('session_id') %}
+            <form method="post" action="{{ url_for('/setup/select-server') }}" class="space-y-6">
+                <input type="hidden" name="session_id" value="{{ request.query_params.get('session_id') }}">
+                
+                <!-- Server Selection -->
+                <div class="border border-gray-200 rounded-lg p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Available Servers</h3>
+                    <div id="server-list" hx-get="{{ base_url }}/setup/get-servers?session_id={{ request.query_params.get('session_id') }}" hx-trigger="load" hx-swap="innerHTML">
+                        <div class="text-center py-4">
+                            <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto"></div>
+                            <p class="text-sm text-gray-500 mt-2">Loading your servers...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Success Message -->
+                <div class="border border-green-200 rounded-lg p-6 bg-green-50">
+                    <h3 class="text-lg font-semibold text-green-900 mb-2 flex items-center">
+                        <svg class="w-6 h-6 mr-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                        </svg>
+                        Ready to Go!
+                    </h3>
+                    <p class="text-sm text-green-700">
+                        <strong>Movie & TV search is ready!</strong> Stout Requests includes built-in access to movie and TV metadata, just like Ombi. 
+                        You can configure Radarr/Sonarr for automatic downloads and other advanced settings later in Admin Settings.
+                    </p>
+                </div>
+
+                <div class="flex justify-between">
+                    <a href="{{ base_url }}/setup?step=1" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-md text-sm font-medium">
+                        ← Back to Plex Login
+                    </a>
+                    <button 
+                        type="submit"
+                        class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                    >
+                        Complete Setup →
+                    </button>
+                </div>
+            </form>
+            {% else %}
+            <div class="text-center py-8">
+                <p class="text-red-600">Setup session expired. Please start over.</p>
+                <a href="{{ base_url }}/setup?step=1" class="mt-4 inline-block bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-md text-sm font-medium">
+                    Start Over
+                </a>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Step 2: Optional Configuration -->
+        {% if step == '2' %}
+        <div class="bg-white rounded-lg shadow-lg p-8">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl font-bold text-gray-900">Optional Configuration</h2>
+                <p class="text-gray-600 mt-2">Configure Radarr and Sonarr for automatic downloads (you can skip this for now)</p>
+            </div>
+
+            <form method="post" action="{{ url_for('/setup/step2') }}" class="space-y-6">
+                <!-- Radarr Configuration -->
+                <div class="border border-gray-200 rounded-lg p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                        <svg class="w-6 h-6 mr-2 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
+                        </svg>
+                        Radarr (Movies) - Optional
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="radarr_url" class="block text-sm font-medium text-gray-700 mb-2">Radarr URL</label>
+                            <input 
+                                type="url" 
+                                id="radarr_url"
+                                name="radarr_url"
+                                placeholder="http://your-radarr-instance:7878"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            >
+                        </div>
+                        <div>
+                            <label for="radarr_api_key" class="block text-sm font-medium text-gray-700 mb-2">Radarr API Key</label>
+                            <input 
+                                type="password" 
+                                id="radarr_api_key"
+                                name="radarr_api_key"
+                                placeholder="Enter Radarr API key"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            >
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sonarr Configuration -->
+                <div class="border border-gray-200 rounded-lg p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                        <svg class="w-6 h-6 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4z"></path>
+                            <path d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5a.75.75 0 001.5 0v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z"></path>
+                        </svg>
+                        Sonarr (TV Shows) - Optional
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="sonarr_url" class="block text-sm font-medium text-gray-700 mb-2">Sonarr URL</label>
+                            <input 
+                                type="url" 
+                                id="sonarr_url"
+                                name="sonarr_url"
+                                placeholder="http://your-sonarr-instance:8989"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            >
+                        </div>
+                        <div>
+                            <label for="sonarr_api_key" class="block text-sm font-medium text-gray-700 mb-2">Sonarr API Key</label>
+                            <input 
+                                type="password" 
+                                id="sonarr_api_key"
+                                name="sonarr_api_key"
+                                placeholder="Enter Sonarr API key"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            >
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Application Settings -->
+                <div class="border border-gray-200 rounded-lg p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                        <svg class="w-6 h-6 mr-2 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path>
+                        </svg>
+                        Application Settings
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="app_name" class="block text-sm font-medium text-gray-700 mb-2">Application Name</label>
+                            <input 
+                                type="text" 
+                                id="app_name"
+                                name="app_name"
+                                value="Stout Requests"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            >
+                        </div>
+                        <div>
+                            <label for="max_requests_per_user" class="block text-sm font-medium text-gray-700 mb-2">Max Requests per User</label>
+                            <input 
+                                type="number" 
+                                id="max_requests_per_user"
+                                name="max_requests_per_user"
+                                value="10"
+                                min="1"
+                                max="100"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            >
+                        </div>
+                        <div class="md:col-span-2">
+                            <div class="flex items-center">
+                                <input 
+                                    type="checkbox" 
+                                    id="require_approval"
+                                    name="require_approval"
+                                    checked
+                                    class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                                >
+                                <label for="require_approval" class="ml-2 text-sm text-gray-700">Require admin approval for requests</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-between">
+                    <a href="{{ base_url }}/setup?step=1" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-md text-sm font-medium">
+                        ← Back
+                    </a>
+                    <button 
+                        type="submit"
+                        class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                    >
+                        Complete Setup →
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        <!-- Step 3: Complete -->
+        {% if step == '3' %}
+        <div class="bg-white rounded-lg shadow-lg p-8 text-center">
+            <div class="mb-8">
+                <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                    </svg>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-900">Setup Complete!</h2>
+                <p class="text-gray-600 mt-2">Stout Requests is now configured and ready to use</p>
+            </div>
+
+            <div class="bg-orange-50 border border-orange-200 rounded-lg p-6 mb-8">
+                <h3 class="text-lg font-semibold text-orange-900 mb-2">Next Steps:</h3>
+                <div class="text-left space-y-2 text-sm text-orange-800">
+                    <p>1. <strong>Log in with Plex</strong> - Click the button below to sign in with your Plex account</p>
+                    <p>2. <strong>Import Friends</strong> - After logging in, visit Admin Settings to import your Plex friends</p>
+                    <p>3. <strong>Start Requesting</strong> - Search for movies and TV shows to add to your request queue</p>
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <a href="{{ base_url }}/" class="inline-block bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-md text-lg font-medium">
+                    Start Using Stout Requests
+                </a>
+                {% if not has_users %}
+                <p class="text-sm text-gray-600">
+                    You'll be automatically made an admin when you first log in with Plex
+                </p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        // Handle Plex OAuth flow
+        document.addEventListener('htmx:afterRequest', function(event) {
+            const response = event.detail.xhr.response;
+            if (response && event.detail.target.id === 'plex-oauth-content') {
+                try {
+                    const data = JSON.parse(response);
+                    if (data.auth_url && data.pin_id) {
+                        handlePlexOAuth(data.auth_url, data.pin_id);
+                    }
+                } catch (e) {
+                    // Not JSON response, handle normally
+                }
+            }
+        });
+
+        function handlePlexOAuth(authUrl, pinId) {
+            const target = document.getElementById('plex-oauth-content');
+            
+            // Show authorization instructions
+            target.innerHTML = `
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8 text-blue-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">Opening Plex Authorization...</h3>
+                    <p class="text-gray-600 mb-4">A popup/tab should open automatically</p>
+                    <div class="space-y-3">
+                        <button type="button" onclick="openPlexAuth('${authUrl}')" 
+                                class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-md text-sm font-medium w-full">
+                            🔗 Didn't open? Click here
+                        </button>
+                        <p class="text-xs text-gray-500">Manual link: <a href="${authUrl}" target="_blank" class="text-orange-600 underline">Open Plex Authorization</a></p>
+                        <p class="text-xs text-gray-500 mt-3">✅ Waiting for authorization... (polling every 5 seconds)</p>
+                    </div>
+                </div>
+            `;
+            
+            // Automatically open the popup immediately
+            setTimeout(() => {
+                openPlexAuth(authUrl);
+            }, 100); // Small delay to ensure DOM is updated
+            
+            // Start polling for authorization
+            pollForAuth(pinId);
+        }
+
+        function openPlexAuth(url) {
+            // Try to open popup first
+            const popup = window.open(url, 'plex-auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+            
+            // If popup failed, fallback to new tab
+            if (!popup || popup.closed || typeof popup.closed == 'undefined') {
+                // Show message about fallback
+                const fallbackMessage = document.createElement('div');
+                fallbackMessage.className = 'mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800';
+                fallbackMessage.innerHTML = '⚠️ Popup blocked - using the manual link above instead';
+                document.querySelector('#plex-oauth-content .space-y-3').appendChild(fallbackMessage);
+                
+                // Open in new tab as fallback
+                window.open(url, '_blank');
+            }
+        }
+
+        function pollForAuth(pinId) {
+            console.log('Starting to poll for PIN:', pinId);
+            let attempts = 0;
+            const maxAttempts = 120; // 10 minutes max
+            
+            // Start polling after initial delay (e.g., 7 seconds)
+            setTimeout(() => {
+                const pollInterval = setInterval(async () => {
+                    attempts++;
+                    if (attempts > maxAttempts) {
+                        clearInterval(pollInterval);
+                        showTimeoutUI();
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch('{{ base_url }}/setup/plex-verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'pin_id=' + encodeURIComponent(pinId),
+                            redirect: 'follow'  // Allow automatic redirect following
+                        });
+
+                        console.log('Poll response status:', response.status);
+                        
+                        if (response.status === 0) {
+                            // Network error or CORS issue - continue polling
+                            console.log('Network error (status 0), continuing to poll...');
+                            updatePollingStatus(attempts, maxAttempts);
+                        } else if (response.redirected) {
+                            // Response was redirected - check if it's success or error
+                            clearInterval(pollInterval);
+                            window.location.href = response.url;
+                        } else if (response.status === 200) {
+                            // Check if it's a JSON response indicating pending status
+                            const contentType = response.headers.get('content-type');
+                            if (contentType && contentType.includes('application/json')) {
+                                const data = await response.json();
+                                if (data.status === 'pending') {
+                                    console.log('PIN not authorized yet, continuing to poll...');
+                                    updatePollingStatus(attempts, maxAttempts);
+                                } else {
+                                    console.log('Unexpected JSON response:', data);
+                                    // Continue polling for unexpected responses
+                                }
+                            } else {
+                                console.log('Unexpected 200 response, continuing to poll...');
+                                updatePollingStatus(attempts, maxAttempts);
+                            }
+                        } else if (response.status === 303) {
+                            // Explicit redirect - follow it
+                            clearInterval(pollInterval);
+                            // For 303 responses, we need to read the location header differently
+                            const text = await response.text();
+                            if (text.includes('session_id=')) {
+                                // Success redirect
+                                const match = text.match(/session_id=(\d+)/);
+                                if (match) {
+                                    window.location.href = '{{ base_url }}/setup?step=1.5&session_id=' + match[1];
+                                } else {
+                                    window.location.href = '{{ base_url }}/setup?step=1.5';
+                                }
+                            } else {
+                                // Error redirect
+                                window.location.href = '{{ base_url }}/setup?step=1&error=Authorization failed';
+                            }
+                        } else if (response.status >= 400 && response.status < 500) {
+                            // Client error - stop polling and show error
+                            clearInterval(pollInterval);
+                            showErrorUI('Authorization failed. Please try again.');
+                        } else {
+                            console.log('Unexpected poll response status:', response.status);
+                            // Continue polling for other statuses
+                            updatePollingStatus(attempts, maxAttempts);
+                        }
+                    } catch (err) {
+                        console.log('Polling error:', err);
+                        // Continue polling despite errors, but track them
+                        updatePollingStatus(attempts, maxAttempts);
+                    }
+                }, 5000);
+            }, 7000);  // initial delay before first poll
+        }
+
+        function updatePollingStatus(attempts, maxAttempts) {
+            const statusElement = document.querySelector('#plex-oauth-content .text-xs.text-gray-500');
+            if (statusElement) {
+                const timeRemaining = Math.ceil((maxAttempts - attempts) * 5 / 60); // Convert to minutes
+                statusElement.textContent = `✅ Waiting for authorization... (${attempts}/${maxAttempts} attempts, ~${timeRemaining} min remaining)`;
+            }
+        }
+
+        function showTimeoutUI() {
+            const target = document.getElementById('plex-oauth-content');
+            if (target) {
+                target.innerHTML = `
+                    <div class="text-center">
+                        <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Authorization Timeout</h3>
+                        <p class="text-gray-600 mb-4">The authorization process timed out. Please try again.</p>
+                        <button 
+                            type="button"
+                            class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-md text-sm font-medium"
+                            onclick="location.reload()"
+                        >
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        function showErrorUI(message) {
+            const target = document.getElementById('plex-oauth-content');
+            if (target) {
+                target.innerHTML = `
+                    <div class="text-center">
+                        <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Authorization Error</h3>
+                        <p class="text-gray-600 mb-4">${message}</p>
+                        <button 
+                            type="button"
+                            class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-md text-sm font-medium"
+                            onclick="location.reload()"
+                        >
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+
+        // Handle test results for other forms
+        document.addEventListener('htmx:responseError', function(event) {
+            const target = event.detail.target;
+            if (target.id !== 'plex-oauth-content') {
+                target.innerHTML = '<div class="text-red-600 text-sm">Test failed. Please check your configuration.</div>';
+            }
+        });
+        
+        document.addEventListener('htmx:afterRequest', function(event) {
+            const response = event.detail.xhr.response;
+            if (response && event.detail.target.id !== 'plex-oauth-content') {
+                try {
+                    const data = JSON.parse(response);
+                    const target = event.detail.target;
+                    
+                    if (data.status === 'success') {
+                        target.innerHTML = `<div class="text-green-600 text-sm flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                            </svg>
+                            ${data.message}
+                        </div>`;
+                    } else {
+                        target.innerHTML = `<div class="text-red-600 text-sm flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            ${data.message}
+                        </div>`;
+                    }
+                } catch (e) {
+                    // Not JSON response, probably HTML error
+                }
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,894 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - Stout Requests{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
+                <p class="text-gray-600 mt-1">Manage your Stout Requests server settings and users</p>
+            </div>
+            <a href="{{ base_url }}/" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                ← Back to Discover
+            </a>
+        </div>
+
+        <!-- Success/Error Messages -->
+        {% if request.query_params.get('success') %}
+        <div id="admin-success-message" class="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
+            <div class="flex">
+                <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                </svg>
+                <p class="ml-3 text-sm text-green-700">{{ request.query_params.get('success') }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if request.query_params.get('error') %}
+        <div id="admin-error-message" class="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+            <div class="flex">
+                <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                </svg>
+                <p class="ml-3 text-sm text-red-700">{{ request.query_params.get('error') }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tab Navigation -->
+        <div class="border-b border-gray-200 mb-8">
+            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                <button onclick="showTab('overview')" id="tab-overview" class="tab-button border-primary-500 text-primary-600 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    📊 Overview
+                </button>
+                <button onclick="showTab('users')" id="tab-users" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    👥 Users
+                </button>
+                <button onclick="showTab('general')" id="tab-general" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    ⚙️ General
+                </button>
+                <button onclick="showTab('media-servers')" id="tab-media-servers" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    🖥️ Media Servers
+                </button>
+                <button onclick="showTab('services')" id="tab-services" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    🔧 Services
+                </button>
+                <button onclick="showTab('libraries')" id="tab-libraries" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    📚 Libraries
+                </button>
+            </nav>
+        </div>
+
+        <!-- Tab Content -->
+        <div id="tab-content">
+            <!-- Overview Tab -->
+            <div id="overview-content" class="tab-content">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <!-- Stats Cards -->
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Total Users</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="stats-users">{{ stats.total_users or 0 }}</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Pending Requests</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="stats-pending">{{ stats.pending_requests or 0 }}</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001-1v-8M7 8h10"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Library Items</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="stats-library">{{ stats.library_items or 0 }}</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">System Status</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="stats-status">
+                                            {% if connection_status.all_connected %}
+                                                <span class="text-green-600">Healthy</span>
+                                            {% else %}
+                                                <span class="text-red-600">Issues</span>
+                                            {% endif %}
+                                        </dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <button onclick="showTab('users')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                            👥 Manage Users
+                        </button>
+                        <button onclick="triggerLibrarySync()" class="bg-green-50 hover:bg-green-100 text-green-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                            🔄 Sync Library
+                        </button>
+                        <button onclick="testConnections()" class="bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                            🔍 Test Connections
+                        </button>
+                        <button onclick="clearAuth()" class="bg-red-50 hover:bg-red-100 text-red-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                            🚨 Clear Auth Issues
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Users Tab -->
+            <div id="users-content" class="tab-content hidden">
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-lg font-medium text-gray-900">User Management</h3>
+                            <div class="space-x-2">
+                                <button hx-post="{{ base_url }}/admin/import-friends" 
+                                        hx-target="#import-friends-feedback" 
+                                        hx-swap="innerHTML"
+                                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                    Import Plex Friends
+                                </button>
+                                <button onclick="showCreateLocalUser()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                    Create Local User
+                                </button>
+                                <button onclick="showCreateTestUser()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                    Create Test User
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Import Friends Feedback Area -->
+                    <div id="import-friends-feedback"></div>
+                    
+                    <!-- Create Test User Form (hidden by default) -->
+                    <div id="create-test-user-form" class="px-6 py-4 border-b border-gray-200 bg-gray-50 hidden">
+                        <h4 class="text-md font-medium text-gray-900 mb-4">Create Test User</h4>
+                        <form method="post" action="{{ url_for('/admin/users/create-test') }}" class="flex items-end space-x-4">
+                            <div class="flex-1">
+                                <label for="test-username" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                <input type="text" name="username" id="test-username" required 
+                                       placeholder="testuser1" 
+                                       class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                            </div>
+                            <div class="flex items-center">
+                                <input type="checkbox" name="is_admin" id="test-is-admin" 
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                <label for="test-is-admin" class="ml-2 text-sm text-gray-700">Admin User</label>
+                            </div>
+                            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                Create User
+                            </button>
+                            <button type="button" onclick="hideCreateTestUser()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                                Cancel
+                            </button>
+                        </form>
+                        <p class="text-xs text-gray-500 mt-2">Test users can be used to test different permission levels without Plex authentication.</p>
+                    </div>
+                    
+                    <!-- Create Local User Form (hidden by default) -->
+                    <div id="create-local-user-form" class="px-6 py-4 border-b border-gray-200 bg-purple-50 hidden">
+                        <h4 class="text-md font-medium text-gray-900 mb-4">Create Local User</h4>
+                        <form id="local-user-form" class="space-y-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="local-username" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                    <input type="text" name="username" id="local-username" required 
+                                           placeholder="john.doe" 
+                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                                </div>
+                                <div>
+                                    <label for="local-full-name" class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                                    <input type="text" name="full_name" id="local-full-name" 
+                                           placeholder="John Doe" 
+                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="local-email" class="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
+                                    <input type="email" name="email" id="local-email" 
+                                           placeholder="john.doe@example.com" 
+                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                                </div>
+                                <div>
+                                    <label for="local-password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                    <input type="password" name="password" id="local-password" required 
+                                           placeholder="Secure password" 
+                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="is_admin" id="local-is-admin" 
+                                           class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                    <label for="local-is-admin" class="ml-2 text-sm text-gray-700">Admin User</label>
+                                </div>
+                                
+                                <div class="flex space-x-2">
+                                    <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                        Create User
+                                    </button>
+                                    <button type="button" onclick="hideCreateLocalUser()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                        <p class="text-xs text-gray-500 mt-2">Local users can log in without a Plex account using their username and password.</p>
+                        <div id="local-user-feedback" class="mt-4 hidden">
+                            <!-- Feedback messages will appear here -->
+                        </div>
+                    </div>
+                    
+                    <div id="users-list" hx-get="{{ base_url }}/admin/users/list" hx-trigger="load">
+                        <div class="flex justify-center py-12">
+                            <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- General Settings Tab -->
+            <div id="general-content" class="tab-content hidden">
+                <form hx-post="{{ base_url }}/admin/settings/update-general" hx-target="#settings-feedback" hx-on::after-request="handleGeneralSettingsResponse(event)">
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-6">General Settings</h3>
+                        
+                        <div class="grid grid-cols-1 gap-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="app_name" class="block text-sm font-medium text-gray-700">Application Name</label>
+                                    <input type="text" name="app_name" id="app_name" 
+                                           value="{{ settings.app_name or 'Stout Requests' }}"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
+                                    <input type="text" name="base_url" id="base_url" 
+                                           value="{{ settings.base_url or '' }}"
+                                           placeholder="/stout (for reverse proxy setups)"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <p class="mt-1 text-xs text-gray-500">
+                                        For reverse proxy setups (e.g., "/stout"). Leave empty if not using a reverse proxy.<br>
+                                        <strong>Examples:</strong> "/stout", "/requests", "/media" - Must start with "/" if specified.
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="site_theme" class="block text-sm font-medium text-gray-700">Site Theme</label>
+                                    <select name="site_theme" id="site_theme" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="default" {{ 'selected' if settings.site_theme == 'default' else '' }}>Default (Orange)</option>
+                                        <option value="dark" {{ 'selected' if settings.site_theme == 'dark' else '' }}>Dark Mode</option>
+                                        <option value="blue" {{ 'selected' if settings.site_theme == 'blue' else '' }}>Blue Theme</option>
+                                        <option value="green" {{ 'selected' if settings.site_theme == 'green' else '' }}>Green Theme</option>
+                                        <option value="purple" {{ 'selected' if settings.site_theme == 'purple' else '' }}>Purple Theme</option>
+                                    </select>
+                                    <p class="mt-1 text-sm text-gray-500">Choose the visual theme for all users</p>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="max_requests_per_user" class="block text-sm font-medium text-gray-700">Max Requests per User</label>
+                                    <input type="number" name="max_requests_per_user" id="max_requests_per_user" 
+                                           value="{{ settings.max_requests_per_user or 10 }}" min="1" max="100"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                                
+                                <div class="space-y-4">
+                                    <div class="flex items-start">
+                                        <div class="flex items-center h-5">
+                                            <input type="checkbox" name="require_approval" id="require_approval" 
+                                                   {{ 'checked' if settings.require_approval else '' }}
+                                                   class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                        </div>
+                                        <div class="ml-3 text-sm">
+                                            <label for="require_approval" class="font-medium text-gray-700">Require Approval</label>
+                                            <p class="text-gray-500">All requests must be approved by an admin</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex items-start">
+                                        <div class="flex items-center h-5">
+                                            <input type="checkbox" name="auto_approve_admin" id="auto_approve_admin" 
+                                                   {{ 'checked' if settings.auto_approve_admin else '' }}
+                                                   class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                        </div>
+                                        <div class="ml-3 text-sm">
+                                            <label for="auto_approve_admin" class="font-medium text-gray-700">Auto-approve Admin Requests</label>
+                                            <p class="text-gray-500">Automatically approve requests from administrators</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Request Visibility Settings -->
+                                    <div class="border-t pt-4 mt-4">
+                                        <h4 class="text-sm font-medium text-gray-900 mb-3">Request Visibility</h4>
+                                        <div class="space-y-4">
+                                            <div class="flex items-start">
+                                                <div class="flex items-center h-5">
+                                                    <input type="checkbox" name="can_view_all_requests" id="can_view_all_requests" 
+                                                           {{ 'checked' if settings.can_view_all_requests else '' }}
+                                                           class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                                </div>
+                                                <div class="ml-3 text-sm">
+                                                    <label for="can_view_all_requests" class="font-medium text-gray-700">Users can view all requests</label>
+                                                    <p class="text-gray-500">When enabled, regular users can see requests from all users on the Requests page and Discover page recent requests</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="flex items-start">
+                                                <div class="flex items-center h-5">
+                                                    <input type="checkbox" name="can_view_request_user" id="can_view_request_user" 
+                                                           {{ 'checked' if settings.can_view_request_user else '' }}
+                                                           class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                                </div>
+                                                <div class="ml-3 text-sm">
+                                                    <label for="can_view_request_user" class="font-medium text-gray-700">Users can see who made each request</label>
+                                                    <p class="text-gray-500">When enabled, regular users can see the username of who made each request. Admins always see this information</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-6 flex justify-end">
+                            <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                Save General Settings
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Media Servers Tab -->
+            <div id="media-servers-content" class="tab-content hidden">
+                <form hx-post="{{ base_url }}/admin/settings/update-media" hx-target="#settings-feedback">
+                    <div class="space-y-6">
+                        <!-- Plex Settings -->
+                        <div class="bg-white shadow rounded-lg p-6">
+                            <div class="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 class="text-lg font-medium text-gray-900">Plex Media Server</h3>
+                                    <p class="text-sm text-gray-500 mt-1">Configure your Plex Media Server connection</p>
+                                </div>
+                                <div class="flex items-center">
+                                    <div class="w-3 h-3 bg-green-400 rounded-full mr-2"></div>
+                                    <span class="text-sm text-gray-600">Connected</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 gap-6">
+                                <div>
+                                    <label for="plex_url" class="block text-sm font-medium text-gray-700">Plex Server URL</label>
+                                    <input type="url" name="plex_url" id="plex_url" 
+                                           value="{{ settings.plex_url or '' }}"
+                                           placeholder="http://localhost:32400"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <p class="mt-1 text-sm text-gray-500">The URL where your Plex server is accessible</p>
+                                </div>
+                                
+                                <div>
+                                    <label for="plex_token" class="block text-sm font-medium text-gray-700">Plex Token</label>
+                                    <input type="password" name="plex_token" id="plex_token" 
+                                           value="{{ '•' * 20 if settings.plex_token else '' }}"
+                                           placeholder="Your Plex authentication token"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <p class="mt-1 text-sm text-gray-500">
+                                        Authentication token for your Plex server. 
+                                        <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" class="text-orange-600 hover:text-orange-500">How to find your token</a>
+                                    </p>
+                                </div>
+                                
+                                <div>
+                                    <label for="plex_client_id" class="block text-sm font-medium text-gray-700">Plex Client ID</label>
+                                    <input type="text" name="plex_client_id" id="plex_client_id" 
+                                           value="{{ settings.plex_client_id or 'stout-requests' }}"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <p class="mt-1 text-sm text-gray-500">Unique identifier for this application</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between">
+                            <button type="button" onclick="testPlexConnection()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                Test Plex Connection
+                            </button>
+                            <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                Save Media Server Settings
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Services Tab -->
+            <div id="services-content" class="tab-content hidden">
+                <form hx-post="{{ base_url }}/admin/settings/update-media" hx-target="#settings-feedback">
+                    <div class="space-y-6">
+                        <!-- Radarr Settings -->
+                        <div class="bg-white shadow rounded-lg p-6">
+                            <div class="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 class="text-lg font-medium text-gray-900">Radarr</h3>
+                                    <p class="text-sm text-gray-500 mt-1">Movie collection management service</p>
+                                </div>
+                                <div class="flex items-center">
+                                    <div class="w-3 h-3 bg-gray-400 rounded-full mr-2"></div>
+                                    <span class="text-sm text-gray-600">Optional</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 gap-6">
+                                <div>
+                                    <label for="radarr_url" class="block text-sm font-medium text-gray-700">Radarr URL</label>
+                                    <input type="url" name="radarr_url" id="radarr_url" 
+                                           value="{{ settings.radarr_url or '' }}"
+                                           placeholder="http://localhost:7878"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="radarr_api_key" class="block text-sm font-medium text-gray-700">Radarr API Key</label>
+                                    <input type="password" name="radarr_api_key" id="radarr_api_key" 
+                                           value="{{ '•' * 20 if settings.radarr_api_key else '' }}"
+                                           placeholder="Your Radarr API key"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Sonarr Settings -->
+                        <div class="bg-white shadow rounded-lg p-6">
+                            <div class="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 class="text-lg font-medium text-gray-900">Sonarr</h3>
+                                    <p class="text-sm text-gray-500 mt-1">TV series collection management service</p>
+                                </div>
+                                <div class="flex items-center">
+                                    <div class="w-3 h-3 bg-gray-400 rounded-full mr-2"></div>
+                                    <span class="text-sm text-gray-600">Optional</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 gap-6">
+                                <div>
+                                    <label for="sonarr_url" class="block text-sm font-medium text-gray-700">Sonarr URL</label>
+                                    <input type="url" name="sonarr_url" id="sonarr_url" 
+                                           value="{{ settings.sonarr_url or '' }}"
+                                           placeholder="http://localhost:8989"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr_api_key" class="block text-sm font-medium text-gray-700">Sonarr API Key</label>
+                                    <input type="password" name="sonarr_api_key" id="sonarr_api_key" 
+                                           value="{{ '•' * 20 if settings.sonarr_api_key else '' }}"
+                                           placeholder="Your Sonarr API key"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between">
+                            <button type="button" onclick="testServicesConnections()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                Test Service Connections
+                            </button>
+                            <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                                Save Service Settings
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Libraries Tab -->
+            <div id="libraries-content" class="tab-content hidden">
+                <div id="libraries-frame" hx-get="{{ base_url }}/admin/library/content" hx-trigger="load">
+                    <div class="flex justify-center py-12">
+                        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Feedback -->
+        <div id="settings-feedback" class="mt-6"></div>
+    </div>
+</div>
+
+<script>
+let currentAdminTab = 'overview';
+
+function showTab(tabName) {
+    console.log('Switching to admin tab:', tabName);
+    currentAdminTab = tabName;
+    
+    // Clear any query parameters for notifications when switching tabs
+    clearNotificationParams();
+    
+    // Hide any existing notifications immediately when switching tabs
+    hideNotificationMessages();
+    
+    // Clear settings feedback div when switching tabs
+    clearSettingsFeedback();
+    
+    // Update tab styling
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.classList.remove('border-primary-500', 'text-primary-600');
+        button.classList.add('border-transparent', 'text-gray-500');
+    });
+    
+    const activeTab = document.getElementById(`tab-${tabName}`);
+    if (activeTab) {
+        activeTab.classList.remove('border-transparent', 'text-gray-500');
+        activeTab.classList.add('border-primary-500', 'text-primary-600');
+    }
+    
+    // Show/hide content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.add('hidden');
+    });
+    
+    const activeContent = document.getElementById(`${tabName}-content`);
+    if (activeContent) {
+        activeContent.classList.remove('hidden');
+    }
+}
+
+function clearNotificationParams() {
+    if (window.location.search) {
+        const url = new URL(window.location);
+        url.searchParams.delete('success');
+        url.searchParams.delete('error');
+        window.history.replaceState({}, '', url.pathname + url.search);
+    }
+}
+
+function hideNotificationMessages() {
+    const successMessage = document.getElementById('admin-success-message');
+    const errorMessage = document.getElementById('admin-error-message');
+    
+    if (successMessage) {
+        successMessage.style.display = 'none';
+    }
+    if (errorMessage) {
+        errorMessage.style.display = 'none';
+    }
+}
+
+function clearSettingsFeedback() {
+    const feedbackDiv = document.getElementById('settings-feedback');
+    if (feedbackDiv) {
+        feedbackDiv.innerHTML = '';
+        feedbackDiv.style.display = 'none';
+    }
+}
+
+function autoHideNotifications() {
+    // Auto-hide notifications after 5 seconds
+    setTimeout(() => {
+        hideNotificationMessages();
+        clearNotificationParams();
+        clearSettingsFeedback();
+    }, 5000);
+}
+
+function autoHideSettingsFeedback() {
+    // Auto-hide settings feedback after 5 seconds
+    setTimeout(() => {
+        clearSettingsFeedback();
+    }, 5000);
+}
+
+
+async function triggerLibrarySync() {
+    try {
+        showToast('Starting library sync...', 'info');
+        
+        const response = await fetch('{{ base_url }}/admin/sync/trigger', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Library sync completed successfully', 'success');
+            // Refresh stats if on overview tab
+            if (currentAdminTab === 'overview') {
+                setTimeout(() => location.reload(), 1000);
+            }
+        } else {
+            showToast('Library sync failed: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('Error triggering sync: ' + error.message, 'error');
+    }
+}
+
+async function testConnections() {
+    try {
+        showToast('Testing connections...', 'info');
+        
+        const response = await fetch('{{ base_url }}/admin/settings/test-connections', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            const results = result.results;
+            let message = 'Connection test results:\n';
+            for (const [service, status] of Object.entries(results)) {
+                message += `${service}: ${status ? '✅' : '❌'}\n`;
+            }
+            showToast(message, results.all_connected ? 'success' : 'warning');
+        } else {
+            showToast('Failed to test connections', 'error');
+        }
+    } catch (error) {
+        showToast('Error testing connections: ' + error.message, 'error');
+    }
+}
+
+function showToast(message, type = 'info') {
+    // Simple toast implementation
+    const toast = document.createElement('div');
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-md text-white z-50 ${
+        type === 'success' ? 'bg-green-600' :
+        type === 'error' ? 'bg-red-600' :
+        type === 'warning' ? 'bg-yellow-600' :
+        'bg-blue-600'
+    }`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
+
+// Initialize on page load
+// Test user form functions
+function showCreateTestUser() {
+    document.getElementById('create-test-user-form').classList.remove('hidden');
+}
+
+function hideCreateTestUser() {
+    document.getElementById('create-test-user-form').classList.add('hidden');
+    document.getElementById('test-username').value = '';
+    document.getElementById('test-is-admin').checked = false;
+}
+
+// Local user form functions
+function showCreateLocalUser() {
+    document.getElementById('create-local-user-form').classList.remove('hidden');
+}
+
+function hideCreateLocalUser() {
+    document.getElementById('create-local-user-form').classList.add('hidden');
+    document.getElementById('local-user-form').reset();
+    document.getElementById('local-user-feedback').classList.add('hidden');
+}
+
+// Handle local user form submission
+document.addEventListener('DOMContentLoaded', function() {
+    const localUserForm = document.getElementById('local-user-form');
+    if (localUserForm) {
+        localUserForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const userData = {
+                username: formData.get('username'),
+                full_name: formData.get('full_name'),
+                email: formData.get('email'),
+                password: formData.get('password'),
+                is_admin: formData.get('is_admin') === 'on'
+            };
+            
+            try {
+                const response = await fetch('{{ base_url }}/admin/users/create-local', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(userData)
+                });
+                
+                const result = await response.json();
+                const feedbackDiv = document.getElementById('local-user-feedback');
+                
+                if (response.ok) {
+                    feedbackDiv.innerHTML = `
+                        <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                            <p class="text-green-700 text-sm">${result.message}</p>
+                        </div>
+                    `;
+                    feedbackDiv.classList.remove('hidden');
+                    
+                    // Reset form and refresh users list
+                    this.reset();
+                    htmx.ajax('GET', '/admin/users/list', '#users-list');
+                    
+                    // Hide form after 3 seconds
+                    setTimeout(() => {
+                        hideCreateLocalUser();
+                    }, 3000);
+                } else {
+                    feedbackDiv.innerHTML = `
+                        <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                            <p class="text-red-700 text-sm">${result.detail || 'Failed to create user'}</p>
+                        </div>
+                    `;
+                    feedbackDiv.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Error creating local user:', error);
+                const feedbackDiv = document.getElementById('local-user-feedback');
+                feedbackDiv.innerHTML = `
+                    <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p class="text-red-700 text-sm">Network error. Please try again.</p>
+                    </div>
+                `;
+                feedbackDiv.classList.remove('hidden');
+            }
+        });
+    }
+});
+
+// Clear authentication issues
+function clearAuth() {
+    if (confirm('This will clear all authentication cookies and redirect to login. Continue?')) {
+        // Clear all authentication-related cookies
+        document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+        document.cookie = "plex_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+        
+        // Clear localStorage
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('plex_token');
+        
+        // Redirect to logout which will clear server-side cookies too
+        window.location.href = '{{ base_url }}/logout';
+    }
+}
+
+function handleGeneralSettingsResponse(event) {
+    // Check if the response was successful by looking for the success message
+    const responseText = event.detail.xhr.responseText;
+    if (responseText && responseText.includes('General settings updated successfully')) {
+        // Extract the new theme from the form
+        const themeSelect = document.getElementById('site_theme');
+        if (themeSelect) {
+            const newTheme = themeSelect.value;
+            applyThemeImmediately(newTheme);
+            showToast('Settings saved! Theme applied immediately.', 'success');
+        }
+        // Auto-hide the success message
+        autoHideSettingsFeedback();
+    }
+}
+
+function applyThemeImmediately(theme) {
+    const body = document.body;
+    
+    // Remove all existing theme classes
+    body.classList.remove('theme-dark', 'theme-blue', 'theme-green', 'theme-purple');
+    
+    // Apply new theme class if not default
+    if (theme && theme !== 'default') {
+        body.classList.add('theme-' + theme);
+    }
+    
+    console.log('Applied theme:', theme);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    showTab('overview');
+    
+    // Auto-hide any initial notifications after 5 seconds
+    autoHideNotifications();
+    
+    // Set up global HTMX event listeners for auto-refresh
+    setupGlobalHTMXHandlers();
+});
+
+function setupGlobalHTMXHandlers() {
+    // Simplified HTMX handling - let HTMX do the heavy lifting
+    console.log('🚀 Admin HTMX handlers set up');
+}
+</script>
+
+<style>
+.tab-button {
+    transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+    transform: translateY(-1px);
+}
+
+.tab-content {
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+</style>
+
+{% endblock %}

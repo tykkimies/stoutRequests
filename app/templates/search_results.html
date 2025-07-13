@@ -1,0 +1,179 @@
+{% if results %}
+    {% for item in results %}
+        {% if item.media_type in ['movie', 'tv'] %}
+        <div class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+            <div class="flex">
+                <!-- Poster -->
+                <div class="flex-shrink-0">
+                    <a href="{{ base_url }}/media/{{ item.media_type }}/{{ item.id }}" class="block cursor-pointer hover:opacity-90 transition-opacity">
+                        {% if item.poster_url %}
+                        <img 
+                            src="{{ item.poster_url }}" 
+                            alt="{{ item.title or item.name }}"
+                            class="h-48 w-32 object-cover"
+                        >
+                        {% else %}
+                        <div class="h-48 w-32 bg-gray-200 flex items-center justify-center">
+                            <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                        </div>
+                        {% endif %}
+                    </a>
+                </div>
+                
+                <!-- Content -->
+                <div class="flex-1 p-6">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-1">
+                                {{ item.title or item.name }}
+                                {% if item.media_type == 'movie' and item.release_date %}
+                                    <span class="text-gray-500 font-normal">({{ item.release_date[:4] }})</span>
+                                {% elif item.media_type == 'tv' and item.first_air_date %}
+                                    <span class="text-gray-500 font-normal">({{ item.first_air_date[:4] }})</span>
+                                {% endif %}
+                            </h3>
+                            
+                            <div class="flex items-center space-x-2 mb-3">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                    {% if item.media_type == 'movie' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
+                                    {{ 'Movie' if item.media_type == 'movie' else 'TV Show' }}
+                                </span>
+                                
+                                {% if item.vote_average %}
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                                    </svg>
+                                    <span class="ml-1 text-sm text-gray-600">{{ "%.1f"|format(item.vote_average) }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            
+                            {% if item.overview %}
+                            <p class="text-gray-600 text-sm line-clamp-3">{{ item.overview }}</p>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Request button with status -->
+                        <div class="ml-4 flex-shrink-0">
+                            {% set status = item.get('status', 'available') %}
+                            {% if status == 'in_plex' %}
+                            <div class="inline-flex items-center px-3 py-2 border border-green-300 text-sm leading-4 font-medium rounded-md text-green-700 bg-green-50">
+                                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                </svg>
+                                In Plex
+                            </div>
+                            {% elif status == 'requested_pending' %}
+                            <div class="inline-flex items-center px-3 py-2 border border-yellow-300 text-sm leading-4 font-medium rounded-md text-yellow-700 bg-yellow-50">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Requested
+                            </div>
+                            {% elif status == 'requested_approved' %}
+                            <div class="inline-flex items-center px-3 py-2 border border-blue-300 text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-50">
+                                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                </svg>
+                                Approved
+                            </div>
+                            {% elif status == 'requested_downloading' %}
+                            <div class="inline-flex items-center px-3 py-2 border border-purple-300 text-sm leading-4 font-medium rounded-md text-purple-700 bg-purple-50">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
+                                </svg>
+                                Downloading
+                            </div>
+                            {% elif status != 'not_media' %}
+                            <form hx-post="{{ base_url }}/requests/create" hx-target="this" hx-swap="outerHTML">
+                                <input type="hidden" name="tmdb_id" value="{{ item.id }}">
+                                <input type="hidden" name="media_type" value="{{ item.media_type }}">
+                                <input type="hidden" name="title" value="{{ (item.title or item.name)|e }}">
+                                <input type="hidden" name="overview" value="{{ (item.overview or '')|e }}">
+                                <input type="hidden" name="poster_path" value="{{ item.poster_path or '' }}">
+                                <input type="hidden" name="release_date" value="{{ item.release_date or item.first_air_date or '' }}">
+                                <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500">
+                                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                    </svg>
+                                    Request
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+    
+    {% if pagination and pagination.total_pages > 1 %}
+    <div class="flex justify-center mt-6">
+        <nav class="flex space-x-2">
+            {% if pagination.page > 1 %}
+            <button 
+                class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                hx-get="{{ base_url }}/search?q={{ query }}&page={{ pagination.page - 1 }}"
+                hx-target="#search-results"
+            >
+                Previous
+            </button>
+            {% endif %}
+            
+            <span class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 border border-gray-300 rounded-md">
+                Page {{ pagination.page }} of {{ pagination.total_pages }}
+            </span>
+            
+            {% if pagination.page < pagination.total_pages %}
+            <button 
+                class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                hx-get="{{ base_url }}/search?q={{ query }}&page={{ pagination.page + 1 }}"
+                hx-target="#search-results"
+            >
+                Next
+            </button>
+            {% endif %}
+        </nav>
+    </div>
+    {% endif %}
+{% elif tmdb_not_configured %}
+    <div class="text-center py-12">
+        <svg class="w-16 h-16 mx-auto mb-4 text-orange-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+        </svg>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Search Not Available</h3>
+        <p class="text-gray-500 mb-4">TMDB API is not configured yet</p>
+        {% if current_user.is_admin %}
+        <a href="{{ base_url }}/admin/settings" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700">
+            Configure TMDB API
+        </a>
+        {% else %}
+        <p class="text-sm text-gray-400">Contact an administrator to enable search functionality</p>
+        {% endif %}
+    </div>
+{% elif tmdb_error %}
+    <div class="text-center py-12">
+        <svg class="w-16 h-16 mx-auto mb-4 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Search Error</h3>
+        <p class="text-gray-500 mb-4">{{ tmdb_error }}</p>
+        {% if current_user.is_admin %}
+        <a href="{{ base_url }}/admin/settings" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700">
+            Check TMDB Settings
+        </a>
+        {% endif %}
+    </div>
+{% elif query %}
+    <div class="text-center py-12">
+        <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6-4h6m2 5.291A7.962 7.962 0 0118 12a8 8 0 10-8 8 7.962 7.962 0 01-5.291-2z"></path>
+        </svg>
+        <p class="text-lg text-gray-500">No results found for "{{ query }}"</p>
+        <p class="text-gray-400">Try adjusting your search terms</p>
+    </div>
+{% endif %}

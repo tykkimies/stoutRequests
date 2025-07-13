@@ -1,0 +1,2471 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Stout Requests{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    {% if not current_user %}
+    <!-- Landing page for non-authenticated users -->
+    <div class="text-center py-16">
+        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to Stout Requests</h1>
+        <p class="text-xl text-gray-600 mb-8">Request movies and TV shows for your Plex server</p>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 max-w-md mx-auto">
+            <div class="flex items-center justify-center mb-4">
+                <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
+                    </svg>
+                </div>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Ready to get started?</h3>
+            <p class="text-gray-600 text-sm mb-4">Click "Login with Plex" in the top right corner to access your media request dashboard.</p>
+            <div class="text-sm text-gray-500">
+                <p>• Browse trending movies & TV shows</p>
+                <p>• Request content for your Plex server</p>
+                <p>• Track your request status</p>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <!-- Main content with sidebar layout -->
+    <div class="flex bg-gray-50 min-h-screen">
+        <!-- Left Sidebar - Fixed Position -->
+        <div class="w-64 bg-white shadow-lg border-r border-gray-200 fixed top-16 left-0 bottom-0 overflow-y-auto z-10">
+            <div class="p-4">
+                <!-- Setup complete message -->
+                {% if request.query_params.get('setup_complete') %}
+                <div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div class="flex">
+                        <svg class="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div class="ml-2">
+                            <h3 class="text-sm font-medium text-green-800">Setup Complete!</h3>
+                            <p class="mt-1 text-xs text-green-700">
+                                Your Plex server is ready!
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Search Section -->
+                <div class="mb-6">
+                    <div class="flex items-center space-x-2 mb-3">
+                        <div class="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center">
+                            <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-base font-semibold text-gray-900">Search</h3>
+                    </div>
+                    <div class="relative">
+                        <input 
+                            type="text" 
+                            id="search-input" 
+                            name="q"
+                            placeholder="Search movies & TV shows..."
+                            class="w-full px-3 py-2 pl-10 pr-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            hx-get="{{ base_url }}/search"
+                            hx-trigger="keyup changed delay:500ms"
+                            hx-target="#search-results-content"
+                            hx-indicator="#search-loading"
+                            onkeyup="handleSearchInput(this)"
+                        >
+                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2">
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                        </div>
+                        <div id="search-loading" class="absolute right-3 top-1/2 transform -translate-y-1/2 htmx-indicator">
+                            <svg class="animate-spin h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <button 
+                        id="clear-search"
+                        class="text-xs text-blue-600 hover:text-blue-700 hidden mt-2 bg-blue-50 px-2 py-1 rounded-md transition-colors"
+                        onclick="clearSearch()"
+                    >
+                        Clear Search
+                    </button>
+                </div>
+
+                <!-- Filter Controls -->
+                <div class="mb-6">
+                    <div class="flex items-center space-x-2 mb-4">
+                        <div class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center">
+                            <svg class="w-3 h-3 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001 1v-8M7 8h10"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-base font-semibold text-gray-900">Discover</h3>
+                    </div>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Content Type</label>
+                            <select id="media-type" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white">
+                                <option value="mixed">🎭 All</option>
+                                <option value="movie">🎬 Movies</option>
+                                <option value="tv">📺 TV Shows</option>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-xs font-medium text-gray-700">Content Sources</label>
+                                <button type="button" id="clear-sources" onclick="clearContentSources()" class="text-xs text-orange-600 hover:text-orange-700 hidden">Clear</button>
+                            </div>
+                            <div id="content-sources-container" class="space-y-1 max-h-32 overflow-y-auto border border-gray-300 rounded-md p-2">
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded font-medium">
+                                    <input type="checkbox" id="sources-all" name="content-sources" value="all" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    ✨ All Sources
+                                </label>
+                                <hr class="my-1 border-gray-200">
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="content-sources" value="trending" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    🔥 Trending
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="content-sources" value="popular" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    ⭐ Popular
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="content-sources" value="top_rated" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    🏆 Top Rated
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="content-sources" value="upcoming" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    🗓️ Upcoming
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="content-sources" value="now_playing" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    🎭 Now Playing
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-xs font-medium text-gray-700">Genres</label>
+                                <button type="button" id="clear-genres" onclick="clearGenres()" class="text-xs text-orange-600 hover:text-orange-700 hidden">Clear</button>
+                            </div>
+                            <div id="genres-container" class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2">
+                                <!-- Movie Genres -->
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="28" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Action
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="12" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Adventure
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="16" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Animation
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="35" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Comedy
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="80" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Crime
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="99" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Documentary
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="18" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Drama
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="10751" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Family
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="14" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Fantasy
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="36" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    History
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="27" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Horror
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="10402" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Music
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="9648" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Mystery
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="10749" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Romance
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="878" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Science Fiction
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="10770" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    TV Movie
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="53" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Thriller
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="10752" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    War
+                                </label>
+                                <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                    <input type="checkbox" name="genres" value="37" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                    Western
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Rating Filters -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Rating Source</label>
+                            <select id="rating-source" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white" onchange="updateRatingFilter()">
+                                <option value="">No Rating Filter</option>
+                                <option value="tmdb">🍅 TMDB Score</option>
+                                <option value="imdb">⭐ IMDb Rating</option>
+                                <option value="rt">🍅 Rotten Tomatoes</option>
+                            </select>
+                        </div>
+                        
+                        <div id="rating-range-container" class="hidden">
+                            <label class="block text-xs font-medium text-gray-700 mb-1">
+                                <span id="rating-label">Minimum Rating</span>
+                                <span id="rating-value" class="text-orange-600 font-semibold">7.0</span>
+                            </label>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-gray-500" id="min-label">0</span>
+                                <input 
+                                    type="range" 
+                                    id="rating-range" 
+                                    min="0" 
+                                    max="10" 
+                                    step="0.5" 
+                                    value="7.0"
+                                    class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                    oninput="updateRatingValue()"
+                                >
+                                <span class="text-xs text-gray-500" id="max-label">10</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1" id="rating-help">
+                                Only show content with this rating or higher
+                            </div>
+                        </div>
+                        
+                        <!-- Studios Filter -->
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="block text-xs font-medium text-gray-700">Studios</label>
+                                <button type="button" onclick="clearStudios()" class="text-xs text-gray-500 hover:text-gray-700" id="clear-studios" style="display: none;">Clear</button>
+                            </div>
+                            <div class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2" id="studios-container">
+                                <div class="grid grid-cols-1 gap-1" id="studios-list">
+                                    <!-- Popular studios -->
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="420" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        Marvel Studios
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="174" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        Warner Bros.
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="2" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        Walt Disney Pictures
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="33" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        Universal Pictures
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="5" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        Columbia Pictures
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="41077" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        A24
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="4" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        Paramount Pictures
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="studios" value="34" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        Sony Pictures
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Streaming Services Filter -->
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="block text-xs font-medium text-gray-700">Streaming</label>
+                                <button type="button" onclick="clearStreaming()" class="text-xs text-gray-500 hover:text-gray-700" id="clear-streaming" style="display: none;">Clear</button>
+                            </div>
+                            <div class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2" id="streaming-container">
+                                <div class="grid grid-cols-1 gap-1" id="streaming-list">
+                                    <!-- Popular streaming services -->
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="8" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        🔴 Netflix
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="15" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        🎬 Hulu
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="337" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        🎭 Disney+
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="119" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        📦 Amazon Prime
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="384" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        🎪 HBO Max
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="531" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        🍎 Apple TV+
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="386" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        🎥 Peacock
+                                    </label>
+                                    <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                        <input type="checkbox" name="streaming" value="1899" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
+                                        ➕ Paramount+
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Active Filters Display -->
+                        <div id="active-filters" class="hidden">
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="block text-xs font-medium text-gray-700">Active Filters</label>
+                                <button type="button" onclick="clearAllFilters()" class="text-xs text-red-600 hover:text-red-700">Clear All</button>
+                            </div>
+                            <div class="flex flex-wrap gap-1" id="active-filters-list">
+                                <!-- Filter chips will be added here dynamically -->
+                            </div>
+                        </div>
+                        
+                        <button 
+                            id="apply-filters"
+                            class="w-full bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors shadow-sm hover:shadow-md"
+                            onclick="applyFilters()"
+                        >
+                            <span class="flex items-center justify-center">
+                                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                                Apply Filters
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area - With left margin for fixed sidebar -->
+        <div class="flex-1 ml-64 bg-gray-50 overflow-hidden">
+            <div class="p-4 max-w-full overflow-hidden">
+                <!-- Category Management -->
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900 mb-1">Discover</h1>
+                        <p class="text-gray-600 text-sm">Find and request content for your Plex server</p>
+                    </div>
+                    <button id="reorder-toggle" onclick="toggleReorderMode()" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
+                        📝 Reorder Categories
+                    </button>
+                </div>
+
+                <!-- Search Results Container -->
+                <div id="content-results" class="hidden">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-900 mb-1">Search Results</h2>
+                            <p class="text-gray-600 text-sm" id="search-description">Results for your search</p>
+                        </div>
+                        <button onclick="clearSearch()" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
+                            ← Back to Categories
+                        </button>
+                    </div>
+                    <div id="search-results-content">
+                        <!-- Search results will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Category Sections -->
+                <div id="categories-container" class="space-y-8">
+                    <!-- Recently Added to Plex -->
+                    <div class="category-section" data-category="recently-added" data-order="1">
+                        <!-- Title Row -->
+                        <div class="mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                </svg>
+                                Recently Added to Plex
+                            </h2>
+                        </div>
+                        <!-- Content Row with aligned View All button -->
+                        <div class="flex items-center">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12"></div>
+                            <!-- Header for content area -->
+                            <div class="flex-1 flex items-center justify-between mb-2">
+                                <div></div>
+                                <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('recently-added')">
+                                    View All →
+                                </button>
+                            </div>
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12"></div>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="recently-added-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="recently-added-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=plex&sort=recently_added&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-green-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading recently added...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="recently-added-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Requests -->
+                    <div class="category-section" data-category="recent-requests" data-order="1.5">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-purple-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                                </svg>
+                                Recent Requests
+                            </h2>
+                            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('recent-requests')">
+                                View All →
+                            </button>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="recent-requests-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="recent-requests-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=requests&sort=recent&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading recent requests...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="recent-requests-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Trending Movies -->
+                    <div class="category-section" data-category="trending-movies" data-order="2">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                                </svg>
+                                Trending Movies
+                            </h2>
+                            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('trending-movies')">
+                                View All →
+                            </button>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="trending-movies-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="trending-movies-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=movie&sort=trending&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-red-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading trending movies...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="trending-movies-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Popular Movies -->
+                    <div class="category-section" data-category="popular-movies" data-order="3">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-yellow-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+                                </svg>
+                                Popular Movies
+                            </h2>
+                            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('popular-movies')">
+                                View All →
+                            </button>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="popular-movies-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="popular-movies-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=movie&sort=popular&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-yellow-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading popular movies...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="popular-movies-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Trending TV Shows -->
+                    <div class="category-section" data-category="trending-tv" data-order="4">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-purple-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001 1v-8M7 8h10"></path>
+                                </svg>
+                                Trending TV Shows
+                            </h2>
+                            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('trending-tv')">
+                                View All →
+                            </button>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="trending-tv-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="trending-tv-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=tv&sort=trending&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading trending TV shows...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="trending-tv-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Popular TV Shows -->
+                    <div class="category-section" data-category="popular-tv" data-order="5">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-indigo-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+                                </svg>
+                                Popular TV Shows
+                            </h2>
+                            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('popular-tv')">
+                                View All →
+                            </button>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="popular-tv-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="popular-tv-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=tv&sort=popular&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading popular TV shows...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="popular-tv-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upcoming Movies -->
+                    <div class="category-section" data-category="upcoming-movies" data-order="6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                Upcoming Movies
+                            </h2>
+                            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('upcoming-movies')">
+                                View All →
+                            </button>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="upcoming-movies-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="upcoming-movies-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=movie&sort=upcoming&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading upcoming movies...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="upcoming-movies-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.horizontal-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: #CBD5E0 #F7FAFC;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+}
+
+.horizontal-scroll::-webkit-scrollbar {
+    height: 6px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-track {
+    background: #F7FAFC;
+    border-radius: 3px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb {
+    background: #CBD5E0;
+    border-radius: 3px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb:hover {
+    background: #A0AEC0;
+}
+
+.movie-card-horizontal {
+    flex: 0 0 auto;
+    width: 192px; /* w-48 = 192px */
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.movie-card-horizontal:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+}
+
+
+.category-expanded {
+    max-height: none !important;
+}
+
+.category-collapsed {
+    max-height: 280px;
+    overflow: hidden;
+}
+
+/* Ensure content areas stay within viewport bounds */
+.category-scroll-wrapper {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.category-scroll-wrapper .flex-1 {
+    min-width: 0; /* Allow flex item to shrink below content size */
+}
+</style>
+
+<script>
+// Search handling functions
+window.handleSearchInput = function(input) {
+    const query = input.value.trim();
+    const searchContainer = document.getElementById('content-results');
+    const categoriesContainer = document.getElementById('categories-container');
+    const searchDescription = document.getElementById('search-description');
+    const reorderButton = document.getElementById('reorder-toggle');
+    
+    if (query.length > 0) {
+        // Show search results container
+        searchContainer.classList.remove('hidden');
+        categoriesContainer.classList.add('hidden');
+        searchDescription.textContent = `Results for "${query}"`;
+        
+        // Hide reorder button in search view
+        if (reorderButton) {
+            reorderButton.classList.add('hidden');
+        }
+    } else {
+        // Hide search results and show categories
+        searchContainer.classList.add('hidden');
+        categoriesContainer.classList.remove('hidden');
+        
+        // Show reorder button in categories view
+        if (reorderButton) {
+            reorderButton.classList.remove('hidden');
+        }
+    }
+}
+
+window.clearSearch = function() {
+    const searchInput = document.getElementById('search-input');
+    const searchContainer = document.getElementById('content-results');
+    const categoriesContainer = document.getElementById('categories-container');
+    const reorderButton = document.getElementById('reorder-toggle');
+    
+    // Clear search input
+    searchInput.value = '';
+    
+    // Hide search results and show categories
+    searchContainer.classList.add('hidden');
+    categoriesContainer.classList.remove('hidden');
+    
+    // Show reorder button when returning to categories
+    if (reorderButton) {
+        reorderButton.classList.remove('hidden');
+    }
+    
+    // Clear search results content
+    document.getElementById('search-results-content').innerHTML = '';
+}
+
+// Genre management functions - now using static genre list
+
+// Search and discover functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('search-input');
+    const clearSearchButton = document.getElementById('clear-search');
+    const applyFiltersButton = document.getElementById('apply-filters');
+    
+    // Genres are now static - no dynamic loading needed
+    
+    // Content Sources "All" checkbox behavior
+    const allSourcesCheckbox = document.getElementById('sources-all');
+    const individualSourceCheckboxes = document.querySelectorAll('input[name="content-sources"]:not(#sources-all)');
+    
+    // When "All Sources" is clicked
+    allSourcesCheckbox.addEventListener('change', function() {
+        individualSourceCheckboxes.forEach(cb => {
+            cb.checked = this.checked;
+        });
+        updateFilterClearButtons();
+    });
+    
+    // When individual content source checkboxes are clicked
+    individualSourceCheckboxes.forEach(cb => {
+        cb.addEventListener('change', function() {
+            const checkedCount = document.querySelectorAll('input[name="content-sources"]:not(#sources-all):checked').length;
+            const totalCount = individualSourceCheckboxes.length;
+            
+            // Update "All Sources" checkbox state
+            allSourcesCheckbox.checked = checkedCount === totalCount;
+            allSourcesCheckbox.indeterminate = checkedCount > 0 && checkedCount < totalCount;
+            
+            updateFilterClearButtons();
+        });
+    });
+    
+    // Show/hide clear search button based on search input
+    searchInput.addEventListener('input', function() {
+        if (this.value.trim()) {
+            clearSearchButton.classList.remove('hidden');
+        } else {
+            clearSearchButton.classList.add('hidden');
+        }
+    });
+    
+    // Clear search functionality - use the global clearSearch function
+    // (defined elsewhere with full functionality)
+    
+    // Apply filters functionality
+    window.applyFilters = function() {
+        // Clear search input when using discover
+        const searchInput = document.getElementById('search-input');
+        const clearSearchButton = document.getElementById('clear-search');
+        if (searchInput.value.trim()) {
+            searchInput.value = '';
+            clearSearchButton.classList.add('hidden');
+        }
+        
+        // Get filter values
+        const mediaType = document.getElementById('media-type').value;
+        const selectedContentSources = Array.from(document.querySelectorAll('input[name="content-sources"]:checked:not(#sources-all)')).map(cb => cb.value);
+        
+        // Get selected genres (multi-select)
+        const selectedGenres = Array.from(document.querySelectorAll('input[name="genres"]:checked')).map(cb => cb.value);
+        
+        // Get rating filter values
+        const ratingSource = document.getElementById('rating-source').value;
+        const ratingValue = ratingSource ? document.getElementById('rating-range').value : '';
+        
+        // Get studio filters
+        const selectedStudios = Array.from(document.querySelectorAll('input[name="studios"]:checked')).map(cb => cb.value);
+        
+        // Get streaming filters
+        const selectedStreaming = Array.from(document.querySelectorAll('input[name="streaming"]:checked')).map(cb => cb.value);
+        
+        // Update active filters display
+        updateActiveFiltersDisplay(mediaType, selectedContentSources, selectedGenres, ratingSource, ratingValue, selectedStudios, selectedStreaming);
+        
+        // Show filtered content in place of categories
+        showFilteredResults(mediaType, selectedContentSources, selectedGenres, ratingSource, ratingValue, selectedStudios, selectedStreaming);
+    };
+    
+    function showFilteredResults(mediaType, selectedContentSources, selectedGenres, ratingSource, ratingValue, selectedStudios, selectedStreaming) {
+        const categoriesContainer = document.querySelector('.space-y-8');
+        const reorderButton = document.getElementById('reorder-toggle');
+        
+        // Hide reorder button in filtered view
+        if (reorderButton) {
+            reorderButton.classList.add('hidden');
+        }
+        
+        // Replace categories with filtered results
+        categoriesContainer.innerHTML = `
+            <div class="category-section">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                        <svg class="w-5 h-5 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.207A1 1 0 013 6.5V4z"></path>
+                        </svg>
+                        Filtered Results: ${mediaType === 'movie' ? 'Movies' : mediaType === 'tv' ? 'TV Shows' : 'Movies & TV'} • ${selectedContentSources.length === 5 ? 'All Sources' : selectedContentSources.map(s => s.replace('_', ' ')).join(', ')}
+                    </h2>
+                    <button onclick="resetToCategories()" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
+                        ← Back to Categories
+                    </button>
+                </div>
+                <div id="filtered-content">
+                    <div class="text-center py-12">
+                        <div class="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                        <p class="text-gray-500 font-medium">Loading filtered results...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Build query parameters
+        const params = new URLSearchParams({
+            media_type: mediaType
+        });
+        
+        // Add content sources
+        if (selectedContentSources && selectedContentSources.length > 0) {
+            selectedContentSources.forEach(source => {
+                params.append('content_sources', source);
+            });
+        }
+        
+        // Add genre filters
+        if (selectedGenres && selectedGenres.length > 0) {
+            selectedGenres.forEach(genre => {
+                params.append('genres', genre);
+            });
+        }
+        if (ratingSource) {
+            params.set('rating_source', ratingSource);
+            params.set('rating_min', ratingValue);
+        }
+        
+        // Add studios filters
+        if (selectedStudios && selectedStudios.length > 0) {
+            selectedStudios.forEach(studio => {
+                params.append('studios', studio);
+            });
+        }
+        
+        // Add streaming services filters
+        if (selectedStreaming && selectedStreaming.length > 0) {
+            selectedStreaming.forEach(streaming => {
+                params.append('streaming', streaming);
+            });
+        }
+        
+        // Fetch filtered results
+        fetch(`{{ base_url }}/discover?${params}`)
+            .then(response => response.text())
+            .then(html => {
+                const filteredContent = document.getElementById('filtered-content');
+                filteredContent.innerHTML = html;
+                
+                // Process HTMX attributes on new content
+                if (typeof htmx !== 'undefined') {
+                    htmx.process(filteredContent);
+                }
+            })
+            .catch(error => {
+                document.getElementById('filtered-content').innerHTML = `
+                    <div class="text-center py-8 text-red-600">
+                        <p>Error loading filtered results: ${error.message}</p>
+                        <button onclick="applyFilters()" class="mt-2 bg-orange-600 text-white px-4 py-2 rounded">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            });
+    }
+    
+    window.resetToCategories = function() {
+        // Reset to the original categories view
+        const searchInput = document.getElementById('search-input');
+        const searchContainer = document.getElementById('content-results');
+        const categoriesContainer = document.getElementById('categories-container');
+        const reorderButton = document.getElementById('reorder-toggle');
+        
+        // Clear search input
+        if (searchInput) {
+            searchInput.value = '';
+        }
+        
+        // Hide search results if visible
+        if (searchContainer) {
+            searchContainer.classList.add('hidden');
+        }
+        
+        // Show categories container
+        if (categoriesContainer) {
+            categoriesContainer.classList.remove('hidden');
+        }
+        
+        // Show reorder button when returning to categories
+        if (reorderButton) {
+            reorderButton.classList.remove('hidden');
+        }
+        
+        // Clear search results content
+        const searchResultsContent = document.getElementById('search-results-content');
+        if (searchResultsContent) {
+            searchResultsContent.innerHTML = '';
+        }
+        
+        // Reset the categories container to original state by reloading the page
+        // This ensures all filters and expanded states are cleared
+        window.location.href = window.location.pathname;
+    };
+});
+
+// Category expand/collapse functionality
+window.expandCategory = function(categoryId) {
+    const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
+    const allCategories = document.querySelectorAll('.category-section');
+    const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
+    
+    // Check if this category is already expanded
+    const isExpanded = categorySection.classList.contains('expanded');
+    
+    if (isExpanded) {
+        // Collapse this category
+        collapseCategory(categoryId);
+    } else {
+        // Expand this category and hide others
+        doExpandCategory(categoryId);
+    }
+};
+
+function doExpandCategory(categoryId) {
+    const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
+    const allCategories = document.querySelectorAll('.category-section');
+    const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
+    const contentDiv = document.querySelector(`#${categoryId}-content`);
+    
+    // Hide other categories
+    allCategories.forEach(section => {
+        if (section !== categorySection) {
+            section.style.display = 'none';
+        }
+    });
+    
+    // Mark this category as expanded
+    categorySection.classList.add('expanded');
+    
+    // Update button text
+    expandButton.innerHTML = '← Back to Categories';
+    
+    // Load full grid data for this category
+    const categoryParams = getCategoryParams(categoryId);
+    
+    // Show loading state
+    contentDiv.innerHTML = `
+        <div class="text-center py-12">
+            <div class="animate-spin w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p class="text-gray-500 font-medium">Loading all content...</p>
+        </div>
+    `;
+    
+    // Initialize vertical scroll view with infinite loading
+    initializeVerticalScrollView(categoryId, categoryParams, contentDiv);
+}
+
+function collapseCategory(categoryId) {
+    const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
+    const allCategories = document.querySelectorAll('.category-section');
+    const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
+    const contentDiv = document.querySelector(`#${categoryId}-content`);
+    
+    // Clean up infinite scroll observer if it exists
+    if (contentDiv.scrollObserver) {
+        contentDiv.scrollObserver.disconnect();
+        delete contentDiv.scrollObserver;
+        delete contentDiv.loadMoreItems;
+    }
+    
+    // Show all categories again
+    allCategories.forEach(section => {
+        section.style.display = 'block';
+    });
+    
+    // Mark this category as collapsed
+    categorySection.classList.remove('expanded');
+    
+    // Update button text
+    expandButton.innerHTML = 'View All →';
+    
+    // Reload horizontal scroll data
+    const categoryParams = getCategoryParams(categoryId);
+    
+    // Show loading state
+    contentDiv.innerHTML = `
+        <div class="text-center py-8">
+            <div class="animate-spin w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+            <p class="text-gray-500 text-sm">Loading...</p>
+        </div>
+    `;
+    
+    // Fetch horizontal scroll data
+    fetch(`{{ base_url }}/discover/category?${categoryParams}&limit=20`)
+        .then(response => response.text())
+        .then(html => {
+            contentDiv.innerHTML = html;
+        })
+        .catch(error => {
+            contentDiv.innerHTML = `
+                <div class="text-center py-8 text-red-600">
+                    <p>Error loading content</p>
+                </div>
+            `;
+        });
+}
+
+function getCategoryParams(categoryId) {
+    const params = new URLSearchParams();
+    
+    switch(categoryId) {
+        case 'recently-added':
+            params.set('type', 'plex');
+            params.set('sort', 'recently_added');
+            break;
+        case 'recent-requests':
+            params.set('type', 'requests');
+            params.set('sort', 'recent');
+            break;
+        case 'trending-movies':
+            params.set('type', 'movie');
+            params.set('sort', 'trending');
+            break;
+        case 'popular-movies':
+            params.set('type', 'movie');
+            params.set('sort', 'popular');
+            break;
+        case 'trending-tv':
+            params.set('type', 'tv');
+            params.set('sort', 'trending');
+            break;
+        case 'popular-tv':
+            params.set('type', 'tv');
+            params.set('sort', 'popular');
+            break;
+        case 'upcoming-movies':
+            params.set('type', 'movie');
+            params.set('sort', 'upcoming');
+            break;
+    }
+    
+    return params.toString();
+}
+
+// Vertical scroll view functionality
+function initializeVerticalScrollView(categoryId, categoryParams, contentDiv) {
+    let currentOffset = 0;
+    let isLoading = false;
+    let hasMoreItems = true;
+    const itemsPerPage = 40; // Load more items per page for better experience
+    
+    // Set up the main container for vertical scroll
+    contentDiv.innerHTML = `
+        <div class="vertical-scroll-container">
+            <div id="vertical-grid-${categoryId}" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7 gap-4"></div>
+            <div id="vertical-loading-${categoryId}" class="text-center py-8">
+                <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                <p class="text-gray-500">Loading more content...</p>
+            </div>
+            <div id="vertical-end-${categoryId}" class="text-center py-8 hidden">
+                <p class="text-gray-500">You've reached the end!</p>
+            </div>
+        </div>
+    `;
+    
+    const gridContainer = document.getElementById(`vertical-grid-${categoryId}`);
+    const loadingIndicator = document.getElementById(`vertical-loading-${categoryId}`);
+    const endIndicator = document.getElementById(`vertical-end-${categoryId}`);
+    
+    // Function to load more items
+    function loadMoreItems() {
+        if (isLoading || !hasMoreItems) return;
+        
+        isLoading = true;
+        loadingIndicator.classList.remove('hidden');
+        
+        console.log(`📖 Loading more items for ${categoryId}, offset: ${currentOffset}`);
+        
+        fetch(`{{ base_url }}/discover/category?${categoryParams}&limit=${itemsPerPage}&offset=${currentOffset}&view=grid`)
+            .then(response => response.text())
+            .then(html => {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                
+                const newItemsGrid = tempDiv.querySelector('#results-grid');
+                const newItems = newItemsGrid ? Array.from(newItemsGrid.children) : [];
+                
+                console.log(`📊 Loaded ${newItems.length} new items`);
+                
+                if (newItems.length > 0) {
+                    // Append new items to the grid
+                    newItems.forEach(item => {
+                        gridContainer.appendChild(item);
+                        // Process HTMX attributes on new content
+                        if (typeof htmx !== 'undefined') {
+                            htmx.process(item);
+                        }
+                    });
+                    
+                    currentOffset += itemsPerPage;
+                    
+                    // Check if there are more items (if we got less than requested, we're at the end)
+                    if (newItems.length < itemsPerPage) {
+                        hasMoreItems = false;
+                        endIndicator.classList.remove('hidden');
+                    }
+                } else {
+                    hasMoreItems = false;
+                    endIndicator.classList.remove('hidden');
+                }
+                
+                loadingIndicator.classList.add('hidden');
+                isLoading = false;
+            })
+            .catch(error => {
+                console.error('Error loading more items:', error);
+                loadingIndicator.innerHTML = `
+                    <div class="text-center py-4">
+                        <p class="text-red-600 mb-2">Error loading content</p>
+                        <button onclick="loadMoreItems()" class="bg-orange-600 text-white px-4 py-2 rounded text-sm">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+                isLoading = false;
+            });
+    }
+    
+    // Set up infinite scroll observer
+    const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && hasMoreItems && !isLoading) {
+            console.log('🔄 Infinite scroll triggered');
+            loadMoreItems();
+        }
+    }, {
+        rootMargin: '200px' // Trigger loading when user is 200px from the loading indicator
+    });
+    
+    observer.observe(loadingIndicator);
+    
+    // Store the observer and functions for cleanup
+    contentDiv.scrollObserver = observer;
+    contentDiv.loadMoreItems = loadMoreItems;
+    
+    // Load initial items
+    loadMoreItems();
+}
+
+// Category reordering functionality
+let reorderMode = false;
+let draggedElement = null;
+
+window.toggleReorderMode = function() {
+    reorderMode = !reorderMode;
+    const button = document.getElementById('reorder-toggle');
+    const dragHandles = document.querySelectorAll('.drag-handle');
+    const container = document.getElementById('categories-container');
+    
+    if (reorderMode) {
+        // Enter reorder mode
+        button.textContent = '✅ Save Order';
+        button.classList.remove('bg-gray-100', 'hover:bg-gray-200', 'text-gray-700');
+        button.classList.add('bg-green-600', 'hover:bg-green-700', 'text-white');
+        
+        // Show drag handles
+        dragHandles.forEach(handle => handle.classList.remove('hidden'));
+        
+        // Add remove buttons to categories
+        window.addRemoveButtons();
+        
+        // Make sections draggable
+        const sections = container.querySelectorAll('.category-section');
+        sections.forEach(section => {
+            section.draggable = true;
+            section.classList.add('transition-transform', 'hover:scale-105');
+            section.addEventListener('dragstart', handleDragStart);
+            section.addEventListener('dragover', handleDragOver);
+            section.addEventListener('drop', handleDrop);
+            section.addEventListener('dragend', handleDragEnd);
+        });
+        
+        // Add dragover to container for auto-scroll in empty areas
+        container.addEventListener('dragover', handleContainerDragOver);
+        
+        container.classList.add('reorder-mode');
+        
+    } else {
+        // Exit reorder mode and save
+        button.textContent = '📝 Reorder Categories';
+        button.classList.remove('bg-green-600', 'hover:bg-green-700', 'text-white');
+        button.classList.add('bg-gray-100', 'hover:bg-gray-200', 'text-gray-700');
+        
+        // Hide drag handles
+        dragHandles.forEach(handle => handle.classList.add('hidden'));
+        
+        // Remove category management buttons
+        window.removeManagementButtons();
+        
+        // Make sections non-draggable
+        const sections = container.querySelectorAll('.category-section');
+        sections.forEach(section => {
+            section.draggable = false;
+            section.classList.remove('transition-transform', 'hover:scale-105');
+            section.removeEventListener('dragstart', handleDragStart);
+            section.removeEventListener('dragover', handleDragOver);
+            section.removeEventListener('drop', handleDrop);
+            section.removeEventListener('dragend', handleDragEnd);
+        });
+        
+        // Remove container dragover listener
+        container.removeEventListener('dragover', handleContainerDragOver);
+        
+        container.classList.remove('reorder-mode');
+        
+        // Save the new order
+        window.saveCategoryOrder();
+    }
+};
+
+// Category management functions
+window.addRemoveButtons = function() {
+    const sections = document.querySelectorAll('.category-section');
+    sections.forEach(section => {
+        // Don't add remove button if already exists
+        if (section.querySelector('.remove-category-btn')) return;
+        
+        const header = section.querySelector('h2');
+        if (header) {
+            // Create remove button
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-category-btn ml-3 text-red-600 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition-colors';
+            removeBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            `;
+            removeBtn.onclick = () => removeCategory(section);
+            removeBtn.title = 'Remove category';
+            
+            header.appendChild(removeBtn);
+        }
+    });
+    
+    // Add "Add Category" button at the end
+    window.addCategoryAddButton();
+}
+
+window.removeManagementButtons = function() {
+    // Remove all remove buttons
+    document.querySelectorAll('.remove-category-btn').forEach(btn => btn.remove());
+    
+    // Remove add category button
+    const addBtn = document.getElementById('add-category-section');
+    if (addBtn) addBtn.remove();
+}
+
+window.addCategoryAddButton = function() {
+    const container = document.getElementById('categories-container');
+    
+    // Don't add if already exists
+    if (document.getElementById('add-category-section')) return;
+    
+    const addSection = document.createElement('div');
+    addSection.id = 'add-category-section';
+    addSection.className = 'border-2 border-dashed border-gray-300 rounded-lg p-8 text-center';
+    addSection.innerHTML = `
+        <button onclick="showAddCategoryModal()" class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+            </svg>
+            Add Category
+        </button>
+    `;
+    
+    container.appendChild(addSection);
+}
+
+function removeCategory(section) {
+    const categoryName = section.querySelector('h2').textContent.trim();
+    
+    if (confirm(`Are you sure you want to remove the "${categoryName}" category? You can add it back later.`)) {
+        section.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        section.style.opacity = '0';
+        section.style.transform = 'scale(0.95)';
+        
+        setTimeout(() => {
+            section.remove();
+        }, 300);
+    }
+}
+
+const availableCategories = [
+    { id: 'recently-added', name: 'Recently Added to Plex', icon: 'plus', color: 'green' },
+    { id: 'recent-requests', name: 'Recent Requests', icon: 'clock', color: 'purple' },
+    { id: 'trending-movies', name: 'Trending Movies', icon: 'trending-up', color: 'red' },
+    { id: 'popular-movies', name: 'Popular Movies', icon: 'star', color: 'yellow' },
+    { id: 'trending-tv', name: 'Trending TV Shows', icon: 'trending-up', color: 'purple' },
+    { id: 'popular-tv', name: 'Popular TV Shows', icon: 'star', color: 'indigo' },
+    { id: 'upcoming-movies', name: 'Upcoming Movies', icon: 'calendar', color: 'blue' }
+];
+
+function showAddCategoryModal() {
+    // Get currently visible categories
+    const currentCategories = Array.from(document.querySelectorAll('.category-section'))
+        .map(section => section.getAttribute('data-category'))
+        .filter(cat => cat); // Remove nulls
+    
+    // Filter available categories to show only hidden ones
+    const hiddenCategories = availableCategories.filter(cat => 
+        !currentCategories.includes(cat.id)
+    );
+    
+    if (hiddenCategories.length === 0) {
+        alert('All categories are already visible!');
+        return;
+    }
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold mb-4">Add Category</h3>
+            <div class="space-y-2 max-h-60 overflow-y-auto">
+                ${hiddenCategories.map(cat => `
+                    <button onclick="addCategory('${cat.id}'); closeModal()" 
+                            class="w-full text-left p-3 rounded-md hover:bg-gray-50 border border-gray-200 transition-colors">
+                        <div class="font-medium">${cat.name}</div>
+                        <div class="text-sm text-gray-500">Click to add this category</div>
+                    </button>
+                `).join('')}
+            </div>
+            <div class="mt-6 flex justify-end">
+                <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+            </div>
+        </div>
+    `;
+    
+    // Add close modal function to window
+    window.closeModal = () => {
+        modal.remove();
+        delete window.closeModal;
+    };
+    
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            window.closeModal();
+        }
+    });
+    
+    document.body.appendChild(modal);
+}
+
+function addCategory(categoryId) {
+    const categoryConfig = availableCategories.find(cat => cat.id === categoryId);
+    if (!categoryConfig) return;
+    
+    const container = document.getElementById('categories-container');
+    const addButton = document.getElementById('add-category-section');
+    
+    // Create the category section HTML
+    const categoryHtml = createCategoryHTML(categoryConfig);
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = categoryHtml;
+    const newSection = tempDiv.firstElementChild;
+    
+    // Insert before the add button
+    container.insertBefore(newSection, addButton);
+    
+    // Process HTMX attributes for the new section
+    if (typeof htmx !== 'undefined') {
+        htmx.process(newSection);
+    }
+    
+    // Add drag functionality if in reorder mode
+    if (reorderMode) {
+        newSection.draggable = true;
+        newSection.classList.add('transition-transform', 'hover:scale-105');
+        newSection.addEventListener('dragstart', handleDragStart);
+        newSection.addEventListener('dragover', handleDragOver);
+        newSection.addEventListener('drop', handleDrop);
+        newSection.addEventListener('dragend', handleDragEnd);
+        
+        // Add remove button
+        const header = newSection.querySelector('h2');
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-category-btn ml-3 text-red-600 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition-colors';
+        removeBtn.innerHTML = `
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+        `;
+        removeBtn.onclick = () => removeCategory(newSection);
+        removeBtn.title = 'Remove category';
+        header.appendChild(removeBtn);
+    }
+    
+    // Animate in
+    newSection.style.opacity = '0';
+    newSection.style.transform = 'scale(0.95)';
+    newSection.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+    
+    setTimeout(() => {
+        newSection.style.opacity = '1';
+        newSection.style.transform = 'scale(1)';
+    }, 50);
+}
+
+function createCategoryHTML(categoryConfig) {
+    const iconPaths = {
+        'plus': 'M12 6v6m0 0v6m0-6h6m-6 0H6',
+        'clock': 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+        'trending-up': 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6',
+        'star': 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z',
+        'calendar': 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'
+    };
+    
+    const colorClasses = {
+        'green': 'text-green-600',
+        'purple': 'text-purple-600', 
+        'red': 'text-red-600',
+        'yellow': 'text-yellow-600',
+        'indigo': 'text-indigo-600',
+        'blue': 'text-blue-600'
+    };
+    
+    const endpoint = getEndpointForCategory(categoryConfig.id);
+    
+    return `
+        <div class="category-section" data-category="${categoryConfig.id}" data-order="99">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <div class="drag-handle hidden mr-3 cursor-move">
+                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                        </svg>
+                    </div>
+                    <svg class="w-5 h-5 ${colorClasses[categoryConfig.color]} mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPaths[categoryConfig.icon]}"></path>
+                    </svg>
+                    ${categoryConfig.name}
+                </h2>
+                <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('${categoryConfig.id}')">
+                    View All →
+                </button>
+            </div>
+            <div class="relative">
+                <div class="horizontal-scroll" 
+                     hx-get="${endpoint}"
+                     hx-trigger="load"
+                     hx-target="this">
+                    <div class="text-center py-8">
+                        <div class="animate-spin w-5 h-5 border-2 border-${categoryConfig.color}-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                        <p class="text-gray-500 text-sm">Loading ${categoryConfig.name.toLowerCase()}...</p>
+                    </div>
+                </div>
+                
+                <button class="scroll-arrow scroll-arrow-left hidden" onclick="scrollCategory('${categoryConfig.id}', 'left')">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                    </svg>
+                </button>
+                
+                <button class="scroll-arrow scroll-arrow-right hidden" onclick="scrollCategory('${categoryConfig.id}', 'right')">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function getEndpointForCategory(categoryId) {
+    const endpointMap = {
+        'recently-added': '/discover/category?type=plex&sort=recently_added&limit=20',
+        'recent-requests': '/discover/category?type=requests&sort=recent&limit=20',
+        'trending-movies': '/discover/category?type=movie&sort=trending&limit=20',
+        'popular-movies': '/discover/category?type=movie&sort=popular&limit=20',
+        'trending-tv': '/discover/category?type=tv&sort=trending&limit=20',
+        'popular-tv': '/discover/category?type=tv&sort=popular&limit=20',
+        'upcoming-movies': '/discover/category?type=movie&sort=upcoming&limit=20'
+    };
+    
+    return endpointMap[categoryId] || '/discover/category?type=movie&sort=popular&limit=20';
+}
+
+function handleDragStart(e) {
+    draggedElement = this;
+    this.style.opacity = '0.5';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.outerHTML);
+    
+    // Start auto-scroll monitoring
+    startAutoScroll();
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    
+    // Handle auto-scrolling based on mouse position
+    handleAutoScroll(e.clientY);
+    
+    const rect = this.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    
+    if (e.clientY < midY) {
+        this.style.borderTop = '3px solid #f59e0b';
+        this.style.borderBottom = '';
+    } else {
+        this.style.borderBottom = '3px solid #f59e0b';
+        this.style.borderTop = '';
+    }
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    
+    if (this !== draggedElement) {
+        const rect = this.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        
+        if (e.clientY < midY) {
+            this.parentNode.insertBefore(draggedElement, this);
+        } else {
+            this.parentNode.insertBefore(draggedElement, this.nextSibling);
+        }
+    }
+    
+    this.style.borderTop = '';
+    this.style.borderBottom = '';
+}
+
+function handleDragEnd(e) {
+    this.style.opacity = '';
+    
+    // Stop auto-scrolling
+    stopAutoScroll();
+    
+    const sections = document.querySelectorAll('.category-section');
+    sections.forEach(section => {
+        section.style.borderTop = '';
+        section.style.borderBottom = '';
+    });
+}
+
+function handleContainerDragOver(e) {
+    e.preventDefault();
+    
+    // Handle auto-scrolling when dragging over empty areas of container
+    handleAutoScroll(e.clientY);
+}
+
+window.saveCategoryOrder = function() {
+    const sections = document.querySelectorAll('.category-section');
+    const order = Array.from(sections).map((section, index) => ({
+        category: section.getAttribute('data-category'),
+        order: index + 1
+    }));
+    
+    // Save to localStorage
+    localStorage.setItem('categoryOrder', JSON.stringify(order));
+    
+    // Show success message
+    showToast('Category order saved!', 'success');
+    
+    console.log('Category order saved:', order);
+}
+
+function loadCategoryOrder() {
+    const savedOrder = localStorage.getItem('categoryOrder');
+    if (!savedOrder) return;
+    
+    try {
+        const order = JSON.parse(savedOrder);
+        const container = document.getElementById('categories-container');
+        const sections = Array.from(container.querySelectorAll('.category-section'));
+        
+        // Sort sections according to saved order
+        const sortedSections = sections.sort((a, b) => {
+            const aCategory = a.getAttribute('data-category');
+            const bCategory = b.getAttribute('data-category');
+            
+            const aOrder = order.find(item => item.category === aCategory)?.order || 999;
+            const bOrder = order.find(item => item.category === bCategory)?.order || 999;
+            
+            return aOrder - bOrder;
+        });
+        
+        // Reorder in DOM
+        sortedSections.forEach(section => {
+            container.appendChild(section);
+        });
+        
+        console.log('Category order loaded:', order);
+    } catch (e) {
+        console.error('Error loading category order:', e);
+    }
+}
+
+// Auto-scroll functionality for drag and drop
+let autoScrollInterval = null;
+let currentMouseY = null;
+let isAutoScrolling = false;
+
+function startAutoScroll() {
+    if (autoScrollInterval) return; // Already running
+    
+    autoScrollInterval = setInterval(() => {
+        if (currentMouseY !== null && isAutoScrolling) {
+            performAutoScroll(currentMouseY);
+        }
+    }, 16); // ~60fps for smooth scrolling
+}
+
+function stopAutoScroll() {
+    if (autoScrollInterval) {
+        clearInterval(autoScrollInterval);
+        autoScrollInterval = null;
+    }
+    currentMouseY = null;
+    isAutoScrolling = false;
+}
+
+function handleAutoScroll(mouseY) {
+    currentMouseY = mouseY;
+    
+    const scrollZone = 120; // Increased scroll zone for better UX
+    const viewportHeight = window.innerHeight;
+    
+    // Check if we should start auto-scrolling
+    const shouldScroll = (mouseY < scrollZone) || (mouseY > viewportHeight - scrollZone);
+    
+    if (shouldScroll && !isAutoScrolling) {
+        isAutoScrolling = true;
+        startAutoScroll();
+    } else if (!shouldScroll && isAutoScrolling) {
+        isAutoScrolling = false;
+    }
+}
+
+function performAutoScroll(mouseY) {
+    const scrollZone = 120;
+    const maxScrollSpeed = 12; // Maximum pixels per scroll step
+    const viewportHeight = window.innerHeight;
+    
+    // Check if mouse is near top of viewport
+    if (mouseY < scrollZone) {
+        const scrollIntensity = Math.min(1, (scrollZone - mouseY) / scrollZone);
+        const scrollAmount = -maxScrollSpeed * scrollIntensity;
+        
+        // Apply easing for smoother scrolling
+        const easedScroll = scrollAmount * (1 + scrollIntensity * 0.5);
+        window.scrollBy(0, easedScroll);
+    }
+    // Check if mouse is near bottom of viewport
+    else if (mouseY > viewportHeight - scrollZone) {
+        const scrollIntensity = Math.min(1, (mouseY - (viewportHeight - scrollZone)) / scrollZone);
+        const scrollAmount = maxScrollSpeed * scrollIntensity;
+        
+        // Apply easing for smoother scrolling
+        const easedScroll = scrollAmount * (1 + scrollIntensity * 0.5);
+        window.scrollBy(0, easedScroll);
+    }
+}
+
+// Rating filter functionality
+function updateRatingFilter() {
+    const ratingSource = document.getElementById('rating-source').value;
+    const ratingContainer = document.getElementById('rating-range-container');
+    const ratingLabel = document.getElementById('rating-label');
+    const ratingHelp = document.getElementById('rating-help');
+    const minLabel = document.getElementById('min-label');
+    const maxLabel = document.getElementById('max-label');
+    const ratingRange = document.getElementById('rating-range');
+    
+    if (ratingSource === '') {
+        ratingContainer.classList.add('hidden');
+        return;
+    }
+    
+    ratingContainer.classList.remove('hidden');
+    
+    // Update labels and ranges based on source
+    switch (ratingSource) {
+        case 'tmdb':
+            ratingLabel.textContent = 'Minimum TMDB Score';
+            ratingHelp.textContent = 'TMDB scores range from 0-10 based on user votes';
+            minLabel.textContent = '0';
+            maxLabel.textContent = '10';
+            ratingRange.min = '0';
+            ratingRange.max = '10';
+            ratingRange.step = '0.5';
+            ratingRange.value = '7.0';
+            break;
+            
+        case 'imdb':
+            ratingLabel.textContent = 'Minimum IMDb Rating';
+            ratingHelp.textContent = 'IMDb ratings range from 1-10 based on user votes';
+            minLabel.textContent = '1';
+            maxLabel.textContent = '10';
+            ratingRange.min = '1';
+            ratingRange.max = '10';
+            ratingRange.step = '0.1';
+            ratingRange.value = '7.0';
+            break;
+            
+        case 'rt':
+            ratingLabel.textContent = 'Minimum RT Score';
+            ratingHelp.textContent = 'Rotten Tomatoes scores range from 0-100%';
+            minLabel.textContent = '0%';
+            maxLabel.textContent = '100%';
+            ratingRange.min = '0';
+            ratingRange.max = '100';
+            ratingRange.step = '5';
+            ratingRange.value = '70';
+            break;
+    }
+    
+    updateRatingValue();
+}
+
+function updateRatingValue() {
+    const ratingSource = document.getElementById('rating-source').value;
+    const ratingRange = document.getElementById('rating-range');
+    const ratingValue = document.getElementById('rating-value');
+    
+    let displayValue = ratingRange.value;
+    
+    switch (ratingSource) {
+        case 'tmdb':
+        case 'imdb':
+            displayValue = parseFloat(ratingRange.value).toFixed(1);
+            break;
+        case 'rt':
+            displayValue = ratingRange.value + '%';
+            break;
+    }
+    
+    ratingValue.textContent = displayValue;
+}
+
+// Enhanced filter management
+function updateActiveFiltersDisplay(mediaType, sortBy, selectedGenres, ratingSource, ratingValue, selectedStudios, selectedStreaming) {
+    const activeFiltersContainer = document.getElementById('active-filters');
+    const activeFiltersList = document.getElementById('active-filters-list');
+    const filterChips = [];
+    
+    // Add genre filters
+    selectedGenres.forEach(genreId => {
+        const genreLabel = document.querySelector(`input[name="genres"][value="${genreId}"]`).closest('label').textContent.trim();
+        filterChips.push({ type: 'genre', value: genreId, display: genreLabel });
+    });
+    
+    // Add rating filter
+    if (ratingSource && ratingValue) {
+        const ratingDisplay = `${ratingSource.toUpperCase()} ${ratingValue}+`;
+        filterChips.push({ type: 'rating', value: `${ratingSource}:${ratingValue}`, display: ratingDisplay });
+    }
+    
+    // Add studio filters
+    selectedStudios.forEach(studioId => {
+        const studioLabel = document.querySelector(`input[name="studios"][value="${studioId}"]`).closest('label').textContent.trim();
+        filterChips.push({ type: 'studio', value: studioId, display: studioLabel });
+    });
+    
+    // Add streaming filters
+    selectedStreaming.forEach(streamingId => {
+        const streamingLabel = document.querySelector(`input[name="streaming"][value="${streamingId}"]`).closest('label').textContent.trim();
+        filterChips.push({ type: 'streaming', value: streamingId, display: streamingLabel });
+    });
+    
+    // Update display
+    if (filterChips.length > 0) {
+        activeFiltersList.innerHTML = filterChips.map(chip => `
+            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                ${chip.display}
+                <button type="button" onclick="removeFilter('${chip.type}', '${chip.value}')" class="ml-1 text-orange-600 hover:text-orange-800">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </span>
+        `).join('');
+        activeFiltersContainer.classList.remove('hidden');
+    } else {
+        activeFiltersContainer.classList.add('hidden');
+    }
+}
+
+function removeFilter(type, value) {
+    switch (type) {
+        case 'genre':
+            document.querySelector(`input[name="genres"][value="${value}"]`).checked = false;
+            break;
+        case 'rating':
+            document.getElementById('rating-source').value = '';
+            document.getElementById('rating-range-container').classList.add('hidden');
+            break;
+        case 'studio':
+            document.querySelector(`input[name="studios"][value="${value}"]`).checked = false;
+            break;
+        case 'streaming':
+            document.querySelector(`input[name="streaming"][value="${value}"]`).checked = false;
+            break;
+    }
+    updateFilterClearButtons();
+    applyFilters();
+}
+
+function clearStudios() {
+    document.querySelectorAll('input[name="studios"]:checked').forEach(cb => cb.checked = false);
+    updateFilterClearButtons();
+    applyFilters();
+}
+
+function clearStreaming() {
+    document.querySelectorAll('input[name="streaming"]:checked').forEach(cb => cb.checked = false);
+    updateFilterClearButtons();
+    applyFilters();
+}
+
+function clearGenres() {
+    document.querySelectorAll('input[name="genres"]:checked').forEach(cb => cb.checked = false);
+    updateFilterClearButtons();
+    applyFilters();
+}
+
+function clearContentSources() {
+    document.querySelectorAll('input[name="content-sources"]:checked').forEach(cb => cb.checked = false);
+    // Re-check "All Sources" as default
+    document.getElementById('sources-all').checked = true;
+    document.querySelectorAll('input[name="content-sources"]:not(#sources-all)').forEach(cb => cb.checked = true);
+    updateFilterClearButtons();
+    applyFilters();
+}
+
+function clearAllFilters() {
+    document.getElementById('media-type').value = 'mixed';
+    // Reset content sources to all selected
+    document.querySelectorAll('input[name="content-sources"]').forEach(cb => cb.checked = true);
+    document.querySelectorAll('input[name="genres"]:checked').forEach(cb => cb.checked = false);
+    document.getElementById('rating-source').value = '';
+    document.getElementById('rating-range-container').classList.add('hidden');
+    document.querySelectorAll('input[name="studios"]:checked').forEach(cb => cb.checked = false);
+    document.querySelectorAll('input[name="streaming"]:checked').forEach(cb => cb.checked = false);
+    updateFilterClearButtons();
+    applyFilters();
+}
+
+function updateFilterClearButtons() {
+    // Show/hide clear buttons based on selections
+    const genresSelected = document.querySelectorAll('input[name="genres"]:checked').length > 0;
+    document.getElementById('clear-genres').style.display = genresSelected ? 'inline' : 'none';
+    
+    const studiosSelected = document.querySelectorAll('input[name="studios"]:checked').length > 0;
+    document.getElementById('clear-studios').style.display = studiosSelected ? 'inline' : 'none';
+    
+    const streamingSelected = document.querySelectorAll('input[name="streaming"]:checked').length > 0;
+    document.getElementById('clear-streaming').style.display = streamingSelected ? 'inline' : 'none';
+}
+
+// Set up filter change listeners
+document.addEventListener('DOMContentLoaded', function() {
+    // Add listeners for genre checkboxes
+    document.querySelectorAll('input[name="genres"]').forEach(cb => {
+        cb.addEventListener('change', updateFilterClearButtons);
+    });
+    
+    // Add listeners for studios checkboxes
+    document.querySelectorAll('input[name="studios"]').forEach(cb => {
+        cb.addEventListener('change', updateFilterClearButtons);
+    });
+    
+    // Add listeners for streaming checkboxes
+    document.querySelectorAll('input[name="streaming"]').forEach(cb => {
+        cb.addEventListener('change', updateFilterClearButtons);
+    });
+});
+
+// Category scrolling functionality
+function scrollCategory(button, direction) {
+    console.log('scrollCategory called:', direction, button);
+    
+    const targetId = button.getAttribute('data-target');
+    const container = document.getElementById(targetId);
+    
+    if (!container) {
+        console.error('Container not found:', targetId);
+        return;
+    }
+    
+    const scrollAmount = 320; // Scroll by ~2 card widths (160px per card + 16px margin)
+    const currentScroll = container.scrollLeft;
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    
+    console.log('Scroll info:', {
+        currentScroll,
+        maxScroll,
+        scrollWidth: container.scrollWidth,
+        clientWidth: container.clientWidth,
+        direction,
+        scrollAmount
+    });
+    
+    let newScroll;
+    if (direction === 'left') {
+        newScroll = Math.max(0, currentScroll - scrollAmount);
+    } else {
+        newScroll = Math.min(maxScroll, currentScroll + scrollAmount);
+    }
+    
+    console.log('New scroll position:', newScroll);
+    
+    // Smooth scroll animation
+    container.scrollTo({
+        left: newScroll,
+        behavior: 'smooth'
+    });
+    
+    // Update arrow states immediately and after animation
+    setTimeout(() => updateScrollArrows(container), 50);
+    setTimeout(() => updateScrollArrows(container), 500);
+}
+
+// Update arrow opacity based on scroll position
+function updateScrollArrows(container) {
+    const targetId = container.id;
+    const leftArrow = document.querySelector(`button[data-target="${targetId}"].scroll-left`);
+    const rightArrow = document.querySelector(`button[data-target="${targetId}"].scroll-right`);
+    
+    if (!leftArrow || !rightArrow) {
+        console.log('Arrows not found for:', targetId);
+        return;
+    }
+    
+    const scrollLeft = container.scrollLeft;
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    
+    console.log('Updating arrows for:', targetId, {
+        scrollLeft,
+        maxScroll,
+        scrollWidth: container.scrollWidth,
+        clientWidth: container.clientWidth,
+        hasScrollableContent: maxScroll > 10
+    });
+    
+    // Check if there's actually scrollable content
+    const hasScrollableContent = maxScroll > 10;
+    
+    if (!hasScrollableContent) {
+        // No scrollable content - disable both arrows
+        leftArrow.disabled = true;
+        rightArrow.disabled = true;
+        leftArrow.style.opacity = '0.1';
+        rightArrow.style.opacity = '0.1';
+        console.log('No scrollable content, disabling arrows');
+        return;
+    }
+    
+    // Update left arrow
+    if (scrollLeft <= 5) {
+        leftArrow.disabled = true;
+        leftArrow.style.opacity = '0.1';
+    } else {
+        leftArrow.disabled = false;
+        leftArrow.style.opacity = '0.3';
+    }
+    
+    // Update right arrow  
+    if (scrollLeft >= maxScroll - 5) {
+        rightArrow.disabled = true;
+        rightArrow.style.opacity = '0.1';
+    } else {
+        rightArrow.disabled = false;
+        rightArrow.style.opacity = '0.3';
+    }
+    
+    console.log('Arrow states updated:', {
+        leftDisabled: leftArrow.disabled,
+        rightDisabled: rightArrow.disabled
+    });
+}
+
+// Initialize scroll arrows when categories load
+function initScrollArrows() {
+    const containers = document.querySelectorAll('.horizontal-scroll');
+    
+    containers.forEach(container => {
+        console.log('Initializing arrows for container:', container.id);
+        
+        // Set up scroll event listener for arrow updates
+        container.addEventListener('scroll', () => updateScrollArrows(container));
+        
+        // Initial arrow state with multiple delays to catch content loading
+        setTimeout(() => updateScrollArrows(container), 100);
+        setTimeout(() => updateScrollArrows(container), 500);
+        setTimeout(() => updateScrollArrows(container), 1000);
+        setTimeout(() => updateScrollArrows(container), 2000);
+        
+        // Set up mutation observer to detect when content changes
+        const mutationObserver = new MutationObserver(() => {
+            console.log('Content changed in:', container.id);
+            setTimeout(() => updateScrollArrows(container), 100);
+            setTimeout(() => updateScrollArrows(container), 500);
+        });
+        mutationObserver.observe(container, { 
+            childList: true, 
+            subtree: true 
+        });
+        
+        // Set up resize observer to update arrows when content loads via HTMX
+        const resizeObserver = new ResizeObserver(() => {
+            console.log('Container resized:', container.id);
+            setTimeout(() => updateScrollArrows(container), 100);
+        });
+        resizeObserver.observe(container);
+    });
+}
+
+// Set up HTMX event listeners
+document.body.addEventListener('htmx:afterRequest', function(event) {
+    console.log('HTMX request completed, reinitializing arrows');
+    setTimeout(() => {
+        initScrollArrows();
+        // Also manually update all arrows
+        document.querySelectorAll('.horizontal-scroll').forEach(container => {
+            updateScrollArrows(container);
+        });
+    }, 200);
+});
+
+document.body.addEventListener('htmx:afterSettle', function(event) {
+    console.log('HTMX settled, updating arrows');
+    setTimeout(() => {
+        document.querySelectorAll('.horizontal-scroll').forEach(container => {
+            updateScrollArrows(container);
+        });
+    }, 100);
+});
+
+// Global function to force update all arrows (for debugging)
+window.forceUpdateArrows = function() {
+    console.log('Forcing arrow updates...');
+    document.querySelectorAll('.horizontal-scroll').forEach(container => {
+        console.log('Updating arrows for:', container.id);
+        updateScrollArrows(container);
+    });
+};
+
+// Load saved category order when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(loadCategoryOrder, 100); // Small delay to ensure DOM is ready
+    setTimeout(initScrollArrows, 1000); // Initialize arrows after content loads
+    
+    // Also set up a periodic check for arrow states during development
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        setInterval(() => {
+            document.querySelectorAll('.horizontal-scroll').forEach(container => {
+                if (container.children.length > 0) {
+                    updateScrollArrows(container);
+                }
+            });
+        }, 3000);
+    }
+});
+</script>
+
+<style>
+.reorder-mode .category-section {
+    cursor: move;
+    border: 2px dashed transparent;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.reorder-mode .category-section:hover {
+    border-color: #d1d5db;
+    background: rgba(255, 255, 255, 1);
+}
+
+/* Category scroll wrapper */
+.category-scroll-wrapper {
+    gap: 0;
+}
+
+/* Scroll arrow styling */
+.scroll-arrow {
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+    padding: 6px;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.scroll-arrow:hover {
+    background: rgba(255, 255, 255, 1);
+    transform: scale(1.1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.scroll-arrow:active {
+    transform: scale(0.9);
+}
+
+.scroll-arrow:disabled {
+    opacity: 0.2 !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+    pointer-events: none;
+}
+
+.scroll-arrow:not(:disabled) {
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.scroll-arrow svg {
+    transition: all 0.2s ease;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.scroll-arrow:hover:not(:disabled) svg {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    /* Keep arrows but make them smaller on mobile */
+    .scroll-arrow {
+        padding: 4px;
+    }
+    
+    .scroll-arrow svg {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+    
+    /* Reduce arrow space on mobile */
+    .category-scroll-wrapper .flex-shrink-0 {
+        width: 2.5rem;
+    }
+    
+    /* Adjust category headers for mobile */
+    .category-section h2 {
+        font-size: 1rem;
+    }
+    
+    .category-section h2 svg {
+        width: 1rem;
+        height: 1rem;
+    }
+    
+    /* Adjust card sizing for mobile */
+    .movie-card-horizontal {
+        width: 140px;
+        margin-right: 12px;
+    }
+    
+    /* Adjust horizontal scrolling for touch */
+    .horizontal-scroll {
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x mandatory;
+    }
+    
+    .movie-card-horizontal {
+        scroll-snap-align: start;
+    }
+    
+    /* Make buttons more touch-friendly */
+    .category-section button {
+        min-height: 44px;
+        padding: 8px 12px;
+    }
+}
+
+/* Small mobile screens */
+@media (max-width: 480px) {
+    /* Hide arrows on very small screens */
+    .scroll-arrow {
+        display: none;
+    }
+    
+    .movie-card-horizontal {
+        width: 120px;
+        margin-right: 8px;
+    }
+    
+    .category-section h2 {
+        font-size: 0.875rem;
+    }
+    
+    /* Stack category header elements on very small screens */
+    .category-section .flex.items-center.justify-between {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .category-section .flex.items-center.space-x-2 {
+        align-self: flex-end;
+    }
+}
+
+/* Improved horizontal scroll styling */
+.horizontal-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.horizontal-scroll::-webkit-scrollbar {
+    height: 4px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb {
+    background: rgba(156, 163, 175, 0.5);
+    border-radius: 2px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(156, 163, 175, 0.8);
+}
+</style>
+
+{% endblock %}

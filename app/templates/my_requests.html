@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}My Requests - Stout Requests{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">My Requests</h1>
+            <a href="{{ base_url }}/" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                Search More Content
+            </a>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="border-b border-gray-200 mb-6">
+            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                <button onclick="showTab('all')" id="tab-all" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    All Requests
+                    <span id="count-all" class="ml-2 bg-gray-100 text-gray-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                </button>
+                <button onclick="showTab('movies')" id="tab-movies" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    🎬 Movies
+                    <span id="count-movies" class="ml-2 bg-blue-100 text-blue-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                </button>
+                <button onclick="showTab('tv')" id="tab-tv" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    📺 TV Shows
+                    <span id="count-tv" class="ml-2 bg-green-100 text-green-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                </button>
+            </nav>
+        </div>
+
+        {% if requests %}
+        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {% for request in requests %}
+            <div class="request-item bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-200" data-media-type="{{ request.media_type.value }}">
+                <div class="flex h-32">
+                    <!-- Poster -->
+                    <div class="flex-shrink-0 w-20">
+                        <a href="{{ base_url }}/media/{{ request.media_type.value }}/{{ request.tmdb_id }}" class="block w-full h-full">
+                            {% if request.poster_path %}
+                            <img 
+                                src="https://image.tmdb.org/t/p/w185{{ request.poster_path }}" 
+                                alt="{{ request.title }}"
+                                class="w-full h-full object-cover"
+                            >
+                            {% else %}
+                            <div class="w-full h-full bg-gray-200 flex items-center justify-center">
+                                <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                            </div>
+                            {% endif %}
+                        </a>
+                    </div>
+                    
+                    <!-- Content -->
+                    <div class="flex-1 p-4 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-start justify-between">
+                                <div class="flex-1 min-w-0">
+                                    <h3 class="text-sm font-semibold text-gray-900 truncate">{{ request.title }}</h3>
+                                    <div class="flex items-center space-x-2 mt-1">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                                            {% if request.media_type.value == 'movie' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
+                                            {{ '🎬' if request.media_type.value == 'movie' else '📺' }}
+                                        </span>
+                                        <span class="text-xs text-gray-500">{{ request.release_date[:4] if request.release_date else '' }}</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Status Badge -->
+                                <div class="ml-2 flex-shrink-0">
+                                    {% if request.status.value == 'pending' %}
+                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                        ⏳ Pending
+                                    </span>
+                                    {% elif request.status.value == 'approved' %}
+                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        ✓ Approved
+                                    </span>
+                                    {% elif request.status.value == 'available' %}
+                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                        ✓ Available
+                                    </span>
+                                    {% elif request.status.value == 'downloading' %}
+                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                        ⬇ Downloading
+                                    </span>
+                                    {% elif request.status.value == 'rejected' %}
+                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                        ✗ Rejected
+                                    </span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <!-- Overview -->
+                            {% if request.overview %}
+                            <p class="text-xs text-gray-600 mt-2 line-clamp-2">{{ request.overview[:120] }}{% if request.overview|length > 120 %}...{% endif %}</p>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Bottom info -->
+                        <div class="flex items-center justify-between mt-2">
+                            <span class="text-xs text-gray-500">{{ request.created_at.strftime('%b %d, %Y') }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-12">
+            <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+            </svg>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">No requests yet</h3>
+            <p class="text-gray-500 mb-4">You haven't requested any content yet.</p>
+            <a href="{{ base_url }}/" class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg text-sm font-medium">
+                Search for Content
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// Tab functionality for request filtering
+let currentTab = 'all';
+
+function showTab(tabName) {
+    console.log('Switching to tab:', tabName);
+    currentTab = tabName;
+    
+    // Update tab styling
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.classList.remove('border-orange-500', 'text-orange-600');
+        button.classList.add('border-transparent', 'text-gray-500');
+    });
+    
+    const activeTab = document.getElementById(`tab-${tabName}`);
+    if (activeTab) {
+        activeTab.classList.remove('border-transparent', 'text-gray-500');
+        activeTab.classList.add('border-orange-500', 'text-orange-600');
+    }
+    
+    // Filter request items
+    const requestItems = document.querySelectorAll('.request-item');
+    requestItems.forEach(item => {
+        const mediaType = item.getAttribute('data-media-type');
+        
+        if (tabName === 'all') {
+            item.style.display = 'block';
+        } else if (tabName === 'movies' && mediaType === 'movie') {
+            item.style.display = 'block';
+        } else if (tabName === 'tv' && mediaType === 'tv') {
+            item.style.display = 'block';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    // Update counts
+    updateCounts();
+}
+
+function updateCounts() {
+    const allItems = document.querySelectorAll('.request-item');
+    const movieItems = document.querySelectorAll('.request-item[data-media-type="movie"]');
+    const tvItems = document.querySelectorAll('.request-item[data-media-type="tv"]');
+    
+    // Update count badges
+    const countAll = document.getElementById('count-all');
+    const countMovies = document.getElementById('count-movies');
+    const countTv = document.getElementById('count-tv');
+    
+    if (countAll) countAll.textContent = allItems.length;
+    if (countMovies) countMovies.textContent = movieItems.length;
+    if (countTv) countTv.textContent = tvItems.length;
+    
+    console.log('Counts updated:', {
+        all: allItems.length,
+        movies: movieItems.length,
+        tv: tvItems.length
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initializing request tabs');
+    updateCounts();
+    showTab('all'); // Start with all requests visible
+});
+</script>
+
+<style>
+.tab-button {
+    transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+    transform: translateY(-1px);
+}
+
+.request-item {
+    transition: opacity 0.3s ease;
+}
+
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+</style>
+
+{% endblock %}

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ media.title or media.name }} - Stout Requests</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-4">{{ media.title or media.name }}</h1>
+        
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Basic Info -->
+                <div>
+                    <h2 class="text-xl font-semibold mb-4">Information</h2>
+                    <p><strong>Type:</strong> {{ 'Movie' if media_type == 'movie' else 'TV Series' }}</p>
+                    <p><strong>Rating:</strong> {{ media.vote_average or 'N/A' }}/10</p>
+                    <p><strong>Release:</strong> {{ (media.release_date or media.first_air_date)[:4] if (media.release_date or media.first_air_date) else 'N/A' }}</p>
+                    
+                    <!-- Test Rating Logo Component - STATIC VERSION -->
+                    <div class="mt-4">
+                        <h3 class="font-semibold mb-2">Rating with Logo:</h3>
+                        {% if media.vote_average %}
+                        <div class="flex items-center space-x-1" title="The Movie Database Rating">
+                            <div class="bg-blue-500 text-white px-1.5 py-0.5 rounded text-sm font-bold">
+                                TMDB
+                            </div>
+                            <span class="text-sm font-medium text-gray-700">{{ "%.1f"|format(media.vote_average) }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Poster -->
+                <div>
+                    {% if media.poster_url %}
+                    <img src="{{ media.poster_url }}" alt="{{ media.title or media.name }}" class="w-64 h-96 object-cover rounded-lg">
+                    {% else %}
+                    <div class="w-64 h-96 bg-gray-200 rounded-lg flex items-center justify-center">
+                        <span class="text-gray-500">No Poster</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Overview -->
+            {% if media.overview %}
+            <div class="mt-6">
+                <h2 class="text-xl font-semibold mb-2">Overview</h2>
+                <p class="text-gray-700">{{ media.overview }}</p>
+            </div>
+            {% endif %}
+
+            <!-- Navigation -->
+            <div class="mt-6 flex space-x-4">
+                <a href="{{ base_url }}/" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">← Back to Home</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

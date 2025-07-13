@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Stout Requests{% endblock %}</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    
+    <!-- Custom styles -->
+    <style>
+        .bg-gradient-dark {
+            background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+        }
+        .text-shadow {
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        /* Theme Variables */
+        :root {
+            --primary-50: 255, 247, 237;
+            --primary-100: 255, 237, 213;
+            --primary-200: 254, 215, 170;
+            --primary-300: 253, 186, 116;
+            --primary-400: 251, 146, 60;
+            --primary-500: 249, 115, 22;
+            --primary-600: 234, 88, 12;
+            --primary-700: 194, 65, 12;
+            --primary-800: 154, 52, 18;
+            --primary-900: 124, 45, 18;
+        }
+        
+        /* Blue Theme */
+        body.theme-blue {
+            --primary-50: 239, 246, 255;
+            --primary-100: 219, 234, 254;
+            --primary-200: 191, 219, 254;
+            --primary-300: 147, 197, 253;
+            --primary-400: 96, 165, 250;
+            --primary-500: 59, 130, 246;
+            --primary-600: 37, 99, 235;
+            --primary-700: 29, 78, 216;
+            --primary-800: 30, 64, 175;
+            --primary-900: 30, 58, 138;
+        }
+        
+        /* Green Theme */
+        body.theme-green {
+            --primary-50: 240, 253, 244;
+            --primary-100: 220, 252, 231;
+            --primary-200: 187, 247, 208;
+            --primary-300: 134, 239, 172;
+            --primary-400: 74, 222, 128;
+            --primary-500: 34, 197, 94;
+            --primary-600: 22, 163, 74;
+            --primary-700: 21, 128, 61;
+            --primary-800: 22, 101, 52;
+            --primary-900: 20, 83, 45;
+        }
+        
+        /* Purple Theme */
+        body.theme-purple {
+            --primary-50: 250, 245, 255;
+            --primary-100: 243, 232, 255;
+            --primary-200: 233, 213, 255;
+            --primary-300: 196, 181, 253;
+            --primary-400: 147, 125, 250;
+            --primary-500: 99, 102, 241;
+            --primary-600: 79, 70, 229;
+            --primary-700: 67, 56, 202;
+            --primary-800: 55, 48, 163;
+            --primary-900: 49, 46, 129;
+        }
+        
+        /* Dark Theme */
+        body.theme-dark {
+            background-color: #1f2937;
+            color: #f9fafb;
+            --primary-50: 55, 65, 81;
+            --primary-100: 75, 85, 99;
+            --primary-200: 107, 114, 128;
+            --primary-300: 156, 163, 175;
+            --primary-400: 209, 213, 219;
+            --primary-500: 229, 231, 235;
+            --primary-600: 243, 244, 246;
+            --primary-700: 249, 250, 251;
+            --primary-800: 255, 255, 255;
+            --primary-900: 255, 255, 255;
+        }
+        
+        body.theme-dark .bg-white { background-color: #374151 !important; }
+        body.theme-dark .bg-gray-50 { background-color: #4b5563 !important; }
+        body.theme-dark .bg-gray-100 { background-color: #1f2937 !important; }
+        body.theme-dark .text-gray-900 { color: #f9fafb !important; }
+        body.theme-dark .text-gray-800 { color: #e5e7eb !important; }
+        body.theme-dark .text-gray-700 { color: #d1d5db !important; }
+        body.theme-dark .text-gray-600 { color: #9ca3af !important; }
+        body.theme-dark .text-gray-500 { color: #6b7280 !important; }
+        body.theme-dark .border-gray-200 { border-color: #4b5563 !important; }
+        body.theme-dark .border-gray-300 { border-color: #6b7280 !important; }
+        
+        /* Dynamic Primary Colors */
+        .bg-primary-500 { background-color: rgb(var(--primary-500)); }
+        .bg-primary-600 { background-color: rgb(var(--primary-600)); }
+        .bg-primary-700 { background-color: rgb(var(--primary-700)); }
+        .text-primary-600 { color: rgb(var(--primary-600)); }
+        .text-primary-700 { color: rgb(var(--primary-700)); }
+        .border-primary-500 { border-color: rgb(var(--primary-500)); }
+        .ring-primary-500 { --tw-ring-color: rgb(var(--primary-500)); }
+        .focus\:ring-primary-500:focus { --tw-ring-color: rgb(var(--primary-500)); }
+        .focus\:border-primary-500:focus { border-color: rgb(var(--primary-500)); }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen {% if current_user %}flex flex-col{% endif %} {% if site_theme and site_theme != 'default' %}theme-{{ site_theme }}{% endif %}">
+    <!-- Navigation -->
+    <nav class="bg-gradient-dark shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <h1 class="text-xl font-bold text-white text-shadow">🍺 Stout Requests</h1>
+                    </div>
+                    {% if current_user %}
+                    <div class="hidden md:block">
+                        <div class="ml-10 flex items-baseline space-x-4">
+                            <a href="{{ base_url }}/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Search</a>
+                            <a href="{{ base_url }}/requests/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Requests</a>
+                            {% if current_user.is_admin %}
+                            <a href="{{ base_url }}/admin/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">⚙️ Admin</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="flex items-center">
+                    {% if current_user %}
+                    <div class="flex items-center space-x-4">
+                        <span class="text-gray-300 text-sm">Welcome, {{ current_user.full_name or current_user.username }}</span>
+                        {% if current_user.is_admin %}
+                        <span class="bg-yellow-600 text-white px-2 py-1 rounded text-xs">Admin</span>
+                        {% endif %}
+                        {% if current_user.plex_id and current_user.plex_id < 0 %}
+                        <span class="bg-purple-600 text-white px-2 py-1 rounded text-xs">Test User</span>
+                        <a href="{{ base_url }}/admin" class="bg-primary-600 hover:bg-primary-700 text-white px-2 py-1 rounded text-xs">Return to Admin</a>
+                        {% endif %}
+                        <a href="{{ base_url }}/logout" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Logout</a>
+                    </div>
+                    {% else %}
+                    <a href="{{ base_url }}/login" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Login with Plex
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="{% if current_user %}flex-1 overflow-hidden{% else %}max-w-7xl mx-auto py-6 sm:px-6 lg:px-8{% endif %}">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Toast notifications -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50"></div>
+
+    <script>
+        // Simple toast notification function
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const colors = {
+                'success': 'bg-green-500',
+                'error': 'bg-red-500',
+                'warning': 'bg-yellow-500',
+                'info': 'bg-blue-500'
+            };
+            
+            toast.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg mb-2 max-w-sm`;
+            toast.textContent = message;
+            
+            container.appendChild(toast);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                toast.remove();
+            }, 5000);
+        }
+
+        // Sync token from cookie to localStorage on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get token from cookie
+            const cookieToken = document.cookie
+                .split('; ')
+                .find(row => row.startsWith('access_token='))
+                ?.split('=')[1];
+            
+            if (cookieToken && !localStorage.getItem('access_token')) {
+                localStorage.setItem('access_token', cookieToken);
+            }
+        });
+
+        // Add Authorization header to all HTMX requests
+        document.addEventListener('htmx:configRequest', function(event) {
+            let token = localStorage.getItem('access_token');
+            
+            // Fallback to cookie if localStorage is empty
+            if (!token) {
+                token = document.cookie
+                    .split('; ')
+                    .find(row => row.startsWith('access_token='))
+                    ?.split('=')[1];
+                
+                if (token) {
+                    localStorage.setItem('access_token', token);
+                }
+            }
+            
+            if (token) {
+                event.detail.headers['Authorization'] = 'Bearer ' + token;
+            }
+        });
+
+        // HTMX event listeners
+        document.addEventListener('htmx:responseError', function(event) {
+            showToast('An error occurred. Please try again.', 'error');
+        });
+        
+        document.addEventListener('htmx:sendError', function(event) {
+            showToast('Network error. Please check your connection.', 'error');
+        });
+        
+        // Enhanced HTMX event handling for better UX
+        document.addEventListener('htmx:afterRequest', function(event) {
+            const response = event.detail.xhr;
+            
+            // Only show success toast for POST/PUT/DELETE operations (not GET requests)
+            const method = event.detail.requestConfig.verb.toLowerCase();
+            if (response.status === 200 && 
+                ['post', 'put', 'delete'].includes(method) && 
+                response.responseText.includes('successfully')) {
+                showToast('Operation completed successfully!', 'success');
+            }
+        });
+    </script>
+</body>
+</html>

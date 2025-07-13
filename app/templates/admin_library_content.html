@@ -1,0 +1,385 @@
+<!-- Library Management Content (for HTMX tab loading) -->
+<div class="space-y-6">
+    <!-- Library Sync Preferences Card -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg leading-6 font-medium text-gray-900">Library Sync Preferences</h3>
+                <button 
+                    id="save-preferences-btn"
+                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                    onclick="saveLibraryPreferences()"
+                >
+                    💾 Save Preferences
+                </button>
+            </div>
+            
+            <div class="mb-4">
+                <p class="text-sm text-gray-600">Select which Plex libraries to sync. If none are selected, all libraries will be synced.</p>
+            </div>
+            
+            <div id="library-preferences-content" class="space-y-3">
+                <!-- Library checkboxes will be loaded here -->
+                <div class="flex justify-center py-8">
+                    <div class="animate-spin w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full"></div>
+                </div>
+            </div>
+            
+            <div id="preferences-feedback" class="mt-4 hidden">
+                <!-- Feedback messages will appear here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sync Status Card -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg leading-6 font-medium text-gray-900">Plex Library Sync</h3>
+                <button 
+                    id="library-sync-btn"
+                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    hx-post="{{ base_url }}/admin/sync/trigger"
+                    hx-target="#library-sync-result"
+                    hx-swap="innerHTML"
+                    onclick="this.disabled=true; this.innerHTML='🔄 Syncing...'; setTimeout(() => { this.disabled=false; this.innerHTML='🔄 Sync Now'; }, 5000);"
+                >
+                    🔄 Sync Now
+                </button>
+            </div>
+            
+            <!-- Sync Statistics -->
+            <div id="library-sync-stats">
+                {% if sync_stats.get('error') %}
+                <div class="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-red-800">Sync Error</h3>
+                            <p class="text-sm text-red-700 mt-1">{{ sync_stats.error }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    <div class="bg-blue-50 p-4 rounded-lg">
+                        <div class="text-2xl font-bold text-blue-900">{{ sync_stats.get('total_items', 0) }}</div>
+                        <div class="text-sm text-blue-700">Total Items</div>
+                    </div>
+                    <div class="bg-green-50 p-4 rounded-lg">
+                        <div class="text-2xl font-bold text-green-900">{{ sync_stats.get('movies', 0) }}</div>
+                        <div class="text-sm text-green-700">Movies</div>
+                    </div>
+                    <div class="bg-purple-50 p-4 rounded-lg">
+                        <div class="text-2xl font-bold text-purple-900">{{ sync_stats.get('tv_shows', 0) }}</div>
+                        <div class="text-sm text-purple-700">TV Shows</div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <div class="text-2xl font-bold text-gray-900">
+                            {% if sync_stats.get('sync_age_hours') %}
+                                {% if sync_stats.sync_age_hours < 1 %}
+                                    < 1h
+                                {% elif sync_stats.sync_age_hours < 24 %}
+                                    {{ "%.0f"|format(sync_stats.sync_age_hours) }}h
+                                {% else %}
+                                    {{ "%.0f"|format(sync_stats.sync_age_hours / 24) }}d
+                                {% endif %}
+                            {% else %}
+                                Never
+                            {% endif %}
+                        </div>
+                        <div class="text-sm text-gray-700">Last Sync</div>
+                    </div>
+                </div>
+                
+                {% if sync_stats.get('last_sync') %}
+                <p class="text-sm text-gray-600">
+                    Last synchronized: {{ sync_stats.last_sync }}
+                </p>
+                {% else %}
+                <div class="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-yellow-800">No Sync Data</h3>
+                            <p class="text-sm text-yellow-700 mt-1">Library hasn't been synchronized yet. Click "Sync Now" to perform initial sync.</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+            
+            <!-- Sync Result Area -->
+            <div id="library-sync-result"></div>
+        </div>
+    </div>
+
+    <!-- How It Works -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">How Library Sync Works</h3>
+            <div class="prose prose-sm text-gray-600">
+                <ul class="space-y-2">
+                    <li>
+                        <strong>Performance:</strong> Instead of checking Plex API for every item on every page load (slow), 
+                        we sync your Plex library to our database periodically for instant lookups.
+                    </li>
+                    <li>
+                        <strong>Real-time Status:</strong> "On Plex" buttons appear instantly, and newly added content 
+                        shows up in "Recently Added" categories immediately after sync.
+                    </li>
+                    <li>
+                        <strong>Automatic Sync:</strong> The library syncs automatically when you restart the application. 
+                        Use manual sync when you've added new content to Plex.
+                    </li>
+                    <li>
+                        <strong>TMDB Matching:</strong> We match your Plex items to TMDB IDs for consistent metadata 
+                        and request tracking across different services.
+                    </li>
+                </ul>
+                
+                <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <h4 class="font-medium text-gray-900 mb-2">💡 Tips</h4>
+                    <ul class="text-sm space-y-1">
+                        <li>• Run sync after adding new content to Plex</li>
+                        <li>• Sync is safe to run multiple times</li>
+                        <li>• Large libraries may take a few minutes to sync</li>
+                        <li>• Items without TMDB IDs won't appear in discover results</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Helper function to get authentication headers
+function getAuthHeaders() {
+    // Get authentication token
+    let token = localStorage.getItem('access_token');
+    
+    // Fallback to cookie if localStorage is empty
+    if (!token) {
+        token = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('access_token='))
+            ?.split('=')[1];
+        
+        if (token) {
+            localStorage.setItem('access_token', token);
+        }
+    }
+    
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    
+    if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+    }
+    
+    return headers;
+}
+
+// Load library preferences on page load
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 DOM loaded, starting library preferences load...');
+    loadLibraryPreferences();
+});
+
+// Also load when this content is loaded via HTMX
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadLibraryPreferences);
+} else {
+    console.log('🚀 Document already ready, loading library preferences immediately...');
+    loadLibraryPreferences();
+}
+
+async function loadLibraryPreferences() {
+    try {
+        console.log('🔄 Loading library preferences...');
+        const response = await fetch('{{ base_url }}/admin/library/preferences', {
+            method: 'GET',
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+        
+        if (response.ok) {
+            console.log('✅ Library preferences loaded successfully:', data);
+            renderLibraryPreferences(data.libraries, data.selected_libraries);
+        } else {
+            console.error('❌ Error response:', response.status, data);
+            let errorMessage = data.detail || 'Unknown error';
+            
+            // Provide more helpful error messages
+            if (response.status === 500 && errorMessage.includes('Plex')) {
+                errorMessage = 'Plex connection failed. Please configure your Plex server settings in the Media Servers tab first.';
+            } else if (response.status === 500 && errorMessage.includes('database')) {
+                errorMessage = 'Database connection error. Please contact your administrator.';
+            }
+            
+            document.getElementById('library-preferences-content').innerHTML = `
+                <div class="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-yellow-800">Library Sync Unavailable</h3>
+                            <div class="mt-2 text-sm text-yellow-700">
+                                <p>${errorMessage}</p>
+                                ${response.status === 500 && errorMessage.includes('Plex') ? 
+                                    '<p class="mt-2"><strong>Next steps:</strong></p><ol class="list-decimal list-inside mt-1"><li>Go to the "Media Servers" tab</li><li>Configure your Plex Server URL and Token</li><li>Return to this tab and refresh</li></ol>' 
+                                    : ''
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('❌ Network error loading library preferences:', error);
+        document.getElementById('library-preferences-content').innerHTML = `
+            <div class="bg-red-50 border border-red-200 rounded-md p-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800">Connection Error</h3>
+                        <div class="mt-2 text-sm text-red-700">
+                            <p>Unable to connect to the server. Please check your connection and try again.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function renderLibraryPreferences(libraries, selectedLibraries) {
+    const container = document.getElementById('library-preferences-content');
+    
+    if (!libraries || libraries.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4 text-gray-500">
+                <p>No Plex libraries found. Please check your Plex connection.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const libraryHtml = libraries.map(library => {
+        const isSelected = selectedLibraries.includes(library.title);
+        const typeIcon = library.type === 'movie' ? '🎬' : '📺';
+        const typeColor = library.type === 'movie' ? 'blue' : 'green';
+        
+        return `
+            <div class="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                <input 
+                    type="checkbox" 
+                    id="library-${library.key}" 
+                    name="selected_libraries" 
+                    value="${library.title}"
+                    ${isSelected ? 'checked' : ''}
+                    class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                />
+                <label for="library-${library.key}" class="flex-1 cursor-pointer">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-lg">${typeIcon}</span>
+                        <span class="font-medium text-gray-900">${library.title}</span>
+                        <span class="px-2 py-1 text-xs bg-${typeColor}-100 text-${typeColor}-800 rounded-full">
+                            ${library.type}
+                        </span>
+                    </div>
+                </label>
+            </div>
+        `;
+    }).join('');
+    
+    container.innerHTML = `
+        <div class="space-y-2">
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-sm font-medium text-gray-700">Available Libraries (${libraries.length})</span>
+                <div class="space-x-2">
+                    <button onclick="selectAllLibraries()" class="text-sm text-primary-600 hover:text-primary-500">Select All</button>
+                    <button onclick="selectNoneLibraries()" class="text-sm text-gray-600 hover:text-gray-500">Select None</button>
+                </div>
+            </div>
+            ${libraryHtml}
+        </div>
+    `;
+}
+
+function selectAllLibraries() {
+    const checkboxes = document.querySelectorAll('input[name="selected_libraries"]');
+    checkboxes.forEach(checkbox => checkbox.checked = true);
+}
+
+function selectNoneLibraries() {
+    const checkboxes = document.querySelectorAll('input[name="selected_libraries"]');
+    checkboxes.forEach(checkbox => checkbox.checked = false);
+}
+
+async function saveLibraryPreferences() {
+    const checkboxes = document.querySelectorAll('input[name="selected_libraries"]:checked');
+    const selectedLibraries = Array.from(checkboxes).map(cb => cb.value);
+    
+    try {
+        const response = await fetch('{{ base_url }}/admin/library/preferences', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                selected_libraries: selectedLibraries
+            })
+        });
+        
+        const result = await response.json();
+        const feedbackDiv = document.getElementById('preferences-feedback');
+        
+        if (response.ok) {
+            feedbackDiv.innerHTML = `
+                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p class="text-green-700 text-sm">${result.message}</p>
+                </div>
+            `;
+            feedbackDiv.classList.remove('hidden');
+            
+            // Hide feedback after 5 seconds
+            setTimeout(() => {
+                feedbackDiv.classList.add('hidden');
+            }, 5000);
+        } else {
+            feedbackDiv.innerHTML = `
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-700 text-sm">${result.detail || 'Failed to save preferences'}</p>
+                </div>
+            `;
+            feedbackDiv.classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error('Error saving library preferences:', error);
+        const feedbackDiv = document.getElementById('preferences-feedback');
+        feedbackDiv.innerHTML = `
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-700 text-sm">Network error. Please try again.</p>
+            </div>
+        `;
+        feedbackDiv.classList.remove('hidden');
+    }
+}
+</script>

@@ -1,0 +1,623 @@
+{% extends "base.html" %}
+
+{% block title %}Requests - Stout Requests{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">
+                {% if current_user.is_admin %}
+                All Requests
+                {% else %}
+                My Requests
+                {% endif %}
+            </h1>
+            <div class="flex space-x-3">
+                <a href="{{ base_url }}/" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Discover Content
+                </a>
+            </div>
+        </div>
+
+        <!-- Primary Tab Navigation (Media Type) -->
+        <div class="border-b border-gray-200 mb-6">
+            <nav class="-mb-px flex space-x-8" aria-label="Media Type Tabs">
+                <button onclick="showMediaType('all')" id="media-tab-all" class="media-tab-button border-orange-500 text-orange-600 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    📋 All
+                    <span id="media-count-all" class="ml-2 bg-gray-100 text-gray-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                </button>
+                <button onclick="showMediaType('movie')" id="media-tab-movie" class="media-tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    🎬 Movies
+                    <span id="media-count-movie" class="ml-2 bg-blue-100 text-blue-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                </button>
+                <button onclick="showMediaType('tv')" id="media-tab-tv" class="media-tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                    📺 TV Shows
+                    <span id="media-count-tv" class="ml-2 bg-green-100 text-green-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                </button>
+            </nav>
+        </div>
+
+        <!-- Secondary Tab Navigation (Status) -->
+        <div class="border-b border-gray-100 mb-6 bg-gray-50 rounded-lg p-1">
+            <nav class="flex space-x-1" aria-label="Status Tabs">
+                <button onclick="showStatus('all')" id="status-tab-all" class="status-tab-button bg-white text-gray-900 shadow-sm flex-1 py-2 px-3 text-center rounded-md text-sm font-medium">
+                    All Requests
+                    <span id="status-count-all" class="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full"></span>
+                </button>
+                <button onclick="showStatus('pending')" id="status-tab-pending" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                    ⏳ Pending
+                    <span id="status-count-pending" class="ml-2 text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full"></span>
+                </button>
+                <button onclick="showStatus('approved')" id="status-tab-approved" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                    ✓ Approved
+                    <span id="status-count-approved" class="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full"></span>
+                </button>
+                <button onclick="showStatus('downloading')" id="status-tab-downloading" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                    ⬇ Processing
+                    <span id="status-count-downloading" class="ml-2 text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full"></span>
+                </button>
+                <button onclick="showStatus('available')" id="status-tab-available" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                    📁 Available
+                    <span id="status-count-available" class="ml-2 text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full"></span>
+                </button>
+                {% if current_user.is_admin %}
+                <button onclick="showStatus('rejected')" id="status-tab-rejected" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                    ✗ Rejected
+                    <span id="status-count-rejected" class="ml-2 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full"></span>
+                </button>
+                {% endif %}
+            </nav>
+        </div>
+
+        {% if requests %}
+        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {% for request in requests %}
+            <div class="request-item bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer" 
+                 data-media-type="{{ request.media_type.value }}" 
+                 data-status="{{ request.status.value }}"
+                 onclick="openMediaInfo('{{ request.media_type.value }}', '{{ request.tmdb_id }}')">
+                
+                <!-- Card Header -->
+                <div class="flex min-h-0">
+                    <!-- Poster -->
+                    <div class="flex-shrink-0 w-20">
+                        {% if request.poster_path %}
+                        <img 
+                            src="https://image.tmdb.org/t/p/w185{{ request.poster_path }}" 
+                            alt="{{ request.title }}"
+                            class="w-full h-32 object-cover"
+                        >
+                        {% else %}
+                        <div class="w-full h-32 bg-gray-200 flex items-center justify-center">
+                            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 002 2z"></path>
+                            </svg>
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Main Content -->
+                    <div class="flex-1 p-3 flex flex-col min-h-0">
+                        <!-- Title and Status Row -->
+                        <div class="flex items-start justify-between mb-2">
+                            <div class="flex-1 min-w-0">
+                                <h3 class="text-sm font-semibold text-gray-900 truncate">{{ request.title }}</h3>
+                                <div class="flex items-center space-x-2 mt-1">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                                        {% if request.media_type.value == 'movie' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
+                                        {{ '🎬' if request.media_type.value == 'movie' else '📺' }}
+                                    </span>
+                                    {% if request.release_date %}
+                                    <span class="text-xs text-gray-500">{{ request.release_date[:4] }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <!-- Status Badge -->
+                            <div class="ml-2 flex-shrink-0">
+                                {% if request.status.value == 'pending' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    ⏳ Pending
+                                </span>
+                                {% elif request.status.value == 'approved' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    ✓ Approved
+                                </span>
+                                {% elif request.status.value == 'available' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    ✓ Available
+                                </span>
+                                {% elif request.status.value == 'downloading' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                    ⬇ Processing
+                                </span>
+                                {% elif request.status.value == 'rejected' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                    ✗ Rejected
+                                </span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- User info and overview -->
+                        <div class="flex-1 min-h-0">
+                            {% if show_request_user and user_lookup.get(request.id) %}
+                            <div class="mb-1">
+                                <span class="text-xs text-gray-600">👤 {{ user_lookup[request.id].username if user_lookup[request.id].username else 'Unknown' }}</span>
+                            </div>
+                            {% endif %}
+                            
+                            {% if request.overview %}
+                            <p class="text-xs text-gray-600 line-clamp-2">{{ request.overview[:80] }}{% if request.overview|length > 80 %}...{% endif %}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Card Footer -->
+                <div class="border-t border-gray-100 px-3 py-2 bg-gray-50" onclick="event.stopPropagation()">
+                    <!-- Request date and time info -->
+                    <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
+                        <div class="flex items-center space-x-3">
+                            <span title="Requested on">📅 {{ request.created_at.strftime('%b %d, %Y') }}</span>
+                            <span title="Request time">🕒 {{ request.created_at.strftime('%I:%M %p') }}</span>
+                        </div>
+                        {% if request.approved_at %}
+                        <span title="Approved on" class="text-blue-600">✓ {{ request.approved_at.strftime('%b %d') }}</span>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Action buttons -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-1">
+                            <!-- Admin Actions -->
+                            {% if current_user.is_admin %}
+                                {% if request.status.value == 'pending' %}
+                                <button 
+                                    onclick="approveRequest({{ request.id }}); event.stopPropagation();"
+                                    class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                                    title="Approve Request"
+                                >
+                                    ✓ Approve
+                                </button>
+                                <button 
+                                    onclick="rejectRequest({{ request.id }}); event.stopPropagation();"
+                                    class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                                    title="Reject Request"
+                                >
+                                    ✗ Reject
+                                </button>
+                                {% elif request.status.value == 'approved' or request.status.value == 'downloading' %}
+                                <button 
+                                    onclick="markAsAvailable({{ request.id }}); event.stopPropagation();"
+                                    class="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                                    title="Mark as Available in Plex"
+                                >
+                                    📁 Mark Available
+                                </button>
+                                {% elif request.status.value == 'available' %}
+                                <span class="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">📁 Available in Plex</span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Delete button and metadata -->
+                        <div class="flex items-center space-x-2">
+                            {% if request.status.value in ['approved', 'downloading', 'available'] and request.approved_by %}
+                            <span class="text-xs text-gray-400" title="Approved by admin">👤 Admin</span>
+                            {% endif %}
+                            
+                            <!-- Delete button (visible to admins or request owner) -->
+                            {% if current_user.is_admin or (user_lookup.get(request.id) and user_lookup[request.id].id == current_user.id) %}
+                            <button 
+                                onclick="deleteRequest({{ request.id }}); event.stopPropagation();"
+                                class="bg-gray-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                                title="Delete Request"
+                            >
+                                🗑️ Delete
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-12">
+            <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+            </svg>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">No requests yet</h3>
+            <p class="text-gray-500 mb-4">
+                {% if current_user.is_admin %}
+                No users have made any content requests yet.
+                {% else %}
+                You haven't requested any content yet.
+                {% endif %}
+            </p>
+            <a href="{{ base_url }}/" class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg text-sm font-medium">
+                Search for Content
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// Nested tab functionality for request filtering
+let currentMediaType = 'all';
+let currentStatus = 'all';
+
+function showMediaType(mediaType) {
+    console.log('Switching to media type:', mediaType);
+    currentMediaType = mediaType;
+    
+    // Update media type tab styling
+    document.querySelectorAll('.media-tab-button').forEach(button => {
+        button.classList.remove('border-orange-500', 'text-orange-600');
+        button.classList.add('border-transparent', 'text-gray-500');
+    });
+    
+    const activeTab = document.getElementById(`media-tab-${mediaType}`);
+    if (activeTab) {
+        activeTab.classList.remove('border-transparent', 'text-gray-500');
+        activeTab.classList.add('border-orange-500', 'text-orange-600');
+    }
+    
+    // Apply combined filter
+    filterRequests();
+    updateCounts();
+}
+
+function showStatus(status) {
+    console.log('Switching to status:', status);
+    currentStatus = status;
+    
+    // Update status tab styling
+    document.querySelectorAll('.status-tab-button').forEach(button => {
+        button.classList.remove('bg-white', 'text-gray-900', 'shadow-sm');
+        button.classList.add('text-gray-600');
+    });
+    
+    const activeTab = document.getElementById(`status-tab-${status}`);
+    if (activeTab) {
+        activeTab.classList.remove('text-gray-600');
+        activeTab.classList.add('bg-white', 'text-gray-900', 'shadow-sm');
+    }
+    
+    // Apply combined filter
+    filterRequests();
+    updateCounts();
+}
+
+function filterRequests() {
+    const requestItems = document.querySelectorAll('.request-item');
+    
+    requestItems.forEach(item => {
+        const mediaType = item.getAttribute('data-media-type');
+        const status = item.getAttribute('data-status');
+        
+        let shouldShow = true;
+        
+        // Apply media type filter
+        if (currentMediaType !== 'all') {
+            shouldShow = shouldShow && (mediaType === currentMediaType);
+        }
+        
+        // Apply status filter
+        if (currentStatus !== 'all') {
+            shouldShow = shouldShow && (status === currentStatus);
+        }
+        
+        item.style.display = shouldShow ? 'block' : 'none';
+    });
+}
+
+function updateCounts() {
+    const allItems = document.querySelectorAll('.request-item');
+    const movieItems = document.querySelectorAll('.request-item[data-media-type="movie"]');
+    const tvItems = document.querySelectorAll('.request-item[data-media-type="tv"]');
+    
+    // Status counts
+    const pendingItems = document.querySelectorAll('.request-item[data-status="pending"]');
+    const approvedItems = document.querySelectorAll('.request-item[data-status="approved"]');
+    const downloadingItems = document.querySelectorAll('.request-item[data-status="downloading"]');
+    const availableItems = document.querySelectorAll('.request-item[data-status="available"]');
+    const rejectedItems = document.querySelectorAll('.request-item[data-status="rejected"]');
+    
+    // Update media type count badges
+    const mediaCountAll = document.getElementById('media-count-all');
+    const mediaCountMovie = document.getElementById('media-count-movie');
+    const mediaCountTv = document.getElementById('media-count-tv');
+    
+    if (mediaCountAll) mediaCountAll.textContent = allItems.length;
+    if (mediaCountMovie) mediaCountMovie.textContent = movieItems.length;
+    if (mediaCountTv) mediaCountTv.textContent = tvItems.length;
+    
+    // Update status count badges
+    const statusCountAll = document.getElementById('status-count-all');
+    const statusCountPending = document.getElementById('status-count-pending');
+    const statusCountApproved = document.getElementById('status-count-approved');
+    const statusCountDownloading = document.getElementById('status-count-downloading');
+    const statusCountAvailable = document.getElementById('status-count-available');
+    const statusCountRejected = document.getElementById('status-count-rejected');
+    
+    if (statusCountAll) statusCountAll.textContent = allItems.length;
+    if (statusCountPending) statusCountPending.textContent = pendingItems.length;
+    if (statusCountApproved) statusCountApproved.textContent = approvedItems.length;
+    if (statusCountDownloading) statusCountDownloading.textContent = downloadingItems.length;
+    if (statusCountAvailable) statusCountAvailable.textContent = availableItems.length;
+    if (statusCountRejected) statusCountRejected.textContent = rejectedItems.length;
+    
+    // Apply current filter to counts for context
+    updateFilteredCounts();
+}
+
+function updateFilteredCounts() {
+    // Get currently visible items based on filters
+    const visibleItems = document.querySelectorAll('.request-item[style="display: block;"], .request-item:not([style])');
+    const filteredCount = Array.from(visibleItems).filter(item => 
+        item.style.display !== 'none'
+    ).length;
+    
+    // Update the active status tab to show filtered count
+    const activeStatusTab = document.querySelector('.status-tab-button.bg-white .status-count-all, .status-tab-button.bg-white span[id^="status-count-"]');
+    if (activeStatusTab && currentMediaType !== 'all') {
+        // Show filtered count when media type filter is active
+        const originalCount = activeStatusTab.textContent;
+        if (!originalCount.includes('/')) {
+            activeStatusTab.textContent = `${filteredCount}/${originalCount}`;
+        }
+    }
+}
+
+// Admin actions
+async function approveRequest(requestId) {
+    try {
+        const response = await fetch(`{{ base_url }}/requests/${requestId}/approve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            location.reload(); // Refresh to show updated status
+        } else {
+            alert('Failed to approve request');
+        }
+    } catch (error) {
+        console.error('Error approving request:', error);
+        alert('Error approving request');
+    }
+}
+
+async function rejectRequest(requestId) {
+    if (confirm('Are you sure you want to reject this request?')) {
+        try {
+            const response = await fetch(`{{ base_url }}/requests/${requestId}/reject`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                location.reload(); // Refresh to show updated status
+            } else {
+                alert('Failed to reject request');
+            }
+        } catch (error) {
+            console.error('Error rejecting request:', error);
+            alert('Error rejecting request');
+        }
+    }
+}
+
+async function markAsAvailable(requestId) {
+    if (confirm('Mark this request as available in Plex?')) {
+        try {
+            const response = await fetch(`{{ base_url }}/requests/${requestId}/mark-available`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                location.reload(); // Refresh to show updated status
+            } else {
+                alert('Failed to mark as available');
+            }
+        } catch (error) {
+            console.error('Error marking as available:', error);
+            alert('Error marking as available');
+        }
+    }
+}
+
+// Full card clickability
+function openMediaInfo(mediaType, tmdbId) {
+    window.location.href = `{{ base_url }}/media/${mediaType}/${tmdbId}`;
+}
+
+// Delete request functionality
+async function deleteRequest(requestId) {
+    if (confirm('Are you sure you want to delete this request? This action cannot be undone.')) {
+        try {
+            const response = await fetch(`{{ base_url }}/requests/${requestId}/delete`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                // Remove the request item from the DOM
+                const requestElement = document.querySelector(`[onclick*="${requestId}"]`);
+                if (requestElement) {
+                    requestElement.style.opacity = '0';
+                    requestElement.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        requestElement.remove();
+                        updateCounts();
+                        
+                        // Check if no requests are left and show empty state
+                        const remainingRequests = document.querySelectorAll('.request-item');
+                        if (remainingRequests.length === 0) {
+                            location.reload();
+                        }
+                    }, 200);
+                }
+            } else {
+                const errorData = await response.json();
+                alert(`Failed to delete request: ${errorData.detail || 'Unknown error'}`);
+            }
+        } catch (error) {
+            console.error('Error deleting request:', error);
+            alert('Error deleting request. Please try again.');
+        }
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initializing nested request tabs');
+    updateCounts();
+    // Start with all media types and all statuses visible
+    showMediaType('all');
+    showStatus('all');
+});
+</script>
+
+<style>
+.media-tab-button, .status-tab-button {
+    transition: all 0.2s ease;
+}
+
+.media-tab-button:hover {
+    transform: translateY(-1px);
+}
+
+.status-tab-button:hover {
+    background-color: rgba(255, 255, 255, 0.8);
+}
+
+.request-item {
+    transition: all 0.3s ease;
+    border: 1px solid transparent;
+    background: linear-gradient(135deg, #ffffff 0%, #fafafa 100%);
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+    height: auto;
+}
+
+.request-item:hover {
+    border-color: #e5e7eb;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-wrap: break-word;
+}
+
+/* Card layout improvements */
+.request-item .flex.min-h-0 {
+    flex: 1;
+    min-height: 0;
+}
+
+/* Footer styling */
+.request-item .border-t {
+    margin-top: auto;
+    flex-shrink: 0;
+}
+
+/* Ensure action buttons are properly spaced and visible */
+.request-item button {
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 32px;
+    font-size: 0.75rem;
+}
+
+/* Improve content area layout */
+.request-item .flex-1.p-3 {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 0;
+}
+
+/* Footer improvements */
+.request-item .border-t.border-gray-100 {
+    background-color: #f9fafb;
+    margin-top: auto;
+}
+
+/* Mobile responsiveness for cards */
+@media (max-width: 768px) {
+    .request-item {
+        min-height: 220px;
+    }
+    
+    .request-item .flex.min-h-0 {
+        flex-direction: column;
+    }
+    
+    .request-item .flex-shrink-0.w-20 {
+        width: 100%;
+        height: 80px;
+        flex-shrink: 0;
+    }
+    
+    .request-item .flex-shrink-0.w-20 img {
+        width: 100%;
+        height: 80px;
+        object-fit: cover;
+    }
+}
+
+/* Status tab styling improvements */
+.status-tab-button {
+    position: relative;
+    overflow: hidden;
+}
+
+.status-tab-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    transition: left 0.5s;
+}
+
+.status-tab-button:hover::before {
+    left: 100%;
+}
+
+/* Responsive improvements */
+@media (max-width: 640px) {
+    .status-tab-button {
+        padding: 0.5rem 0.25rem;
+        font-size: 0.75rem;
+    }
+    
+    .status-tab-button span {
+        display: none;
+    }
+}
+</style>
+
+{% endblock %}

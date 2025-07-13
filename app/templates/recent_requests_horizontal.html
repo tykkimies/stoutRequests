@@ -1,0 +1,148 @@
+<!-- Recent Requests Horizontal Template - Jellyseerr Style -->
+{% if results %}
+<div class="flex space-x-4 overflow-x-auto pb-2">
+    {% for item in results %}
+    <div class="request-card group flex-shrink-0 w-96 rounded-lg shadow-sm overflow-hidden hover:shadow-xl hover:scale-105 transition-all duration-300 cursor-pointer relative">
+        <!-- Background Image -->
+        {% if item.backdrop_url %}
+        <div class="absolute inset-0 bg-cover bg-center bg-no-repeat" style="background-image: url('{{ item.backdrop_url }}');"></div>
+        <div class="absolute inset-0 bg-gradient-to-r from-black/80 via-black/60 to-black/40"></div>
+        {% else %}
+        <div class="absolute inset-0 bg-gradient-to-r from-gray-800 to-gray-600"></div>
+        {% endif %}
+        
+        <!-- Content -->
+        <div class="relative flex h-32">
+            <!-- Poster -->
+            <div class="flex-shrink-0 w-24 relative">
+                {% if item.poster_url %}
+                <img src="{{ item.poster_url }}" alt="{{ item.title or item.name }}" class="w-full h-full object-cover group-hover:brightness-110 transition-all duration-300">
+                {% else %}
+                <div class="w-full h-full bg-gray-700/80 flex items-center justify-center group-hover:bg-gray-600/80 transition-colors duration-300">
+                    <svg class="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001 1v-8M7 8h10"></path>
+                    </svg>
+                </div>
+                {% endif %}
+            </div>
+            
+            
+            <!-- Clickable overlay for entire card -->
+            <a href="{{ base_url }}/media/{{ item.media_type }}/{{ item.id }}" class="absolute inset-0 z-10"></a>
+            
+            <!-- Content -->
+            <div class="flex-1 p-4 flex flex-col justify-between relative pointer-events-none">
+                <div>
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-base font-semibold text-white truncate">{{ item.title or item.name }}</h3>
+                            <div class="flex items-center space-x-2 mt-1">
+                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                                    {% if item.media_type == 'movie' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
+                                    {{ '🎬' if item.media_type == 'movie' else '📺' }}
+                                </span>
+                                {% if item.release_date %}
+                                <span class="text-sm text-gray-300">{{ item.release_date[:4] }}</span>
+                                {% elif item.first_air_date %}
+                                <span class="text-sm text-gray-300">{{ item.first_air_date[:4] }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        <!-- Status Badge -->
+                        <div class="ml-2 flex-shrink-0" id="status-badge-{{ item.request_id }}">
+                            {% set status = item.status if item.status else 'available' %}
+                            {% if status == 'in_plex' or item.in_plex %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                ✓ In Plex
+                            </span>
+                            {% elif status == 'requested_pending' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                ⏳ Pending
+                            </span>
+                            {% elif status == 'requested_approved' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                ✓ Approved
+                            </span>
+                            {% elif status == 'requested_downloading' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                ⬇ Downloading
+                            </span>
+                            {% elif status == 'rejected' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                ✗ Rejected
+                            </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <!-- User info (shown based on visibility settings) -->
+                    {% if show_request_user and item.user %}
+                    <div class="mt-2">
+                        <span class="text-sm text-gray-200">👤 {{ item.user.username if item.user.username else 'Unknown' }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <!-- Bottom section -->
+                <div class="flex items-center justify-between mt-2">
+                    <div class="flex items-center space-x-2">
+                        <!-- Rating -->
+                        {% if item.vote_average %}
+                        <div class="flex items-center">
+                            <svg class="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                            </svg>
+                            <span class="text-sm text-gray-200">{{ "%.1f"|format(item.vote_average) }}</span>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Request date -->
+                        {% if item.created_at %}
+                        <span class="text-sm text-gray-300">{{ item.created_at.strftime('%b %d') if item.created_at else '' }}</span>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Admin actions for pending requests (only for admins when user can view all requests) -->
+                    {% if current_user and current_user.is_admin and item.status == 'requested_pending' and can_view_all_requests %}
+                    <div class="flex space-x-1 relative z-20 pointer-events-auto" id="admin-actions-{{ item.request_id }}">
+                        <button 
+                            hx-post="{{ base_url }}/requests/{{ item.request_id }}/approve"
+                            hx-target="#status-badge-{{ item.request_id }}"
+                            hx-swap="outerHTML"
+                            hx-confirm="Approve this request?"
+                            onclick="event.stopPropagation();"
+                            class="bg-green-600 hover:bg-green-700 hover:scale-110 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                            title="Approve Request"
+                        >
+                            ✓
+                        </button>
+                        <button 
+                            hx-post="{{ base_url }}/requests/{{ item.request_id }}/reject"
+                            hx-target="#status-badge-{{ item.request_id }}"
+                            hx-swap="outerHTML"
+                            hx-confirm="Are you sure you want to reject this request?"
+                            onclick="event.stopPropagation();"
+                            class="bg-red-600 hover:bg-red-700 hover:scale-110 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                            title="Reject Request"
+                        >
+                            ✗
+                        </button>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% else %}
+<div class="text-center py-8">
+    <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+    </svg>
+    <p class="text-sm text-gray-500">No recent requests</p>
+</div>
+{% endif %}
+

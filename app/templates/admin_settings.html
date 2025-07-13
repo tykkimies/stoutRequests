@@ -1,0 +1,394 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Settings - Stout Requests{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">Admin Settings</h1>
+            <div class="flex space-x-2">
+                <button 
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                    hx-post="{{ base_url }}/admin/settings/test-connections"
+                    hx-target="#connection-results"
+                    hx-swap="innerHTML"
+                >
+                    Test Connections
+                </button>
+            </div>
+        </div>
+
+        <!-- Success/Error Messages -->
+        {% if request.query_params.get('success') %}
+        <div class="mb-4 p-4 bg-green-50 border border-green-200 rounded-md">
+            <div class="flex">
+                <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                </svg>
+                <p class="ml-3 text-sm text-green-700">{{ request.query_params.get('success') }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if request.query_params.get('error') %}
+        <div class="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+            <div class="flex">
+                <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                </svg>
+                <p class="ml-3 text-sm text-red-700">{{ request.query_params.get('error') }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('/admin/settings/update') }}" class="space-y-6">
+            <!-- Plex Configuration -->
+            <div class="bg-white shadow rounded-lg p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                    <svg class="w-6 h-6 mr-2 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"></path>
+                    </svg>
+                    Plex Configuration
+                    <div class="ml-auto flex items-center">
+                        {% if connection_status.plex.status == 'connected' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <div class="w-2 h-2 bg-green-400 rounded-full mr-1"></div>
+                            Connected
+                        </span>
+                        {% elif connection_status.plex.status == 'error' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <div class="w-2 h-2 bg-red-400 rounded-full mr-1"></div>
+                            Error
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            <div class="w-2 h-2 bg-gray-400 rounded-full mr-1"></div>
+                            Not Configured
+                        </span>
+                        {% endif %}
+                    </div>
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="plex_url" class="block text-sm font-medium text-gray-700 mb-2">Plex Server URL</label>
+                        <input 
+                            type="url" 
+                            id="plex_url"
+                            name="plex_url"
+                            value="{{ raw_settings.plex_url or '' }}"
+                            placeholder="http://your-plex-server:32400"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                        <p class="mt-1 text-xs text-gray-500">URL of your Plex Media Server</p>
+                    </div>
+                    <div>
+                        <label for="plex_token" class="block text-sm font-medium text-gray-700 mb-2">Plex Token</label>
+                        <input 
+                            type="password" 
+                            id="plex_token"
+                            name="plex_token"
+                            value="{{ raw_settings.plex_token or '' }}"
+                            placeholder="Enter your Plex token"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                        <p class="mt-1 text-xs text-gray-500">
+                            <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" class="text-blue-600 hover:text-blue-800">
+                                How to find your Plex token
+                            </a>
+                        </p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="plex_client_id" class="block text-sm font-medium text-gray-700 mb-2">Client ID</label>
+                        <input 
+                            type="text" 
+                            id="plex_client_id"
+                            name="plex_client_id"
+                            value="{{ raw_settings.plex_client_id or 'stout-requests' }}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                        <p class="mt-1 text-xs text-gray-500">Unique identifier for OAuth (default is fine)</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TMDB Configuration -->
+            <div class="bg-white shadow rounded-lg p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                    <svg class="w-6 h-6 mr-2 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    TMDB Configuration
+                    <div class="ml-auto flex items-center">
+                        {% if connection_status.tmdb.status == 'connected' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <div class="w-2 h-2 bg-green-400 rounded-full mr-1"></div>
+                            Connected
+                        </span>
+                        {% elif connection_status.tmdb.status == 'error' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <div class="w-2 h-2 bg-red-400 rounded-full mr-1"></div>
+                            Error
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            <div class="w-2 h-2 bg-gray-400 rounded-full mr-1"></div>
+                            Not Configured
+                        </span>
+                        {% endif %}
+                    </div>
+                </h2>
+                <div>
+                    <label for="tmdb_api_key" class="block text-sm font-medium text-gray-700 mb-2">TMDB API Key</label>
+                    <input 
+                        type="password" 
+                        id="tmdb_api_key"
+                        name="tmdb_api_key"
+                        value="{{ raw_settings.tmdb_api_key or '' }}"
+                        placeholder="Enter your TMDB API key"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                    <p class="mt-1 text-xs text-gray-500">
+                        <a href="https://www.themoviedb.org/settings/api" target="_blank" class="text-blue-600 hover:text-blue-800">
+                            Get your TMDB API key
+                        </a>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Radarr Configuration -->
+            <div class="bg-white shadow rounded-lg p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                    <svg class="w-6 h-6 mr-2 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
+                    </svg>
+                    Radarr Configuration
+                    <div class="ml-auto flex items-center">
+                        {% if connection_status.radarr.status == 'connected' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <div class="w-2 h-2 bg-green-400 rounded-full mr-1"></div>
+                            Connected
+                        </span>
+                        {% elif connection_status.radarr.status == 'error' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <div class="w-2 h-2 bg-red-400 rounded-full mr-1"></div>
+                            Error
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            <div class="w-2 h-2 bg-gray-400 rounded-full mr-1"></div>
+                            Not Configured
+                        </span>
+                        {% endif %}
+                    </div>
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="radarr_url" class="block text-sm font-medium text-gray-700 mb-2">Radarr URL</label>
+                        <input 
+                            type="url" 
+                            id="radarr_url"
+                            name="radarr_url"
+                            value="{{ raw_settings.radarr_url or '' }}"
+                            placeholder="http://your-radarr-instance:7878"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                    </div>
+                    <div>
+                        <label for="radarr_api_key" class="block text-sm font-medium text-gray-700 mb-2">Radarr API Key</label>
+                        <input 
+                            type="password" 
+                            id="radarr_api_key"
+                            name="radarr_api_key"
+                            value="{{ raw_settings.radarr_api_key or '' }}"
+                            placeholder="Enter Radarr API key"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sonarr Configuration -->
+            <div class="bg-white shadow rounded-lg p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                    <svg class="w-6 h-6 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4z"></path>
+                        <path d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5a.75.75 0 001.5 0v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z"></path>
+                    </svg>
+                    Sonarr Configuration
+                    <div class="ml-auto flex items-center">
+                        {% if connection_status.sonarr.status == 'connected' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <div class="w-2 h-2 bg-green-400 rounded-full mr-1"></div>
+                            Connected
+                        </span>
+                        {% elif connection_status.sonarr.status == 'error' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <div class="w-2 h-2 bg-red-400 rounded-full mr-1"></div>
+                            Error
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            <div class="w-2 h-2 bg-gray-400 rounded-full mr-1"></div>
+                            Not Configured
+                        </span>
+                        {% endif %}
+                    </div>
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="sonarr_url" class="block text-sm font-medium text-gray-700 mb-2">Sonarr URL</label>
+                        <input 
+                            type="url" 
+                            id="sonarr_url"
+                            name="sonarr_url"
+                            value="{{ raw_settings.sonarr_url or '' }}"
+                            placeholder="http://your-sonarr-instance:8989"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                    </div>
+                    <div>
+                        <label for="sonarr_api_key" class="block text-sm font-medium text-gray-700 mb-2">Sonarr API Key</label>
+                        <input 
+                            type="password" 
+                            id="sonarr_api_key"
+                            name="sonarr_api_key"
+                            value="{{ raw_settings.sonarr_api_key or '' }}"
+                            placeholder="Enter Sonarr API key"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                    </div>
+                </div>
+            </div>
+
+            <!-- Application Settings -->
+            <div class="bg-white shadow rounded-lg p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                    <svg class="w-6 h-6 mr-2 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path>
+                    </svg>
+                    Application Settings
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="app_name" class="block text-sm font-medium text-gray-700 mb-2">Application Name</label>
+                        <input 
+                            type="text" 
+                            id="app_name"
+                            name="app_name"
+                            value="{{ raw_settings.app_name or 'Stout Requests' }}"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                    </div>
+                    <div>
+                        <label for="max_requests_per_user" class="block text-sm font-medium text-gray-700 mb-2">Max Requests per User</label>
+                        <input 
+                            type="number" 
+                            id="max_requests_per_user"
+                            name="max_requests_per_user"
+                            value="{{ raw_settings.max_requests_per_user or 10 }}"
+                            min="1"
+                            max="100"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                    </div>
+                    <div class="md:col-span-2 space-y-4">
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                id="require_approval"
+                                name="require_approval"
+                                {% if raw_settings.require_approval %}checked{% endif %}
+                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                            >
+                            <label for="require_approval" class="ml-2 text-sm text-gray-700">Require admin approval for requests</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                id="auto_approve_admin"
+                                name="auto_approve_admin"
+                                {% if raw_settings.auto_approve_admin %}checked{% endif %}
+                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                            >
+                            <label for="auto_approve_admin" class="ml-2 text-sm text-gray-700">Auto-approve requests from admins</label>
+                        </div>
+                        
+                        <!-- Request Visibility Settings -->
+                        <div class="border-t pt-4 mt-4">
+                            <h3 class="text-lg font-medium text-gray-900 mb-3">Request Visibility</h3>
+                            <div class="space-y-3">
+                                <div class="flex items-center">
+                                    <input 
+                                        type="checkbox" 
+                                        id="can_view_all_requests"
+                                        name="can_view_all_requests"
+                                        {% if raw_settings.can_view_all_requests %}checked{% endif %}
+                                        class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                                    >
+                                    <label for="can_view_all_requests" class="ml-2 text-sm text-gray-700">
+                                        Users can view all requests (not just their own)
+                                    </label>
+                                </div>
+                                <p class="ml-6 text-xs text-gray-500">When enabled, regular users can see requests from all users on the Requests page and Discover page recent requests.</p>
+                                
+                                <div class="flex items-center">
+                                    <input 
+                                        type="checkbox" 
+                                        id="can_view_request_user"
+                                        name="can_view_request_user"
+                                        {% if raw_settings.can_view_request_user %}checked{% endif %}
+                                        class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                                    >
+                                    <label for="can_view_request_user" class="ml-2 text-sm text-gray-700">
+                                        Users can see who made each request
+                                    </label>
+                                </div>
+                                <p class="ml-6 text-xs text-gray-500">When enabled, regular users can see the username of who made each request. Admins always see this information.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Save Button -->
+            <div class="flex justify-end">
+                <button 
+                    type="submit"
+                    class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                >
+                    Save Settings
+                </button>
+            </div>
+        </form>
+
+        <!-- Connection Test Results -->
+        <div id="connection-results" class="mt-6"></div>
+
+        <!-- User Management -->
+        <div class="mt-8 bg-white shadow rounded-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-900">User Management</h2>
+                <div class="space-x-2">
+                    <button 
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                        hx-post="{{ base_url }}/admin/import-friends"
+                        hx-target="#import-result"
+                        hx-swap="innerHTML"
+                    >
+                        Import Plex Friends
+                    </button>
+                    <a href="{{ base_url }}/admin/users" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Manage Users
+                    </a>
+                </div>
+            </div>
+            <div id="import-result" class="mt-4"></div>
+            <p class="text-sm text-gray-600">
+                Import your Plex friends to allow them to log in and make requests. 
+                You can also manually manage user permissions and access.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
