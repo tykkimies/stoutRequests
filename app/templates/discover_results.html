@@ -112,15 +112,18 @@
         {% endfor %}
     </div>
 
-    <!-- Note: Load more functionality removed as TMDB may not return additional pages for some categories -->
-    <div class="w-full text-center mt-8 mb-8">
-        <p class="text-sm text-gray-500">
-            {% if results|length >= 20 %}
-            Showing {{ results|length }} results
-            {% else %}
-            Showing all {{ results|length }} available results
-            {% endif %}
-        </p>
+    <!-- Infinite scroll loading indicator -->
+    <div id="discover-loading" class="text-center py-8 hidden">
+        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p class="text-gray-500">Loading more content...</p>
+    </div>
+    
+    <!-- Invisible sentinel for infinite scroll -->
+    <div id="discover-sentinel" class="h-1"></div>
+    
+    <!-- End of results indicator -->
+    <div id="discover-end" class="text-center py-8 hidden">
+        <p class="text-gray-500">You've reached the end!</p>
     </div>
 </div>
 
@@ -142,4 +145,132 @@
     overflow: hidden;
 }
 </style>
+
+<script>
+// Initialize infinite scroll for discover results
+(function initializeDiscoverInfiniteScroll() {
+    console.log('🔧 Discover infinite scroll script starting...');
+    
+    const resultsGrid = document.getElementById('results-grid');
+    const loadingIndicator = document.getElementById('discover-loading');
+    const endIndicator = document.getElementById('discover-end');
+    const sentinel = document.getElementById('discover-sentinel');
+    
+    console.log('🔧 Elements found:', {
+        resultsGrid: !!resultsGrid,
+        loadingIndicator: !!loadingIndicator,
+        endIndicator: !!endIndicator,
+        sentinel: !!sentinel
+    });
+    
+    if (!resultsGrid || !loadingIndicator || !sentinel) {
+        console.error('❌ Missing required elements for infinite scroll');
+        return;
+    }
+    
+    let currentPage = 1; // Page 1 is already loaded, start loading from page 2
+    let isLoading = false;
+    let hasMoreResults = true;
+    
+    // Function to load more results
+    function loadMoreResults() {
+        if (isLoading || !hasMoreResults) return;
+        
+        isLoading = true;
+        loadingIndicator.classList.remove('hidden');
+        
+        currentPage++; // Increment to next page
+        
+        // Get current filters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        urlParams.set('page', currentPage);
+        
+        console.log(`📖 Loading discover page ${currentPage}`);
+        
+        fetch(`${window.location.pathname}?${urlParams.toString()}`, {
+            headers: {
+                'Accept': 'text/html',
+                'HX-Request': 'true'  // Tell server this is an HTMX/AJAX request
+            }
+        })
+        .then(response => response.text())
+        .then(html => {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            
+            // Look for the results grid in the returned HTML
+            let newResultsGrid = tempDiv.querySelector('#results-grid');
+            
+            // If not found, this might be a full page response, so try to find it in the full document
+            if (!newResultsGrid) {
+                newResultsGrid = tempDiv.querySelector('.grid');
+            }
+            
+            const newResults = newResultsGrid ? Array.from(newResultsGrid.children) : [];
+            
+            console.log(`📊 Loaded ${newResults.length} new results for page ${currentPage + 1}`);
+            
+            if (newResults.length > 0) {
+                // Append new results to the existing grid
+                newResults.forEach(result => {
+                    resultsGrid.appendChild(result);
+                    // Process HTMX attributes on new content
+                    if (typeof htmx !== 'undefined') {
+                        htmx.process(result);
+                    }
+                });
+                
+                // Check if we should continue loading (assume we've reached the end if we get less than 20 results)
+                if (newResults.length < 20) {
+                    hasMoreResults = false;
+                    loadingIndicator.classList.add('hidden');
+                    endIndicator.classList.remove('hidden');
+                    console.log('📄 Reached end of results');
+                }
+            } else {
+                // No more results
+                hasMoreResults = false;
+                loadingIndicator.classList.add('hidden');
+                endIndicator.classList.remove('hidden');
+                console.log('📄 No more results available');
+            }
+            
+            isLoading = false;
+            if (hasMoreResults) {
+                loadingIndicator.classList.add('hidden');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading more discover results:', error);
+            loadingIndicator.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-red-600 mb-2">Error loading content</p>
+                    <button onclick="loadMoreResults()" class="bg-orange-600 text-white px-4 py-2 rounded text-sm">
+                        Try Again
+                    </button>
+                </div>
+            `;
+            isLoading = false;
+        });
+    }
+    
+    // Set up intersection observer for infinite scroll
+    console.log('🔧 Setting up IntersectionObserver...');
+    const observer = new IntersectionObserver((entries) => {
+        console.log('📱 Discover sentinel intersecting:', entries[0].isIntersecting, 'hasMoreResults:', hasMoreResults, 'isLoading:', isLoading);
+        if (entries[0].isIntersecting && hasMoreResults && !isLoading) {
+            console.log('🔄 Discover infinite scroll triggered');
+            loadMoreResults();
+        }
+    }, {
+        rootMargin: '200px' // Start loading when user is 200px from the sentinel
+    });
+    
+    observer.observe(sentinel);
+    console.log('✅ IntersectionObserver set up and observing sentinel');
+    
+    // Make loadMoreResults available globally for error retry button
+    window.loadMoreResults = loadMoreResults;
+})(); // Immediately invoke the function
+</script>
 

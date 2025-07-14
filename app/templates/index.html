@@ -119,28 +119,32 @@
                             </div>
                             <div id="content-sources-container" class="space-y-1 max-h-32 overflow-y-auto border border-gray-300 rounded-md p-2">
                                 <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded font-medium">
-                                    <input type="checkbox" id="sources-all" name="content-sources" value="all" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    <input type="checkbox" id="sources-all" name="content-sources" value="all" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
                                     ✨ All Sources
                                 </label>
                                 <hr class="my-1 border-gray-200">
+                                <div class="text-xs text-gray-500 px-1 py-1 italic">
+                                    Leave all unchecked to search all content with filters below
+                                </div>
+                                <hr class="my-1 border-gray-200">
                                 <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                                    <input type="checkbox" name="content-sources" value="trending" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    <input type="checkbox" name="content-sources" value="trending" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
                                     🔥 Trending
                                 </label>
                                 <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                                    <input type="checkbox" name="content-sources" value="popular" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    <input type="checkbox" name="content-sources" value="popular" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
                                     ⭐ Popular
                                 </label>
                                 <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                                    <input type="checkbox" name="content-sources" value="top_rated" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    <input type="checkbox" name="content-sources" value="top_rated" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
                                     🏆 Top Rated
                                 </label>
                                 <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                                    <input type="checkbox" name="content-sources" value="upcoming" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    <input type="checkbox" name="content-sources" value="upcoming" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
                                     🗓️ Upcoming
                                 </label>
                                 <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                                    <input type="checkbox" name="content-sources" value="now_playing" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" checked>
+                                    <input type="checkbox" name="content-sources" value="now_playing" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3">
                                     🎭 Now Playing
                                 </label>
                             </div>
@@ -534,6 +538,59 @@
                         </div>
                     </div>
 
+                    <!-- Personalized Recommendations -->
+                    <div class="category-section" data-category="personalized-recommendations" data-order="1.8">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                                <div class="drag-handle hidden mr-3 cursor-move">
+                                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                    </svg>
+                                </div>
+                                <svg class="w-5 h-5 text-pink-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
+                                </svg>
+                                Recommended for You
+                            </h2>
+                            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('personalized-recommendations')">
+                                View All →
+                            </button>
+                        </div>
+                        <div class="flex items-center category-scroll-wrapper max-w-full">
+                            <!-- Left Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-left opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="personalized-recommendations-content" onclick="scrollCategory(this, 'left')">
+                                    <svg class="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Content Area -->
+                            <div class="flex-1 overflow-hidden">
+                                <div id="personalized-recommendations-content" 
+                                     class="horizontal-scroll"
+                                     hx-get="{{ base_url }}/discover/category?type=recommendations&sort=personalized&limit=20"
+                                     hx-trigger="load"
+                                     hx-target="this">
+                                    <div class="text-center py-8">
+                                        <div class="animate-spin w-5 h-5 border-2 border-pink-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p class="text-gray-500 text-sm">Loading personalized recommendations...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Arrow Space -->
+                            <div class="flex-shrink-0 w-12 flex justify-center">
+                                <button class="scroll-arrow scroll-right opacity-30 hover:opacity-100 transition-opacity disabled:opacity-10" data-target="personalized-recommendations-content" onclick="scrollCategory(this, 'right')">
+                                    <svg class="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Trending Movies -->
                     <div class="category-section" data-category="trending-movies" data-order="2">
                         <div class="flex items-center justify-between mb-4">
@@ -849,13 +906,99 @@
 }
 
 
-.category-expanded {
-    max-height: none !important;
+/* Category Animation Styles */
+.category-section {
+    transition: all 0.4s cubic-bezier(0.4, 0.0, 0.2, 1);
+    transform-origin: top;
 }
 
-.category-collapsed {
-    max-height: 280px;
-    overflow: hidden;
+.category-section.expanding {
+    animation: categoryExpand 0.4s cubic-bezier(0.4, 0.0, 0.2, 1) forwards;
+}
+
+.category-section.collapsing {
+    animation: categoryCollapse 0.4s cubic-bezier(0.4, 0.0, 0.2, 1) forwards;
+}
+
+.category-section.expanded {
+    transform: scale(1);
+}
+
+.category-section.hidden-for-expansion {
+    opacity: 0;
+    transform: scale(0.95) translateY(-20px);
+    pointer-events: none;
+    transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Animation keyframes */
+@keyframes categoryExpand {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.02);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes categoryCollapse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* Smooth loading states */
+.category-content-loading {
+    transition: opacity 0.3s ease;
+}
+
+.category-content-loaded {
+    animation: fadeInUp 0.5s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+@keyframes fadeInUp {
+    0% {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Enhanced button transitions */
+.category-section button {
+    transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.category-section button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+/* Arrow scroll buttons enhanced transitions */
+.scroll-arrow {
+    transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    border-radius: 50%;
+    padding: 8px;
+}
+
+.scroll-arrow:hover {
+    background-color: rgba(255,255,255,0.9);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    transform: scale(1.1);
 }
 
 /* Ensure content areas stay within viewport bounds */
@@ -932,7 +1075,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Genres are now static - no dynamic loading needed
     
-    // Content Sources "All" checkbox behavior
+    // Content Sources behavior
     const allSourcesCheckbox = document.getElementById('sources-all');
     const individualSourceCheckboxes = document.querySelectorAll('input[name="content-sources"]:not(#sources-all)');
     
@@ -1008,6 +1151,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const categoriesContainer = document.querySelector('.space-y-8');
         const reorderButton = document.getElementById('reorder-toggle');
         
+        // Push state to browser history for proper back button behavior
+        window.history.pushState(
+            { view: 'filtered' }, 
+            'Filtered Results - Stout Requests', 
+            window.location.href
+        );
+        
         // Hide reorder button in filtered view
         if (reorderButton) {
             reorderButton.classList.add('hidden');
@@ -1021,7 +1171,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <svg class="w-5 h-5 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.207A1 1 0 013 6.5V4z"></path>
                         </svg>
-                        Filtered Results: ${mediaType === 'movie' ? 'Movies' : mediaType === 'tv' ? 'TV Shows' : 'Movies & TV'} • ${selectedContentSources.length === 5 ? 'All Sources' : selectedContentSources.map(s => s.replace('_', ' ')).join(', ')}
+                        ${selectedContentSources.length === 0 ? 'Discover' : 'Filtered Results'}: ${mediaType === 'movie' ? 'Movies' : mediaType === 'tv' ? 'TV Shows' : 'Movies & TV'}${selectedContentSources.length > 0 ? ' • ' + (selectedContentSources.length === 5 ? 'All Sources' : selectedContentSources.map(s => s.replace('_', ' ')).join(', ')) : ' • All Content'}
                     </h2>
                     <button onclick="resetToCategories()" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
                         ← Back to Categories
@@ -1084,6 +1234,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (typeof htmx !== 'undefined') {
                     htmx.process(filteredContent);
                 }
+                
+                // Initialize infinite scroll for the loaded content
+                initializeFilteredResultsInfiniteScroll(params.toString());
             })
             .catch(error => {
                 document.getElementById('filtered-content').innerHTML = `
@@ -1160,15 +1313,34 @@ function doExpandCategory(categoryId) {
     const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
     const contentDiv = document.querySelector(`#${categoryId}-content`);
     
-    // Hide other categories
+    // Push state to browser history for proper back button behavior
+    const currentUrl = new URL(window.location);
+    currentUrl.searchParams.set('view', categoryId);
+    window.history.pushState(
+        { view: 'category', categoryId: categoryId }, 
+        `${getCategoryDisplayName(categoryId)} - Stout Requests`, 
+        currentUrl
+    );
+    
+    // Add expanding animation to current category
+    categorySection.classList.add('expanding');
+    
+    // Hide other categories with smooth animation
     allCategories.forEach(section => {
         if (section !== categorySection) {
-            section.style.display = 'none';
+            section.classList.add('hidden-for-expansion');
+            // Hide completely after animation
+            setTimeout(() => {
+                section.style.display = 'none';
+            }, 300);
         }
     });
     
-    // Mark this category as expanded
-    categorySection.classList.add('expanded');
+    // Mark this category as expanded after animation
+    setTimeout(() => {
+        categorySection.classList.remove('expanding');
+        categorySection.classList.add('expanded');
+    }, 400);
     
     // Update button text
     expandButton.innerHTML = '← Back to Categories';
@@ -1194,6 +1366,15 @@ function collapseCategory(categoryId) {
     const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
     const contentDiv = document.querySelector(`#${categoryId}-content`);
     
+    // Update browser history to remove the view parameter
+    const currentUrl = new URL(window.location);
+    currentUrl.searchParams.delete('view');
+    window.history.pushState(
+        { view: 'categories' }, 
+        'Stout Requests', 
+        currentUrl
+    );
+    
     // Clean up infinite scroll observer if it exists
     if (contentDiv.scrollObserver) {
         contentDiv.scrollObserver.disconnect();
@@ -1201,13 +1382,20 @@ function collapseCategory(categoryId) {
         delete contentDiv.loadMoreItems;
     }
     
-    // Show all categories again
-    allCategories.forEach(section => {
-        section.style.display = 'block';
-    });
-    
-    // Mark this category as collapsed
+    // Add collapsing animation to current category
+    categorySection.classList.add('collapsing');
     categorySection.classList.remove('expanded');
+    
+    // Show all categories again with smooth animation
+    setTimeout(() => {
+        allCategories.forEach(section => {
+            section.style.display = 'block';
+            section.classList.remove('hidden-for-expansion');
+        });
+        
+        // Clean up animation classes
+        categorySection.classList.remove('collapsing');
+    }, 100);
     
     // Update button text
     expandButton.innerHTML = 'View All →';
@@ -1228,6 +1416,11 @@ function collapseCategory(categoryId) {
         .then(response => response.text())
         .then(html => {
             contentDiv.innerHTML = html;
+            // Add fade-in animation to loaded content
+            contentDiv.classList.add('category-content-loaded');
+            setTimeout(() => {
+                contentDiv.classList.remove('category-content-loaded');
+            }, 500);
         })
         .catch(error => {
             contentDiv.innerHTML = `
@@ -1270,83 +1463,283 @@ function getCategoryParams(categoryId) {
             params.set('type', 'movie');
             params.set('sort', 'upcoming');
             break;
+        case 'personalized-recommendations':
+            params.set('type', 'recommendations');
+            params.set('sort', 'personalized');
+            break;
     }
     
     return params.toString();
 }
 
+// Helper function to get display names for categories
+function getCategoryDisplayName(categoryId) {
+    const categoryNames = {
+        'recently-added': 'Recently Added to Plex',
+        'recent-requests': 'Recent Requests',
+        'personalized-recommendations': 'Recommended for You',
+        'trending-movies': 'Trending Movies',
+        'popular-movies': 'Popular Movies',
+        'trending-tv': 'Trending TV Shows',
+        'popular-tv': 'Popular TV Shows',
+        'upcoming-movies': 'Upcoming Movies'
+    };
+    return categoryNames[categoryId] || 'Category';
+}
+
+// Browser history management for back button support
+window.addEventListener('popstate', function(event) {
+    console.log('👈 Popstate event:', event.state, window.location.search);
+    
+    if (event.state) {
+        if (event.state.view === 'categories') {
+            // User pressed back to return to categories view
+            // Check if we're in filtered mode or category expanded mode
+            const filteredContent = document.getElementById('filtered-content');
+            const expandedCategory = document.querySelector('.category-section.expanded');
+            
+            if (filteredContent) {
+                // We're in filtered view - use resetToCategories like the button does
+                resetToCategories();
+            } else if (expandedCategory) {
+                // We're in category expanded view - use collapseCategory like the button does
+                const categoryId = expandedCategory.querySelector('[id$="-content"]').id.replace('-content', '');
+                collapseCategory(categoryId);
+            }
+        } else if (event.state.view === 'category' && event.state.categoryId) {
+            // User navigated to a specific category view
+            doExpandCategoryWithoutHistory(event.state.categoryId);
+        } else if (event.state.view === 'filtered') {
+            // User navigated back to filtered results - not much to do since they're already shown
+            // This handles forward navigation after going back from filtered view
+        }
+    } else {
+        // No state - could be initial navigation or back to start
+        // Check if URL has view parameter and clean it up
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('view')) {
+            urlParams.delete('view');
+            const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
+            window.history.replaceState({ view: 'categories' }, 'Stout Requests', newUrl);
+        }
+        
+        // Check if we're in filtered mode or category expanded mode  
+        const filteredContent = document.getElementById('filtered-content');
+        const expandedCategory = document.querySelector('.category-section.expanded');
+        
+        if (filteredContent) {
+            // We're in filtered view - use resetToCategories
+            resetToCategories();
+        } else if (expandedCategory) {
+            // We're in category expanded view - use collapseCategory
+            const categoryId = expandedCategory.querySelector('[id$="-content"]').id.replace('-content', '');
+            collapseCategory(categoryId);
+        }
+    }
+});
+
+// Helper functions that don't modify browser history (used by popstate handler)
+function doExpandCategoryWithoutHistory(categoryId) {
+    const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
+    if (!categorySection) return;
+    
+    const allCategories = document.querySelectorAll('.category-section');
+    const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
+    const contentDiv = document.querySelector(`#${categoryId}-content`);
+    
+    // Hide other categories
+    allCategories.forEach(section => {
+        if (section !== categorySection) {
+            section.style.display = 'none';
+        }
+    });
+    
+    // Mark this category as expanded
+    categorySection.classList.add('expanded');
+    
+    // Update button text
+    expandButton.innerHTML = '← Back to Categories';
+    
+    // Load full grid data for this category
+    const categoryParams = getCategoryParams(categoryId);
+    
+    // Show loading state
+    contentDiv.innerHTML = `
+        <div class="text-center py-12">
+            <div class="animate-spin w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p class="text-gray-500 font-medium">Loading all content...</p>
+        </div>
+    `;
+    
+    // Initialize vertical scroll view with infinite loading
+    initializeVerticalScrollView(categoryId, categoryParams, contentDiv);
+}
+
+
+// Check URL on page load for direct category links
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const viewParam = urlParams.get('view');
+    
+    if (viewParam && viewParam !== 'categories') {
+        // User navigated directly to a category view
+        setTimeout(() => {
+            doExpandCategoryWithoutHistory(viewParam);
+        }, 500); // Small delay to ensure page is fully loaded
+    }
+});
+
 // Vertical scroll view functionality
 function initializeVerticalScrollView(categoryId, categoryParams, contentDiv) {
-    let currentOffset = 0;
+    console.log('🔧 Initializing vertical scroll view for category:', categoryId);
+    let currentPage = 1; // Page 1 will be loaded first
     let isLoading = false;
     let hasMoreItems = true;
     const itemsPerPage = 40; // Load more items per page for better experience
     
-    // Set up the main container for vertical scroll
+    // Show loading state while fetching first page
     contentDiv.innerHTML = `
-        <div class="vertical-scroll-container">
-            <div id="vertical-grid-${categoryId}" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7 gap-4"></div>
-            <div id="vertical-loading-${categoryId}" class="text-center py-8">
-                <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-                <p class="text-gray-500">Loading more content...</p>
-            </div>
-            <div id="vertical-end-${categoryId}" class="text-center py-8 hidden">
-                <p class="text-gray-500">You've reached the end!</p>
-            </div>
+        <div class="text-center py-12">
+            <div class="animate-spin w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p class="text-gray-500 font-medium">Loading all content...</p>
         </div>
     `;
     
-    const gridContainer = document.getElementById(`vertical-grid-${categoryId}`);
-    const loadingIndicator = document.getElementById(`vertical-loading-${categoryId}`);
-    const endIndicator = document.getElementById(`vertical-end-${categoryId}`);
+    // Load the first page with view=grid to get the full template
+    const firstPageUrl = `{{ base_url }}/discover/category?${categoryParams}&page=1&view=grid`;
+    console.log(`🌐 Loading first page: ${firstPageUrl}`);
+    
+    fetch(firstPageUrl)
+        .then(response => response.text())
+        .then(html => {
+            console.log(`📄 First page loaded, HTML length: ${html.length}`);
+            // Load the full template into the content div
+            contentDiv.innerHTML = html;
+            
+            // Now set up infinite scroll for this loaded content
+            initializeCategoryInfiniteScroll(categoryId, categoryParams, contentDiv);
+        })
+        .catch(error => {
+            console.error('Error loading first page:', error);
+            contentDiv.innerHTML = `
+                <div class="text-center py-8 text-red-600">
+                    <p>Error loading content</p>
+                    <button onclick="initializeVerticalScrollView('${categoryId}', '${categoryParams}', document.querySelector('#${categoryId}-content'))" class="mt-2 bg-orange-600 text-white px-4 py-2 rounded">
+                        Try Again
+                    </button>
+                </div>
+            `;
+        });
+}
+
+// Initialize infinite scroll for category view all (similar to filtered results)
+function initializeCategoryInfiniteScroll(categoryId, categoryParams, contentDiv) {
+    console.log('🔧 Initializing category infinite scroll for:', categoryId);
+    
+    const resultsGrid = contentDiv.querySelector('#results-grid');
+    
+    if (!resultsGrid) {
+        console.error('❌ Missing results grid for category infinite scroll');
+        return;
+    }
+    
+    let currentPage = 1; // Page 1 is already loaded
+    let isLoading = false;
+    let hasMoreResults = true;
+    
+    // Add loading indicator and sentinel to the content
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.id = `category-loading-${categoryId}`;
+    loadingIndicator.className = 'text-center py-8 hidden';
+    loadingIndicator.innerHTML = `
+        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p class="text-gray-500">Loading more content...</p>
+    `;
+    
+    const sentinel = document.createElement('div');
+    sentinel.id = `category-sentinel-${categoryId}`;
+    sentinel.className = 'h-1';
+    
+    const endIndicator = document.createElement('div');
+    endIndicator.id = `category-end-${categoryId}`;
+    endIndicator.className = 'text-center py-8 hidden';
+    endIndicator.innerHTML = '<p class="text-gray-500">You\'ve reached the end!</p>';
+    
+    // Add elements to DOM
+    contentDiv.appendChild(loadingIndicator);
+    contentDiv.appendChild(sentinel);
+    contentDiv.appendChild(endIndicator);
     
     // Function to load more items
     function loadMoreItems() {
-        if (isLoading || !hasMoreItems) return;
+        console.log(`🔧 loadMoreItems called for ${categoryId}:`, {
+            isLoading,
+            hasMoreResults,
+            currentPage
+        });
+        
+        if (isLoading || !hasMoreResults) {
+            console.log(`⚠️ loadMoreItems blocked for ${categoryId}:`, { isLoading, hasMoreResults });
+            return;
+        }
         
         isLoading = true;
         loadingIndicator.classList.remove('hidden');
         
-        console.log(`📖 Loading more items for ${categoryId}, offset: ${currentOffset}`);
+        currentPage++;
+        console.log(`📖 Loading more items for ${categoryId}, page: ${currentPage}`);
         
-        fetch(`{{ base_url }}/discover/category?${categoryParams}&limit=${itemsPerPage}&offset=${currentOffset}&view=grid`)
-            .then(response => response.text())
+        const fetchUrl = `{{ base_url }}/discover/category?${categoryParams}&page=${currentPage}&view=grid`;
+        console.log(`🌐 Fetching: ${fetchUrl}`);
+        
+        fetch(fetchUrl)
+            .then(response => {
+                console.log(`📡 Response status: ${response.status}`);
+                return response.text();
+            })
             .then(html => {
+                console.log(`📄 Response HTML length: ${html.length}`);
+                
                 const tempDiv = document.createElement('div');
                 tempDiv.innerHTML = html;
                 
-                const newItemsGrid = tempDiv.querySelector('#results-grid');
-                const newItems = newItemsGrid ? Array.from(newItemsGrid.children) : [];
+                const newResultsGrid = tempDiv.querySelector('#results-grid');
+                const newResults = newResultsGrid ? Array.from(newResultsGrid.children) : [];
                 
-                console.log(`📊 Loaded ${newItems.length} new items`);
+                console.log(`📊 Loaded ${newResults.length} new items for ${categoryId}`);
                 
-                if (newItems.length > 0) {
+                if (newResults.length > 0) {
                     // Append new items to the grid
-                    newItems.forEach(item => {
-                        gridContainer.appendChild(item);
+                    newResults.forEach(item => {
+                        resultsGrid.appendChild(item);
                         // Process HTMX attributes on new content
                         if (typeof htmx !== 'undefined') {
                             htmx.process(item);
                         }
                     });
                     
-                    currentOffset += itemsPerPage;
-                    
-                    // Check if there are more items (if we got less than requested, we're at the end)
-                    if (newItems.length < itemsPerPage) {
-                        hasMoreItems = false;
+                    // Check if we should continue loading
+                    if (newResults.length < 20) {
+                        hasMoreResults = false;
+                        loadingIndicator.classList.add('hidden');
                         endIndicator.classList.remove('hidden');
+                        console.log(`📄 Reached end of results for ${categoryId}`);
                     }
                 } else {
-                    hasMoreItems = false;
+                    // No more results
+                    hasMoreResults = false;
+                    loadingIndicator.classList.add('hidden');
                     endIndicator.classList.remove('hidden');
+                    console.log(`📄 No more results available for ${categoryId}`);
                 }
                 
-                loadingIndicator.classList.add('hidden');
                 isLoading = false;
+                if (hasMoreResults) {
+                    loadingIndicator.classList.add('hidden');
+                }
             })
             .catch(error => {
-                console.error('Error loading more items:', error);
+                console.error(`Error loading more items for ${categoryId}:`, error);
                 loadingIndicator.innerHTML = `
                     <div class="text-center py-4">
                         <p class="text-red-600 mb-2">Error loading content</p>
@@ -1359,24 +1752,161 @@ function initializeVerticalScrollView(categoryId, categoryParams, contentDiv) {
             });
     }
     
-    // Set up infinite scroll observer
+    // Set up intersection observer for infinite scroll
+    console.log(`🔧 Setting up IntersectionObserver for ${categoryId}...`);
     const observer = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting && hasMoreItems && !isLoading) {
-            console.log('🔄 Infinite scroll triggered');
+        console.log(`📱 ${categoryId} sentinel intersecting:`, entries[0].isIntersecting, 'hasMoreResults:', hasMoreResults, 'isLoading:', isLoading);
+        if (entries[0].isIntersecting && hasMoreResults && !isLoading) {
+            console.log(`🔄 ${categoryId} infinite scroll triggered`);
             loadMoreItems();
         }
     }, {
-        rootMargin: '200px' // Trigger loading when user is 200px from the loading indicator
+        rootMargin: '200px'
     });
     
-    observer.observe(loadingIndicator);
+    observer.observe(sentinel);
+    console.log(`✅ IntersectionObserver set up for ${categoryId}`);
     
-    // Store the observer and functions for cleanup
+    // Store observer for cleanup
     contentDiv.scrollObserver = observer;
     contentDiv.loadMoreItems = loadMoreItems;
+}
+
+// Initialize infinite scroll for filtered results (Apply Filters)
+function initializeFilteredResultsInfiniteScroll(searchParams) {
+    console.log('🔧 Initializing filtered results infinite scroll with params:', searchParams);
     
-    // Load initial items
-    loadMoreItems();
+    const resultsGrid = document.querySelector('#filtered-content #results-grid');
+    const filteredContent = document.getElementById('filtered-content');
+    
+    if (!resultsGrid || !filteredContent) {
+        console.error('❌ Missing elements for filtered results infinite scroll');
+        return;
+    }
+    
+    let currentPage = 1; // Page 1 is already loaded
+    let isLoading = false;
+    let hasMoreResults = true;
+    
+    // Add loading indicator and sentinel to the filtered content
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.id = 'filtered-loading';
+    loadingIndicator.className = 'text-center py-8 hidden';
+    loadingIndicator.innerHTML = `
+        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p class="text-gray-500">Loading more content...</p>
+    `;
+    
+    const sentinel = document.createElement('div');
+    sentinel.id = 'filtered-sentinel';
+    sentinel.className = 'h-1';
+    
+    const endIndicator = document.createElement('div');
+    endIndicator.id = 'filtered-end';
+    endIndicator.className = 'text-center py-8 hidden';
+    endIndicator.innerHTML = '<p class="text-gray-500">You\'ve reached the end!</p>';
+    
+    // Add elements to DOM
+    filteredContent.appendChild(loadingIndicator);
+    filteredContent.appendChild(sentinel);
+    filteredContent.appendChild(endIndicator);
+    
+    // Function to load more results
+    function loadMoreResults() {
+        console.log('🔧 loadMoreResults called for filtered results:', {
+            isLoading,
+            hasMoreResults,
+            currentPage
+        });
+        
+        if (isLoading || !hasMoreResults) {
+            console.log('⚠️ loadMoreResults blocked:', { isLoading, hasMoreResults });
+            return;
+        }
+        
+        isLoading = true;
+        loadingIndicator.classList.remove('hidden');
+        
+        currentPage++;
+        console.log(`📖 Loading more filtered results, page: ${currentPage}`);
+        
+        // Add page parameter to existing search params
+        const params = new URLSearchParams(searchParams);
+        params.set('page', currentPage);
+        
+        fetch(`{{ base_url }}/discover?${params.toString()}`)
+            .then(response => response.text())
+            .then(html => {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                
+                const newResultsGrid = tempDiv.querySelector('#results-grid');
+                const newResults = newResultsGrid ? Array.from(newResultsGrid.children) : [];
+                
+                console.log(`📊 Loaded ${newResults.length} new filtered results for page ${currentPage}`);
+                
+                if (newResults.length > 0) {
+                    // Append new results to the existing grid
+                    newResults.forEach(result => {
+                        resultsGrid.appendChild(result);
+                        // Process HTMX attributes on new content
+                        if (typeof htmx !== 'undefined') {
+                            htmx.process(result);
+                        }
+                    });
+                    
+                    // Check if we should continue loading
+                    if (newResults.length < 20) {
+                        hasMoreResults = false;
+                        loadingIndicator.classList.add('hidden');
+                        endIndicator.classList.remove('hidden');
+                        console.log('📄 Reached end of filtered results');
+                    }
+                } else {
+                    // No more results
+                    hasMoreResults = false;
+                    loadingIndicator.classList.add('hidden');
+                    endIndicator.classList.remove('hidden');
+                    console.log('📄 No more filtered results available');
+                }
+                
+                isLoading = false;
+                if (hasMoreResults) {
+                    loadingIndicator.classList.add('hidden');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading more filtered results:', error);
+                loadingIndicator.innerHTML = `
+                    <div class="text-center py-4">
+                        <p class="text-red-600 mb-2">Error loading content</p>
+                        <button onclick="loadMoreResults()" class="bg-orange-600 text-white px-4 py-2 rounded text-sm">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+                isLoading = false;
+            });
+    }
+    
+    // Set up intersection observer for infinite scroll
+    console.log('🔧 Setting up IntersectionObserver for filtered results...');
+    const observer = new IntersectionObserver((entries) => {
+        console.log('📱 Filtered sentinel intersecting:', entries[0].isIntersecting, 'hasMoreResults:', hasMoreResults, 'isLoading:', isLoading);
+        if (entries[0].isIntersecting && hasMoreResults && !isLoading) {
+            console.log('🔄 Filtered infinite scroll triggered');
+            loadMoreResults();
+        }
+    }, {
+        rootMargin: '200px'
+    });
+    
+    observer.observe(sentinel);
+    console.log('✅ IntersectionObserver set up for filtered results');
+    
+    // Store observer for cleanup
+    filteredContent.scrollObserver = observer;
+    filteredContent.loadMoreResults = loadMoreResults;
 }
 
 // Category reordering functionality
@@ -2062,18 +2592,16 @@ function clearGenres() {
 }
 
 function clearContentSources() {
+    // Uncheck all content sources to enable discover mode
     document.querySelectorAll('input[name="content-sources"]:checked').forEach(cb => cb.checked = false);
-    // Re-check "All Sources" as default
-    document.getElementById('sources-all').checked = true;
-    document.querySelectorAll('input[name="content-sources"]:not(#sources-all)').forEach(cb => cb.checked = true);
     updateFilterClearButtons();
     applyFilters();
 }
 
 function clearAllFilters() {
     document.getElementById('media-type').value = 'mixed';
-    // Reset content sources to all selected
-    document.querySelectorAll('input[name="content-sources"]').forEach(cb => cb.checked = true);
+    // Reset content sources to none (discover mode)
+    document.querySelectorAll('input[name="content-sources"]:checked').forEach(cb => cb.checked = false);
     document.querySelectorAll('input[name="genres"]:checked').forEach(cb => cb.checked = false);
     document.getElementById('rating-source').value = '';
     document.getElementById('rating-range-container').classList.add('hidden');

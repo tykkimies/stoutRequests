@@ -160,9 +160,27 @@ class PermissionsService:
         """Check if user can request 4K content"""
         return self.has_permission(user_id, PermissionFlags.REQUEST_4K)
     
-    def should_auto_approve(self, user_id: int) -> bool:
+    def should_auto_approve(self, user_id: int, media_type: str = None) -> bool:
         """Check if user's requests should be auto-approved"""
-        return self.has_permission(user_id, PermissionFlags.REQUEST_AUTO_APPROVE)
+        if not media_type:
+            # Check if user has any auto-approve permissions
+            return (
+                self.has_permission(user_id, PermissionFlags.REQUEST_AUTO_APPROVE_MOVIES) or
+                self.has_permission(user_id, PermissionFlags.REQUEST_AUTO_APPROVE_TV) or
+                self.has_permission(user_id, PermissionFlags.REQUEST_AUTO_APPROVE_4K)
+            )
+        
+        # Check specific media type auto-approve permission
+        permission_map = {
+            'movie': PermissionFlags.REQUEST_AUTO_APPROVE_MOVIES,
+            'tv': PermissionFlags.REQUEST_AUTO_APPROVE_TV,
+        }
+        
+        permission = permission_map.get(media_type.lower())
+        if permission:
+            return self.has_permission(user_id, permission)
+        
+        return False
     
     def get_request_limit(self, user_id: int, global_default: int = 10) -> int:
         """Get user's request limit"""

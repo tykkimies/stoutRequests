@@ -277,7 +277,7 @@ async def unauthorized_page(
 async def discover_page(
     request: Request,
     media_type: str = "movie",
-    content_sources: list[str] = Query(default=["trending", "popular", "top_rated", "upcoming", "now_playing"]),
+    content_sources: list[str] = Query(default=[]),
     genres: list[str] = Query(default=[]),
     rating_source: str = "",
     rating_min: str = "",
@@ -307,101 +307,149 @@ async def discover_page(
         if rating_source == "tmdb" and rating_min:
             rating_filter = float(rating_min)
         
-        # Fetch content from multiple sources and combine results
+        # Check if we should use pure TMDB discover endpoint instead of content sources
+        use_discover_endpoint = (
+            not content_sources or  # No sources selected
+            len(content_sources) == 0
+        )
+        
+        print(f"🔍 DISCOVER DEBUG - Content sources received: {content_sources}")
+        print(f"🔍 DISCOVER DEBUG - Use discover endpoint: {use_discover_endpoint}")
+        print(f"🔍 DISCOVER DEBUG - Media type: {media_type}")
+        print(f"🔍 DISCOVER DEBUG - Genres: {genres}")
+        print(f"🔍 DISCOVER DEBUG - Rating filter: {rating_filter}")
+        
         all_results = []
         total_pages = 1
         total_results = 0
         
-        # Helper function to fetch from a specific content source
-        def fetch_from_source(source, target_media_type):
-            try:
-                if source == "trending":
-                    return tmdb_service.get_trending(target_media_type, page)
-                elif source == "popular":
-                    if target_media_type == "movie":
-                        return tmdb_service.discover_movies(
-                            page=page, sort_by="popularity.desc", 
-                            with_genres=genre_filter, vote_average_gte=rating_filter
-                        )
-                    else:
-                        return tmdb_service.discover_tv(
-                            page=page, sort_by="popularity.desc",
-                            with_genres=genre_filter, vote_average_gte=rating_filter
-                        )
-                elif source == "top_rated":
-                    if target_media_type == "movie":
-                        return tmdb_service.discover_movies(
-                            page=page, sort_by="vote_average.desc",
-                            with_genres=genre_filter, vote_average_gte=rating_filter
-                        )
-                    else:
-                        return tmdb_service.discover_tv(
-                            page=page, sort_by="vote_average.desc",
-                            with_genres=genre_filter, vote_average_gte=rating_filter
-                        )
-                elif source == "upcoming" and target_media_type == "movie":
-                    return tmdb_service.get_upcoming_movies(page)
-                elif source == "now_playing" and target_media_type == "movie":
-                    return tmdb_service.get_now_playing_movies(page)
-                else:
-                    return {"results": [], "total_pages": 1, "total_results": 0}
-            except Exception as e:
-                print(f"Error fetching from {source}: {e}")
-                return {"results": [], "total_pages": 1, "total_results": 0}
-        
-        # Determine which media types to fetch
-        media_types_to_fetch = ["movie", "tv"] if media_type == "mixed" else [media_type]
-        
-        # Fetch from each selected content source
-        seen_ids = set()  # For deduplication
-        
-        for source in content_sources:
+        if use_discover_endpoint:
+            print(f"🔍 Using TMDB Discover endpoint (no content sources) - Genres: {genres}, Rating: {rating_filter}")
+            
+            # Use TMDB discover endpoint with all filters - this searches ALL content, not just popular
+            media_types_to_fetch = ["movie", "tv"] if media_type == "mixed" else [media_type]
+            
             for target_media_type in media_types_to_fetch:
-                source_results = fetch_from_source(source, target_media_type)
-                
-                # Add media_type and deduplicate
-                for item in source_results.get('results', []):
-                    # Create unique identifier
-                    item_id = f"{item.get('id', 0)}_{target_media_type}"
+                try:
+                    if target_media_type == "movie":
+                        discover_results = tmdb_service.discover_movies(
+                            page=page,
+                            sort_by="popularity.desc",  # Sort by popularity but search all content
+                            with_genres=genre_filter,
+                            vote_average_gte=rating_filter,
+                        )
+                    else:  # tv
+                        discover_results = tmdb_service.discover_tv(
+                            page=page,
+                            sort_by="popularity.desc",  # Sort by popularity but search all content
+                            with_genres=genre_filter,
+                            vote_average_gte=rating_filter,
+                        )
                     
-                    if item_id not in seen_ids:
-                        seen_ids.add(item_id)
+                    # Add media_type and source info to all items
+                    for item in discover_results.get('results', []):
                         item['media_type'] = target_media_type
-                        item['content_source'] = source  # Track which source this came from
+                        item['content_source'] = 'discover_all'  # Indicate this is from discover endpoint
+                        all_results.append(item)
+                    
+                    # Update pagination info
+                    total_pages = max(total_pages, discover_results.get('total_pages', 1))
+                    total_results += discover_results.get('total_results', 0)
+                    
+                    print(f"🎯 Discover {target_media_type} returned {len(discover_results.get('results', []))} items from ALL content")
+                    
+                except Exception as e:
+                    print(f"❌ Error using discover endpoint for {target_media_type}: {e}")
+                    # Don't fallback to popular - if discover fails, show error
+                    continue
+        else:
+            print(f"🔍 Using traditional content sources: {content_sources}")
+            
+            # Helper function to fetch from a specific content source
+            def fetch_from_source(source, target_media_type):
+                try:
+                    if source == "trending":
+                        return tmdb_service.get_trending(target_media_type, page)
+                    elif source == "popular":
+                        if target_media_type == "movie":
+                            return tmdb_service.discover_movies(
+                                page=page, sort_by="popularity.desc", 
+                                with_genres=genre_filter, vote_average_gte=rating_filter
+                            )
+                        else:
+                            return tmdb_service.discover_tv(
+                                page=page, sort_by="popularity.desc",
+                                with_genres=genre_filter, vote_average_gte=rating_filter
+                            )
+                    elif source == "top_rated":
+                        if target_media_type == "movie":
+                            return tmdb_service.discover_movies(
+                                page=page, sort_by="vote_average.desc",
+                                with_genres=genre_filter, vote_average_gte=rating_filter
+                            )
+                        else:
+                            return tmdb_service.discover_tv(
+                                page=page, sort_by="vote_average.desc",
+                                with_genres=genre_filter, vote_average_gte=rating_filter
+                            )
+                    elif source == "upcoming" and target_media_type == "movie":
+                        return tmdb_service.get_upcoming_movies(page)
+                    elif source == "now_playing" and target_media_type == "movie":
+                        return tmdb_service.get_now_playing_movies(page)
+                    else:
+                        return {"results": [], "total_pages": 1, "total_results": 0}
+                except Exception as e:
+                    print(f"Error fetching from {source}: {e}")
+                    return {"results": [], "total_pages": 1, "total_results": 0}
+            
+            # Determine which media types to fetch
+            media_types_to_fetch = ["movie", "tv"] if media_type == "mixed" else [media_type]
+            
+            # Fetch from each selected content source
+            seen_ids = set()  # For deduplication
+            
+            for source in content_sources:
+                for target_media_type in media_types_to_fetch:
+                    source_results = fetch_from_source(source, target_media_type)
+                    
+                    # Add media_type and deduplicate
+                    for item in source_results.get('results', []):
+                        # Create unique identifier
+                        item_id = f"{item.get('id', 0)}_{target_media_type}"
                         
-                        # Apply genre filter for trending/upcoming/now_playing (which don't support server-side filtering)
-                        if source in ["trending", "upcoming", "now_playing"] and genre_filter:
-                            genre_ids = [int(g) for g in genres]
-                            if any(genre_id in item.get('genre_ids', []) for genre_id in genre_ids):
+                        if item_id not in seen_ids:
+                            seen_ids.add(item_id)
+                            item['media_type'] = target_media_type
+                            item['content_source'] = source  # Track which source this came from
+                            
+                            # Apply genre filter for trending/upcoming/now_playing (which don't support server-side filtering)
+                            if source in ["trending", "upcoming", "now_playing"] and genre_filter:
+                                genre_ids = [int(g) for g in genres]
+                                if any(genre_id in item.get('genre_ids', []) for genre_id in genre_ids):
+                                    all_results.append(item)
+                            elif source not in ["trending", "upcoming", "now_playing"]:
+                                # For discover endpoints, genres are already filtered server-side
                                 all_results.append(item)
-                        elif source not in ["trending", "upcoming", "now_playing"]:
-                            # For discover endpoints, genres are already filtered server-side
-                            all_results.append(item)
-                        elif not genre_filter:
-                            # No genre filter, include everything
-                            all_results.append(item)
-                
-                # Update pagination info
-                total_pages = max(total_pages, source_results.get('total_pages', 1))
-                total_results += source_results.get('total_results', 0)
-        
-        # Limit results to reasonable number per page and sort by popularity
-        results_per_page = 20
-        start_idx = (page - 1) * results_per_page
-        end_idx = start_idx + results_per_page
+                            elif not genre_filter:
+                                # No genre filter, include everything
+                                all_results.append(item)
+                    
+                    # Update pagination info
+                    total_pages = max(total_pages, source_results.get('total_pages', 1))
+                    total_results += source_results.get('total_results', 0)
         
         # Sort combined results by vote_average * popularity for better mixing
         all_results.sort(key=lambda x: (x.get('vote_average', 0) * 0.3 + x.get('popularity', 0) * 0.7), reverse=True)
         
-        # Create paginated results
-        paginated_results = all_results[start_idx:end_idx]
-        
-        # Create results structure
+        # For discover endpoint, return all results from current TMDB page (no artificial pagination)
+        # TMDB handles the real pagination with 20 results per page
         results = {
-            'results': paginated_results,
-            'total_pages': max(1, len(all_results) // results_per_page + (1 if len(all_results) % results_per_page else 0)),
-            'total_results': len(all_results)
+            'results': all_results,
+            'total_pages': total_pages,
+            'total_results': total_results
         }
+        
+        print(f"🔍 DISCOVER RESULTS - Page {page}: {len(all_results)} results, Total Pages: {total_pages}, Total Results: {total_results}")
         
         # Note: Genre and TMDB rating filtering is now handled server-side via discover endpoints
         # Only apply client-side filtering for cases where server-side filtering isn't available
@@ -555,6 +603,7 @@ async def discover_category(
     sort: str = "trending",
     limit: int = 20,
     offset: int = 0,
+    page: int = 1,
     view: str = "horizontal",
     current_user: User | None = Depends(get_current_user_optional),
     session: Session = Depends(get_session)
@@ -877,34 +926,204 @@ async def discover_category(
                 }
             )
         
-        # Handle TMDB categories with pagination
-        # Calculate page number from offset (TMDB uses 1-based pages, 20 items per page)
-        tmdb_page = (offset // 20) + 1
+        # Handle Personalized Recommendations based on user's request history
+        elif type == "recommendations" and sort == "personalized":
+            print(f"🎯 Fetching personalized recommendations for user: {current_user.username}")
+            
+            try:
+                # Get user's recent requests to base recommendations on
+                from app.models.media_request import MediaRequest
+                from datetime import datetime, timedelta
+                
+                # Look at requests from the past 6 months for better recommendations
+                six_months_ago = datetime.utcnow() - timedelta(days=180)
+                user_requests_statement = select(MediaRequest).where(
+                    MediaRequest.user_id == current_user.id,
+                    MediaRequest.created_at >= six_months_ago
+                ).order_by(MediaRequest.created_at.desc()).limit(20)  # Use last 20 requests
+                
+                user_requests = session.exec(user_requests_statement).all()
+                print(f"📊 Found {len(user_requests)} recent requests for recommendations")
+                
+                if not user_requests:
+                    # No request history, fall back to popular content
+                    print("📊 No request history, falling back to popular content")
+                    fallback_results = tmdb_service.get_popular("movie", 1)
+                    fallback_tv = tmdb_service.get_popular("tv", 1)
+                    
+                    all_results = []
+                    for item in fallback_results.get('results', [])[:10]:
+                        item['media_type'] = 'movie'
+                        item['recommendation_reason'] = 'Popular content'
+                        all_results.append(item)
+                    
+                    for item in fallback_tv.get('results', [])[:10]:
+                        item['media_type'] = 'tv'
+                        item['recommendation_reason'] = 'Popular content'
+                        all_results.append(item)
+                    
+                    has_more = False
+                else:
+                    # Generate recommendations based on user's request history
+                    recommendation_items = []
+                    seen_ids = set()
+                    
+                    for user_request in user_requests[:10]:  # Use top 10 requests for recommendations
+                        try:
+                            # Handle enum values safely
+                            request_media_type = user_request.media_type.value if hasattr(user_request.media_type, 'value') else str(user_request.media_type)
+                            
+                            # Get similar and recommended items
+                            if request_media_type == 'movie':
+                                similar_results = tmdb_service.get_movie_similar(user_request.tmdb_id, 1)
+                                rec_results = tmdb_service.get_movie_recommendations(user_request.tmdb_id, 1)
+                            else:
+                                similar_results = tmdb_service.get_tv_similar(user_request.tmdb_id, 1)
+                                rec_results = tmdb_service.get_tv_recommendations(user_request.tmdb_id, 1)
+                            
+                            # Add similar items
+                            for item in similar_results.get('results', [])[:3]:  # Top 3 similar
+                                item_id = f"{item['id']}_{request_media_type}"
+                                if item_id not in seen_ids:
+                                    seen_ids.add(item_id)
+                                    item['media_type'] = request_media_type
+                                    item['recommendation_reason'] = f"Similar to {user_request.title}"
+                                    recommendation_items.append(item)
+                            
+                            # Add recommended items
+                            for item in rec_results.get('results', [])[:2]:  # Top 2 recommendations
+                                item_id = f"{item['id']}_{request_media_type}"
+                                if item_id not in seen_ids:
+                                    seen_ids.add(item_id)
+                                    item['media_type'] = request_media_type
+                                    item['recommendation_reason'] = f"Recommended for {user_request.title}"
+                                    recommendation_items.append(item)
+                        
+                        except Exception as rec_error:
+                            print(f"⚠️ Error getting recommendations for {user_request.title}: {rec_error}")
+                            continue
+                    
+                    # Sort by popularity and limit results
+                    recommendation_items.sort(key=lambda x: x.get('popularity', 0), reverse=True)
+                    
+                    # Apply pagination
+                    start_idx = offset
+                    end_idx = offset + limit
+                    all_results = recommendation_items[start_idx:end_idx]
+                    
+                    has_more = end_idx < len(recommendation_items)
+                    print(f"📊 Generated {len(recommendation_items)} total recommendations, returning {len(all_results)}")
+                
+                # Add Plex status to all recommendations
+                movie_ids = [item['id'] for item in all_results if item.get('media_type') == 'movie']
+                tv_ids = [item['id'] for item in all_results if item.get('media_type') == 'tv']
+                
+                sync_service = PlexSyncService(session)
+                movie_status = sync_service.check_items_status(movie_ids, 'movie') if movie_ids else {}
+                tv_status = sync_service.check_items_status(tv_ids, 'tv') if tv_ids else {}
+                
+                for item in all_results:
+                    if item.get('media_type') == 'movie':
+                        status = movie_status.get(item['id'], 'available')
+                    else:
+                        status = tv_status.get(item['id'], 'available')
+                    
+                    item['status'] = status
+                    item['in_plex'] = status == 'in_plex'
+                    
+                    # Add poster URL
+                    if item.get('poster_path'):
+                        item['poster_url'] = f"{tmdb_service.image_base_url}{item['poster_path']}"
+                
+                # Choose template based on view type
+                template_name = "discover_results.html" if view == "grid" else "category_horizontal.html"
+                
+                return create_template_response(
+                    template_name,
+                    {
+                        "request": request, 
+                        "results": all_results,
+                        "current_user": current_user,
+                        "media_type": "mixed",  # Mixed content type
+                        "sort_by": sort,
+                        "has_more": has_more,
+                        "next_offset": offset + limit,
+                        "current_offset": offset
+                    }
+                )
+                
+            except Exception as rec_error:
+                print(f"❌ Error generating personalized recommendations: {rec_error}")
+                import traceback
+                traceback.print_exc()
+                return HTMLResponse('<div class="text-center py-8 text-red-600">Error loading personalized recommendations</div>')
         
-        if sort == "trending":
-            results = tmdb_service.get_trending(type, tmdb_page)
-        elif sort == "popular":
-            results = tmdb_service.get_popular(type, tmdb_page)
-        elif sort == "top_rated":
-            results = tmdb_service.get_top_rated(type, tmdb_page)
-        elif sort == "upcoming" and type == "movie":
-            results = tmdb_service.get_upcoming_movies(tmdb_page)
-        elif sort == "now_playing" and type == "movie":
-            results = tmdb_service.get_now_playing_movies(tmdb_page)
+        # Handle TMDB categories with enhanced pagination
+        # TMDB provides 20 items per page, we need to fetch multiple pages if needed
+        if page > 1:
+            # Use page parameter directly (for infinite scroll)
+            start_page = page
+            end_page = page
+            print(f"📊 Page-based Pagination - Page: {page}, Limit: {limit}")
         else:
-            results = tmdb_service.get_popular(type, tmdb_page)
+            # Use offset-based calculation (for backwards compatibility)
+            items_needed = offset + limit
+            start_page = (offset // 20) + 1
+            end_page = ((offset + limit - 1) // 20) + 1
+            print(f"📊 Offset-based Pagination - Offset: {offset}, Limit: {limit}, Start Page: {start_page}, End Page: {end_page}")
         
-        # Handle pagination for TMDB results
-        all_results = results.get('results', [])
-        start_idx = offset % 20  # Position within the current TMDB page
-        limited_results = all_results[start_idx:start_idx + limit]
+        # Fetch multiple pages if needed
+        all_results = []
+        total_pages = 1
+        total_results = 0
         
-        # Check if there are more pages available
-        total_pages = results.get('total_pages', 1)
-        total_results = results.get('total_results', len(all_results))
-        has_more = (offset + len(limited_results)) < min(total_results, 500)  # TMDB limits to 500 results
+        for page_num in range(start_page, min(end_page + 1, 26)):  # TMDB usually limits to 25 pages (500 results)
+            try:
+                if sort == "trending":
+                    page_results = tmdb_service.get_trending(type, page_num)
+                elif sort == "popular":
+                    page_results = tmdb_service.get_popular(type, page_num)
+                elif sort == "top_rated":
+                    page_results = tmdb_service.get_top_rated(type, page_num)
+                elif sort == "upcoming" and type == "movie":
+                    page_results = tmdb_service.get_upcoming_movies(page_num)
+                elif sort == "now_playing" and type == "movie":
+                    page_results = tmdb_service.get_now_playing_movies(page_num)
+                else:
+                    page_results = tmdb_service.get_popular(type, page_num)
+                
+                page_items = page_results.get('results', [])
+                all_results.extend(page_items)
+                
+                # Update totals from first page
+                if page_num == start_page:
+                    total_pages = page_results.get('total_pages', 1)
+                    total_results = page_results.get('total_results', 0)
+                
+                # If we got fewer items than expected, we've reached the end
+                if len(page_items) < 20:
+                    break
+                    
+            except Exception as page_error:
+                print(f"Error fetching page {page_num}: {page_error}")
+                break
         
-        print(f"📊 TMDB Pagination Debug - Offset: {offset}, Limit: {limit}, Results: {len(limited_results)}, Total: {total_results}, Has More: {has_more}")
+        # Extract the requested slice
+        if page > 1:
+            # For page-based requests, return all results from this page
+            limited_results = all_results
+            # Has more if we got a full page of results and we're not at the limit
+            has_more = len(all_results) >= 20 and page < min(total_pages, 25)
+        else:
+            # For offset-based requests (backwards compatibility)
+            start_idx = offset % len(all_results) if all_results else 0
+            limited_results = all_results[start_idx:start_idx + limit] if all_results else []
+            # Determine if there are more items available
+            max_tmdb_results = min(total_results, 500)  # TMDB effective limit
+            has_more = (offset + len(limited_results)) < max_tmdb_results and len(limited_results) == limit
+        
+        max_tmdb_results = min(total_results, 500) if page <= 1 else total_results  # TMDB effective limit
+        print(f"📊 Enhanced Pagination Results - Found: {len(all_results)}, Returning: {len(limited_results)}, Has More: {has_more}, Mode: {'page' if page > 1 else 'offset'}")
         
         # Fast status check using database lookup with fallback
         try:

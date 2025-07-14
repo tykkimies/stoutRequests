@@ -342,6 +342,7 @@ class TMDBService:
                        region: str = "US") -> Dict:
         """Discover movies with flexible filtering and sorting"""
         url = f"{self.base_url}/discover/movie"
+        print("We in right spot", url)
         params = {
             'api_key': self.api_key,
             'page': page,

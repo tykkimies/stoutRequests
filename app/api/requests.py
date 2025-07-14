@@ -166,7 +166,7 @@ async def create_request(
     approved_by = None
     approved_at = None
     
-    if permissions_service.should_auto_approve(current_user.id):
+    if permissions_service.should_auto_approve(current_user.id, media_type):
         initial_status = RequestStatus.APPROVED
         approved_by = current_user.id
         approved_at = datetime.utcnow()
