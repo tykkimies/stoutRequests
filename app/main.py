@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBearer
 from sqlmodel import Session, select
 
-from .core.database import create_db_and_tables, get_session
+from .core.database import create_db_and_tables, get_session, engine
 from .core.template_context import get_global_template_context
 from .services.settings_service import build_app_url
 from .api.auth import router as auth_router, get_current_user
@@ -18,12 +18,18 @@ from .api.services import router as services_router
 from app.api import setup
 from .models import User
 from .services.plex_sync_service import PlexSyncService
+from .services.permissions_service import PermissionsService
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     create_db_and_tables()
+    
+    # Initialize default roles and permissions
+    with Session(engine) as session:
+        PermissionsService.ensure_default_roles(session)
+    
     yield
     # Shutdown (if needed)
 
@@ -50,7 +56,8 @@ security = HTTPBearer(auto_error=False)
 
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
-    global_context = get_global_template_context()
+    current_user = context.get('current_user')
+    global_context = get_global_template_context(current_user)
     # Merge contexts, with explicit context taking precedence
     merged_context = {**global_context, **context}
     return templates.TemplateResponse(template_name, merged_context)
@@ -723,14 +730,17 @@ async def discover_category(
                 # Get visibility settings to determine what requests to show
                 visibility_config = SettingsService.get_request_visibility_config(session)
                 
+                from .core.permissions import is_user_admin
+                user_is_admin = is_user_admin(current_user, session)
+                
                 # Debug logging
-                print(f"🔍 DEBUG Recent Requests: User '{current_user.username}' (ID: {current_user.id}, admin: {current_user.is_admin})")
+                print(f"🔍 DEBUG Recent Requests: User '{current_user.username}' (ID: {current_user.id}, admin: {user_is_admin})")
                 print(f"🔍 DEBUG Visibility config: {visibility_config}")
                 
                 # Apply visibility logic similar to unified requests page
-                if current_user.is_admin or visibility_config['can_view_all_requests']:
+                if user_is_admin or visibility_config['can_view_all_requests']:
                     # Show all recent requests
-                    print(f"🔍 DEBUG: Showing ALL requests (admin: {current_user.is_admin}, can_view_all: {visibility_config['can_view_all_requests']})")
+                    print(f"🔍 DEBUG: Showing ALL requests (admin: {user_is_admin}, can_view_all: {visibility_config['can_view_all_requests']})")
                     recent_statement = select(MediaRequest).order_by(
                         MediaRequest.created_at.desc()
                     ).offset(offset).limit(limit)
@@ -749,7 +759,7 @@ async def discover_category(
                     if request_item.tmdb_id:
                         # Fetch the user for this request only if allowed by visibility settings
                         user = None
-                        if current_user.is_admin or visibility_config['can_view_request_user']:
+                        if user_is_admin or visibility_config['can_view_request_user']:
                             user = session.get(User, request_item.user_id) if request_item.user_id else None
                         elif request_item.user_id == current_user.id:
                             # Always show current user's own info
@@ -862,8 +872,8 @@ async def discover_category(
                     "has_more": has_more,
                     "next_offset": offset + limit,
                     "current_offset": offset,
-                    "show_request_user": current_user.is_admin or visibility_config['can_view_request_user'],
-                    "can_view_all_requests": current_user.is_admin or visibility_config['can_view_all_requests']
+                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
+                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests']
                 }
             )
         
@@ -1110,8 +1120,31 @@ async def media_detail(
             MediaRequest.media_type == media_type,
             MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.DOWNLOADING])
         )
-        existing_request = session.exec(existing_request_statement).first()
-        request_status = existing_request.status if existing_request else None
+        existing_requests = session.exec(existing_request_statement).all()
+        
+        # Determine request status and availability
+        request_status = None
+        has_complete_request = False
+        has_partial_requests = False
+        user_partial_requests = []
+        
+        if existing_requests:
+            # Check if there's a complete series request (no season_number specified)
+            complete_request = next((req for req in existing_requests if not req.is_season_request), None)
+            if complete_request:
+                has_complete_request = True
+                request_status = complete_request.status
+            else:
+                # Only partial requests exist
+                has_partial_requests = True
+                # Get user's partial requests to show appropriate UI
+                user_partial_requests = [req for req in existing_requests if req.user_id == current_user.id] if current_user else []
+                # Use the status of the most recent partial request
+                if user_partial_requests:
+                    request_status = user_partial_requests[-1].status
+        
+        # For template context, use the first existing request or None
+        existing_request = existing_requests[0] if existing_requests else None
         
         # Add poster URL and status information
         if media.get('poster_path'):
@@ -1175,15 +1208,23 @@ async def media_detail(
                     else:
                         item['status'] = 'available'
         
+        # Check if user has admin permissions using new unified function
+        from .core.permissions import is_user_admin
+        user_is_admin = is_user_admin(current_user, session)
+        
         context = {
             "request": request,
             "current_user": current_user,
+            "user_is_admin": user_is_admin,
             "media": media,
             "media_type": media_type,
             "is_in_plex": is_in_plex,
             "plex_status": plex_status,
             "request_status": request_status,
             "existing_request": existing_request,
+            "has_complete_request": has_complete_request,
+            "has_partial_requests": has_partial_requests,
+            "user_partial_requests": user_partial_requests,
             "similar": similar.get('results', [])[:12] if similar else [],
             "recommendations": recommendations.get('results', [])[:12] if recommendations else [],
             "cast": credits.get('cast', [])[:10] if credits else [],
@@ -1210,7 +1251,8 @@ async def debug_media_detail(
     session: Session = Depends(get_session)
 ):
     """Debug endpoint to check media detail data"""
-    if not current_user or not current_user.is_admin:
+    from .core.permissions import is_user_admin
+    if not current_user or not is_user_admin(current_user, session):
         return {"error": "Admin access required"}
     
     from .services.tmdb_service import TMDBService
@@ -1364,7 +1406,8 @@ async def debug_show_sync(
     session: Session = Depends(get_session)
 ):
     """Debug endpoint to check why a specific show isn't syncing"""
-    if not current_user or not current_user.is_admin:
+    from .core.permissions import is_user_admin
+    if not current_user or not is_user_admin(current_user, session):
         return {"error": "Admin access required"}
     
     from .services.plex_sync_service import PlexSyncService
@@ -1378,7 +1421,8 @@ async def debug_library_guids(
     session: Session = Depends(get_session)
 ):
     """Debug endpoint to show all GUIDs in the TV library"""
-    if not current_user or not current_user.is_admin:
+    from .core.permissions import is_user_admin
+    if not current_user or not is_user_admin(current_user, session):
         return {"error": "Admin access required"}
     
     from .services.plex_sync_service import PlexSyncService
@@ -1394,7 +1438,8 @@ async def debug_title_match(
     session: Session = Depends(get_session)
 ):
     """Debug endpoint to test title/year matching"""
-    if not current_user or not current_user.is_admin:
+    from .core.permissions import is_user_admin
+    if not current_user or not is_user_admin(current_user, session):
         return {"error": "Admin access required"}
     
     from .services.plex_sync_service import PlexSyncService
@@ -1416,7 +1461,8 @@ async def debug_tv_completion(
     session: Session = Depends(get_session)
 ):
     """Debug endpoint to check TV show completion status"""
-    if not current_user or not current_user.is_admin:
+    from .core.permissions import is_user_admin
+    if not current_user or not is_user_admin(current_user, session):
         return {"error": "Admin access required"}
     
     from .services.plex_sync_service import PlexSyncService

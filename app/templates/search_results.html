@@ -147,7 +147,7 @@
         </svg>
         <h3 class="text-lg font-medium text-gray-900 mb-2">Search Not Available</h3>
         <p class="text-gray-500 mb-4">TMDB API is not configured yet</p>
-        {% if current_user.is_admin %}
+        {% if user_is_admin %}
         <a href="{{ base_url }}/admin/settings" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700">
             Configure TMDB API
         </a>
@@ -162,7 +162,7 @@
         </svg>
         <h3 class="text-lg font-medium text-gray-900 mb-2">Search Error</h3>
         <p class="text-gray-500 mb-4">{{ tmdb_error }}</p>
-        {% if current_user.is_admin %}
+        {% if user_is_admin %}
         <a href="{{ base_url }}/admin/settings" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700">
             Check TMDB Settings
         </a>

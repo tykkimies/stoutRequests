@@ -1,0 +1,114 @@
+{% if (has_complete_request or has_partial_requests) and not is_in_plex %}
+<div class="bg-black bg-opacity-50 rounded-lg p-6">
+    <h3 class="text-xl font-semibold mb-4 flex items-center">
+        {% if request_status == 'pending' %}
+        <svg class="w-5 h-5 mr-2 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        {% if has_complete_request %}Request Pending Review{% else %}Partial Requests Pending{% endif %}
+        {% elif request_status == 'approved' %}
+        <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        {% if has_complete_request %}Request Approved{% else %}Partial Requests Approved{% endif %}
+        {% elif request_status == 'downloading' %}
+        <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+        </svg>
+        {% if has_complete_request %}Downloading{% else %}Partial Content Downloading{% endif %}
+        {% elif request_status == 'rejected' %}
+        <svg class="w-5 h-5 mr-2 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        {% if has_complete_request %}Request Rejected{% else %}Partial Requests Rejected{% endif %}
+        {% endif %}
+    </h3>
+    
+    <div class="text-gray-300">
+        {% if request_status == 'pending' %}
+        {% if has_complete_request %}
+        <p class="mb-4">This {{ media_type }} has already been requested and is waiting for admin approval.</p>
+        {% else %}
+        <p class="mb-4">You have partial requests for this {{ media_type }} that are waiting for admin approval.</p>
+        {% if user_partial_requests %}
+        <div class="mb-4">
+            <p class="text-sm text-gray-400 mb-2">Your pending requests:</p>
+            <ul class="text-sm space-y-1">
+                {% for partial_req in user_partial_requests %}
+                <li class="flex items-center">
+                    <svg class="w-3 h-3 mr-2 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                        <circle cx="10" cy="10" r="3"/>
+                    </svg>
+                    {% if partial_req.is_season_request %}
+                        Season {{ partial_req.season_number }}
+                    {% else %}
+                        Complete Series
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        {% endif %}
+        <div class="bg-yellow-600 bg-opacity-20 border border-yellow-600 rounded-md p-4">
+            <p class="text-sm">⏳ Your request{% if not has_complete_request and user_partial_requests|length > 1 %}s are{% else %} is{% endif %} in the queue. You'll be notified when approved and available.</p>
+            {% if has_partial_requests and not has_complete_request %}
+            <p class="text-sm mt-2 text-yellow-200">💡 You can still request additional seasons or episodes not yet requested above.</p>
+            {% endif %}
+        </div>
+        
+        {% elif request_status == 'approved' %}
+        <p class="mb-4">This {{ media_type }} request has been approved and should be downloading soon.</p>
+        <div class="bg-blue-600 bg-opacity-20 border border-blue-600 rounded-md p-4">
+            <p class="text-sm">✅ The download process will begin shortly. It will appear in Plex once available.</p>
+        </div>
+        {% elif request_status == 'downloading' %}
+        <p class="mb-4">This {{ media_type }} is currently being downloaded.</p>
+        <div class="bg-purple-600 bg-opacity-20 border border-purple-600 rounded-md p-4">
+            <p class="text-sm">⬇ Download in progress. It will appear in Plex once complete.</p>
+        </div>
+        {% elif request_status == 'rejected' %}
+        <p class="mb-4">This {{ media_type }} request has been rejected.</p>
+        <div class="bg-red-600 bg-opacity-20 border border-red-600 rounded-md p-4">
+            <p class="text-sm">✗ The request was not approved. You may request again if needed.</p>
+        </div>
+        {% endif %}
+        
+        <!-- Admin Action Buttons (only show for pending requests) -->
+        {% if user_is_admin and existing_request and request_status == 'pending' %}
+        <div class="mt-6 pt-4 border-t border-gray-600">
+            <div class="flex items-center justify-between mb-3">
+                <h4 class="text-lg font-medium text-white">Admin Actions</h4>
+                <span class="text-xs text-gray-400">Request ID: {{ existing_request.id }}</span>
+            </div>
+            <div class="flex space-x-3">
+                <button 
+                    class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    hx-post="{{ base_url }}/requests/{{ existing_request.id }}/approve"
+                    hx-target="#request-section"
+                    hx-trigger="click"
+                    hx-confirm="Approve this {{ media_type }} request?"
+                >
+                    <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    Approve Request
+                </button>
+                <button 
+                    class="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    hx-post="{{ base_url }}/requests/{{ existing_request.id }}/reject"
+                    hx-target="#request-section"
+                    hx-trigger="click"
+                    hx-confirm="Reject this {{ media_type }} request?"
+                >
+                    <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                    Reject Request
+                </button>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

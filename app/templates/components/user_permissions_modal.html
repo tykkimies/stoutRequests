@@ -1,0 +1,141 @@
+<!-- Simplified User Permissions Modal -->
+<div class="space-y-6">
+    <!-- User Info Header -->
+    <div class="bg-gray-50 p-4 rounded-lg">
+        <div class="flex items-center space-x-4">
+            <div class="h-12 w-12 rounded-full bg-blue-500 flex items-center justify-center">
+                <span class="text-lg font-bold text-white">{{ target_user.username[0].upper() }}</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-semibold text-gray-900">{{ target_user.full_name or target_user.username }}</h3>
+                <p class="text-sm text-gray-600">@{{ target_user.username }}</p>
+                {% if target_user.is_admin %}
+                    <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">Legacy Admin</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Success/Error Messages -->
+    <div id="permissions-feedback" class="hidden"></div>
+
+    <!-- Single Form for All Permissions -->
+    <form id="permissions-form" class="space-y-6" onsubmit="return false;">
+        <!-- Role Assignment -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+            <h4 class="text-md font-semibold text-gray-900 mb-3">Role Assignment</h4>
+            <div class="flex items-center space-x-4">
+                <select name="role_id" class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm">
+                    <option value="">Select Role...</option>
+                    {% for role in roles %}
+                        <option value="{{ role.id }}" {% if user_role and user_role.id == role.id %}selected{% endif %}>
+                            {{ role.display_name }} {% if role.is_default %}(Default){% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if user_role %}
+                <p class="mt-2 text-sm text-gray-600">
+                    Current Role: <strong>{{ user_role.display_name }}</strong>
+                    {% if user_role.description %}- {{ user_role.description }}{% endif %}
+                </p>
+            {% endif %}
+        </div>
+
+        <!-- User Settings -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+            <h4 class="text-md font-semibold text-gray-900 mb-3">User Settings</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="max_requests" class="block text-sm font-medium text-gray-700 mb-1">
+                        Max Requests
+                    </label>
+                    <input 
+                        type="number" 
+                        name="max_requests" 
+                        id="max_requests" 
+                        min="0" 
+                        max="999"
+                        value="{{ user_permissions.max_requests if user_permissions and user_permissions.max_requests is not none else '' }}"
+                        placeholder="Use role default"
+                        class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    >
+                    <p class="text-xs text-gray-500 mt-1">Leave empty to use role default</p>
+                </div>
+                
+                <div class="space-y-3">
+                    <div class="flex items-center">
+                        <input 
+                            type="checkbox" 
+                            name="auto_approve" 
+                            id="auto_approve"
+                            {% if user_permissions and user_permissions.auto_approve_enabled %}checked{% endif %}
+                            class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        >
+                        <label for="auto_approve" class="ml-2 text-sm text-gray-700">Auto-approve requests</label>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <input 
+                            type="checkbox" 
+                            name="can_request_movies" 
+                            id="can_request_movies"
+                            {% if user_permissions and user_permissions.can_request_movies %}checked{% endif %}
+                            class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        >
+                        <label for="can_request_movies" class="ml-2 text-sm text-gray-700">Can request movies</label>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <input 
+                            type="checkbox" 
+                            name="can_request_tv" 
+                            id="can_request_tv"
+                            {% if user_permissions and user_permissions.can_request_tv %}checked{% endif %}
+                            class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        >
+                        <label for="can_request_tv" class="ml-2 text-sm text-gray-700">Can request TV shows</label>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <input 
+                            type="checkbox" 
+                            name="can_request_4k" 
+                            id="can_request_4k"
+                            {% if user_permissions and user_permissions.can_request_4k %}checked{% endif %}
+                            class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        >
+                        <label for="can_request_4k" class="ml-2 text-sm text-gray-700">Can request 4K content</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Current Request Stats -->
+        {% if user_permissions %}
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h4 class="text-md font-semibold text-blue-900 mb-2">Request Statistics</h4>
+            <div class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                    <span class="text-blue-700 font-medium">Current Pending:</span>
+                    <span class="text-blue-900">{{ user_permissions.current_request_count }}</span>
+                </div>
+                <div>
+                    <span class="text-blue-700 font-medium">Total Made:</span>
+                    <span class="text-blue-900">{{ user_permissions.total_requests_made }}</span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Save Button -->
+        <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+            <button type="button" onclick="hidePermissionsModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                Cancel
+            </button>
+            <button type="button" id="save-permissions-btn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700" onclick="console.log('🔥 Save button clicked!'); handlePermissionsSave({{ target_user.id }});">
+                Save Permissions
+            </button>
+        </div>
+    </form>
+</div>

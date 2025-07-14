@@ -42,15 +42,18 @@ async def setup_wizard(
     # Get base_url for template
     base_url = SettingsService.get_base_url(session)
     
-    return templates.TemplateResponse(
-        "setup_wizard.html",
-        {
-            "request": request,
-            "has_users": has_users,
-            "step": request.query_params.get("step", "1"),
-            "base_url": base_url
-        }
-    )
+    # Use global template context for consistent base_url handling
+    from ..core.template_context import get_global_template_context
+    global_context = get_global_template_context()
+    
+    context = {
+        "request": request,
+        "has_users": has_users,
+        "step": request.query_params.get("step", "1"),
+        **global_context  # Include global context (base_url, etc.)
+    }
+    
+    return templates.TemplateResponse("setup_wizard.html", context)
 
 
 
@@ -166,7 +169,8 @@ async def setup_plex_verify(
                 email=user_info.get('email'),
                 full_name=user_info.get('title', user_info['username']),
                 avatar_url=user_info.get('thumb'),
-                is_admin=is_first_user  # First user is admin
+                is_admin=is_first_user,  # First user is admin
+                is_server_owner=is_first_user  # First user is server owner
             )
             session.add(user)
             session.commit()
@@ -336,13 +340,17 @@ async def setup_complete(
     """Setup completion page"""
     settings = SettingsService.get_settings(session)
     
-    return templates.TemplateResponse(
-        "setup_complete.html",
-        {
-            "request": request,
-            "settings": settings
-        }
-    )
+    # Use global template context for consistent base_url handling
+    from ..core.template_context import get_global_template_context
+    global_context = get_global_template_context()
+    
+    context = {
+        "request": request,
+        "settings": settings,
+        **global_context  # Include global context (base_url, etc.)
+    }
+    
+    return templates.TemplateResponse("setup_complete.html", context)
 
 
 @router.post("/test-plex")

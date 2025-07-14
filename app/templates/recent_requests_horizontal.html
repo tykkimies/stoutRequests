@@ -104,7 +104,7 @@
                     </div>
                     
                     <!-- Admin actions for pending requests (only for admins when user can view all requests) -->
-                    {% if current_user and current_user.is_admin and item.status == 'requested_pending' and can_view_all_requests %}
+                    {% if current_user and user_is_admin and item.status == 'requested_pending' and can_view_all_requests %}
                     <div class="flex space-x-1 relative z-20 pointer-events-auto" id="admin-actions-{{ item.request_id }}">
                         <button 
                             hx-post="{{ base_url }}/requests/{{ item.request_id }}/approve"

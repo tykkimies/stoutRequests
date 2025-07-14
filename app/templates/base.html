@@ -129,7 +129,7 @@
                         <div class="ml-10 flex items-baseline space-x-4">
                             <a href="{{ base_url }}/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Search</a>
                             <a href="{{ base_url }}/requests/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Requests</a>
-                            {% if current_user.is_admin %}
+                            {% if user_is_admin %}
                             <a href="{{ base_url }}/admin/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">⚙️ Admin</a>
                             {% endif %}
                         </div>
@@ -140,7 +140,7 @@
                     {% if current_user %}
                     <div class="flex items-center space-x-4">
                         <span class="text-gray-300 text-sm">Welcome, {{ current_user.full_name or current_user.username }}</span>
-                        {% if current_user.is_admin %}
+                        {% if user_is_admin %}
                         <span class="bg-yellow-600 text-white px-2 py-1 rounded text-xs">Admin</span>
                         {% endif %}
                         {% if current_user.plex_id and current_user.plex_id < 0 %}

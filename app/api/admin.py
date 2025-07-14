@@ -9,10 +9,13 @@ from ..core.database import get_session
 from ..core.template_context import get_global_template_context
 from ..models.user import User
 from ..models.settings import Settings
+from ..models.role import Role, PermissionFlags
+from ..models.user_permissions import UserPermissions
 from ..api.auth import get_current_admin_user, get_current_admin_user_flexible
 from ..services.settings_service import SettingsService
 from ..services.plex_service import PlexService
 from ..services.plex_sync_service import PlexSyncService
+from ..services.permissions_service import PermissionsService
 import secrets
 import string
 
@@ -22,7 +25,8 @@ templates = Jinja2Templates(directory="app/templates")
 
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
-    global_context = get_global_template_context()
+    current_user = context.get('current_user')
+    global_context = get_global_template_context(current_user)
     # Merge contexts, with explicit context taking precedence
     merged_context = {**global_context, **context}
     return templates.TemplateResponse(template_name, merged_context)
@@ -35,6 +39,18 @@ async def admin_dashboard(
     session: Session = Depends(get_session)
 ):
     """Consolidated admin dashboard with tabbed interface"""
+    # Log any suspicious GET request with query parameters that might be a form redirect
+    if request.query_params:
+        print(f"🚨 SUSPICIOUS GET REQUEST TO /admin/ with params: {dict(request.query_params)}")
+        print(f"🚨 This might be a form submission redirect!")
+        print(f"🚨 Request method: {request.method}")
+        print(f"🚨 Request URL: {request.url}")
+        print(f"🚨 Request headers: {dict(request.headers)}")
+    
+    # Ensure first admin has proper role assigned
+    from ..core.permissions import ensure_first_admin_has_role
+    ensure_first_admin_has_role(session)
+    
     # Get settings and stats for the dashboard
     settings = SettingsService.get_settings(session)
     masked_settings = settings.mask_sensitive_data()
@@ -411,6 +427,14 @@ async def admin_users(
     session: Session = Depends(get_session)
 ):
     """Admin users management page"""
+    # Log any suspicious GET request with query parameters
+    if request.query_params:
+        print(f"🚨 SUSPICIOUS GET REQUEST TO /admin/users with params: {dict(request.query_params)}")
+        print(f"🚨 This might be a form submission redirect!")
+        print(f"🚨 Request method: {request.method}")
+        print(f"🚨 Request URL: {request.url}")
+        print(f"🚨 Request headers: {dict(request.headers)}")
+    
     statement = select(User).order_by(User.created_at.desc())
     users = session.exec(statement).all()
     
@@ -436,6 +460,10 @@ async def toggle_user_admin(
     
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot modify your own admin status")
+    
+    # Prevent modifying server owners
+    if getattr(user, 'is_server_owner', False):
+        raise HTTPException(status_code=400, detail="Cannot modify server owner permissions")
     
     user.is_admin = not user.is_admin
     session.add(user)
@@ -482,6 +510,10 @@ async def toggle_user_active(
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot modify your own active status")
     
+    # Prevent modifying server owners
+    if getattr(user, 'is_server_owner', False):
+        raise HTTPException(status_code=400, detail="Cannot modify server owner status")
+    
     user.is_active = not user.is_active
     session.add(user)
     session.commit()
@@ -526,6 +558,10 @@ async def delete_user(
     
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    
+    # Prevent deleting server owners
+    if getattr(user, 'is_server_owner', False):
+        raise HTTPException(status_code=400, detail="Cannot delete the server owner")
     
     # Check if user has any media requests
     from ..models.media_request import MediaRequest
@@ -587,12 +623,19 @@ async def users_list(
             <tbody class="bg-white divide-y divide-gray-200">
     """
     
+    # Use the new permission helper for consistent role checking
+    from ..core.permissions import get_user_display_info
+    
     for user in users:
         try:
             status_color = "green" if user.is_active else "red"
             status_text = "Active" if user.is_active else "Inactive"
-            role_color = "yellow" if user.is_admin else "blue"
-            role_text = "Admin" if user.is_admin else "User"
+            
+            # Get role info using helper function
+            user_display = get_user_display_info(user, session)
+            role_text = user_display["role_text"]
+            role_color = user_display["role_color"]
+            is_server_owner = user_display.get("is_server_owner", False)
             
             # Format join date safely
             join_date = user.created_at.strftime('%Y-%m-%d') if user.created_at else 'Unknown'
@@ -654,20 +697,24 @@ async def users_list(
                 """
             
             if user.id != current_user.id:  # Don't allow self-modification
-                admin_action = "Remove Admin" if user.is_admin else "Make Admin"
-                admin_color = "red" if user.is_admin else "blue"
-                
                 active_action = "Deactivate" if user.is_active else "Activate"
                 active_color = "red" if user.is_active else "green"
                 
-                html_content += f"""
+                # Server owners can't be modified
+                if is_server_owner:
+                    html_content += f"""
+                            <span class="text-xs text-gray-500 italic">Server Owner (Unchangeable)</span>"""
+                else:
+                    html_content += f"""
                             <button 
-                                class="text-{admin_color}-600 hover:text-{admin_color}-900 text-xs"
-                                hx-post="{current_base_url}/admin/users/{user.id}/toggle-admin"
-                                hx-target="#users-list"
-                                hx-confirm="Are you sure you want to {admin_action.lower()} this user?"
+                                type="button"
+                                class="permissions-btn text-purple-600 hover:text-purple-900 text-xs bg-purple-50 hover:bg-purple-100 px-2 py-1 rounded"
+                                data-user-id="{user.id}"
+                                title="Manage user permissions and role"
+                                hx-disable
+                                onclick="console.log('🔥 ONCLICK FIRED'); openPermissionsModal({user.id}); return false;"
                             >
-                                {admin_action}
+                                Permissions
                             </button>
                             <button 
                                 class="text-{active_color}-600 hover:text-{active_color}-900 text-xs"
@@ -1032,3 +1079,426 @@ async def update_library_preferences(
             status_code=500,
             detail="Failed to update library preferences"
         )
+
+
+# ===== USER PERMISSIONS MANAGEMENT =====
+
+@router.get("/users/{user_id}/permissions", response_class=HTMLResponse)
+async def get_user_permissions_page(
+    request: Request,
+    user_id: int,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get user permissions management page"""
+    # Get the user
+    statement = select(User).where(User.id == user_id)
+    user = session.exec(statement).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get permissions service
+    permissions_service = PermissionsService(session)
+    
+    # Get all available roles
+    roles = permissions_service.get_all_roles()
+    
+    # Get user's current permissions
+    user_permissions = permissions_service.get_user_permissions(user_id)
+    user_role = permissions_service.get_user_role(user_id)
+    effective_permissions = permissions_service.get_user_effective_permissions(user_id)
+    
+    # Get all permission flags with descriptions
+    all_permissions = PermissionFlags.get_all_permissions()
+    
+    # Content negotiation
+    if request.headers.get("HX-Request"):
+        # Get base URL for the template
+        base_url = SettingsService.get_base_url(session)
+        return create_template_response(
+            "admin_user_permissions_modal.html",
+            {
+                "request": request,
+                "current_user": current_user,
+                "target_user": user,
+                "user_permissions": user_permissions,
+                "user_role": user_role,
+                "roles": roles,
+                "effective_permissions": effective_permissions,
+                "all_permissions": all_permissions,
+                "base_url": base_url
+            }
+        )
+    else:
+        return {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "is_admin": user.is_admin
+            },
+            "permissions": effective_permissions,
+            "role": user_role.name if user_role else None,
+            "available_roles": [{"id": r.id, "name": r.name, "display_name": r.display_name} for r in roles]
+        }
+
+
+@router.post("/users/{user_id}/permissions/role")
+async def assign_user_role(
+    request: Request,
+    user_id: int,
+    role_id: int = Form(None),
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Assign a role to a user"""
+    print(f"🔍 ASSIGN ROLE: user_id={user_id}, role_id={role_id}")
+    
+    # Validate role_id
+    if not role_id:
+        raise HTTPException(status_code=400, detail="Role ID is required")
+    
+    # Get the user
+    statement = select(User).where(User.id == user_id)
+    user = session.exec(statement).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get the role
+    role_statement = select(Role).where(Role.id == role_id)
+    role = session.exec(role_statement).first()
+    
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    
+    # Assign role using permissions service
+    permissions_service = PermissionsService(session)
+    success = permissions_service.assign_role(user_id, role_id)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to assign role")
+    
+    # Content negotiation
+    print(f"🔍 PERMISSIONS ROLE: HX-Request header: {request.headers.get('HX-Request')}")
+    if request.headers.get("HX-Request"):
+        print("✅ Returning HTMX modal content")
+        # Reload the permissions modal content with success message
+        permissions_service = PermissionsService(session)
+        roles = permissions_service.get_all_roles()
+        user_permissions = permissions_service.get_user_permissions(user_id)
+        user_role = permissions_service.get_user_role(user_id)
+        effective_permissions = permissions_service.get_user_effective_permissions(user_id)
+        all_permissions = PermissionFlags.get_all_permissions()
+        
+        base_url = SettingsService.get_base_url(session)
+        context = {
+            "request": request,
+            "current_user": current_user,
+            "target_user": user,
+            "user_permissions": user_permissions,
+            "user_role": user_role,
+            "roles": roles,
+            "effective_permissions": effective_permissions,
+            "all_permissions": all_permissions,
+            "base_url": base_url,
+            "success_message": f'Role "{role.display_name}" assigned to {user.username}'
+        }
+        return create_template_response("admin_user_permissions_modal.html", context)
+    else:
+        return {
+            "success": True,
+            "message": f"Role '{role.display_name}' assigned to {user.username}",
+            "user_id": user_id,
+            "role": {"id": role.id, "name": role.name, "display_name": role.display_name}
+        }
+
+
+@router.post("/users/{user_id}/permissions/custom")
+async def set_user_custom_permission(
+    request: Request,
+    user_id: int,
+    permission: str = Form(...),
+    enabled: bool = Form(...),
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Set a custom permission for a user"""
+    # Get the user
+    statement = select(User).where(User.id == user_id)
+    user = session.exec(statement).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Validate permission
+    all_permissions = PermissionFlags.get_all_permissions()
+    if permission not in all_permissions:
+        raise HTTPException(status_code=400, detail="Invalid permission")
+    
+    # Set permission using permissions service
+    permissions_service = PermissionsService(session)
+    success = permissions_service.set_user_permission(user_id, permission, enabled)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to set permission")
+    
+    action = "granted" if enabled else "revoked"
+    
+    # Content negotiation
+    if request.headers.get("HX-Request"):
+        # Reload the permissions modal content with success message
+        permissions_service = PermissionsService(session)
+        roles = permissions_service.get_all_roles()
+        user_permissions = permissions_service.get_user_permissions(user_id)
+        user_role = permissions_service.get_user_role(user_id)
+        effective_permissions = permissions_service.get_user_effective_permissions(user_id)
+        all_permissions = PermissionFlags.get_all_permissions()
+        
+        base_url = SettingsService.get_base_url(session)
+        context = {
+            "request": request,
+            "current_user": current_user,
+            "target_user": user,
+            "user_permissions": user_permissions,
+            "user_role": user_role,
+            "roles": roles,
+            "effective_permissions": effective_permissions,
+            "all_permissions": all_permissions,
+            "base_url": base_url,
+            "success_message": f'Permission "{all_permissions[permission]}" {action} for {user.username}'
+        }
+        return create_template_response("admin_user_permissions_modal.html", context)
+    else:
+        return {
+            "success": True,
+            "message": f"Permission '{permission}' {action} for {user.username}",
+            "user_id": user_id,
+            "permission": permission,
+            "enabled": enabled
+        }
+
+
+@router.post("/users/{user_id}/permissions/save")
+async def save_user_permissions(
+    request: Request,
+    user_id: int,
+    role_id: Optional[int] = Form(None),
+    max_requests: Optional[int] = Form(None),
+    request_retention_days: Optional[int] = Form(None),
+    auto_approve: bool = Form(False),
+    can_request_movies: Optional[bool] = Form(None),
+    can_request_tv: Optional[bool] = Form(None),
+    can_request_4k: Optional[bool] = Form(None),
+    movie_quality_profile_id: Optional[int] = Form(None),
+    tv_quality_profile_id: Optional[int] = Form(None),
+    notification_enabled: bool = Form(False),
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Save all user permissions in one go"""
+    try:
+        print(f"🔍 SAVE PERMISSIONS ENDPOINT HIT!")
+        print(f"🔍 Request method: {request.method}")
+        print(f"🔍 Request URL: {request.url}")
+        print(f"🔍 Request headers: {dict(request.headers)}")
+        print(f"🔍 HX-Request header: {request.headers.get('HX-Request')}")
+        print(f"🔍 Content-Type: {request.headers.get('Content-Type')}")
+        print(f"🔍 Form data - user_id={user_id}, role_id={role_id}, max_requests={max_requests}")
+        
+        # Get the user
+        statement = select(User).where(User.id == user_id)
+        user = session.exec(statement).first()
+        
+        if not user:
+            if request.headers.get("HX-Request"):
+                return HTMLResponse('<div class="p-4 bg-red-50 border border-red-200 rounded-md"><p class="text-red-800">User not found</p></div>')
+            return {"success": False, "message": "User not found"}
+        
+        # Initialize permissions service
+        permissions_service = PermissionsService(session)
+        
+        # Assign role if provided
+        if role_id:
+            success = permissions_service.assign_role(user_id, role_id)
+            if not success:
+                if request.headers.get("HX-Request"):
+                    return HTMLResponse('<div class="p-4 bg-red-50 border border-red-200 rounded-md"><p class="text-red-800">Failed to assign role</p></div>')
+                return {"success": False, "message": "Failed to assign role"}
+        
+        # Get or create user permissions
+        user_permissions = permissions_service.get_user_permissions(user_id)
+        if not user_permissions:
+            from ..models.user_permissions import UserPermissions
+            user_permissions = UserPermissions(user_id=user_id)
+            session.add(user_permissions)
+        
+        # Update permissions based on form data
+        if max_requests is not None:
+            user_permissions.max_requests = max_requests
+        if request_retention_days is not None:
+            user_permissions.request_retention_days = request_retention_days
+        user_permissions.auto_approve_enabled = auto_approve
+        if can_request_movies is not None:
+            user_permissions.can_request_movies = can_request_movies
+        if can_request_tv is not None:
+            user_permissions.can_request_tv = can_request_tv
+        if can_request_4k is not None:
+            user_permissions.can_request_4k = can_request_4k
+        if movie_quality_profile_id is not None:
+            user_permissions.movie_quality_profile_id = movie_quality_profile_id
+        if tv_quality_profile_id is not None:
+            user_permissions.tv_quality_profile_id = tv_quality_profile_id
+        user_permissions.notification_enabled = notification_enabled
+        user_permissions.updated_at = datetime.utcnow()
+        
+        # Save changes
+        session.add(user_permissions)
+        session.commit()
+        
+        # Content negotiation for HTMX vs API
+        if request.headers.get("HX-Request"):
+            # For HTMX, return empty response - let the JavaScript handle UI updates
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse("")
+        else:
+            return {
+                "success": True, 
+                "message": f"Permissions updated for {user.username}"
+            }
+        
+    except Exception as e:
+        print(f"❌ Error saving permissions: {e}")
+        session.rollback()
+        if request.headers.get("HX-Request"):
+            return HTMLResponse(f'<div class="p-4 bg-red-50 border border-red-200 rounded-md"><p class="text-red-800">Error: {str(e)}</p></div>')
+        return {"success": False, "message": f"Error saving permissions: {str(e)}"}
+
+
+@router.post("/users/{user_id}/permissions/limits")
+async def set_user_limits(
+    request: Request,
+    user_id: int,
+    max_requests: Optional[int] = Form(None),
+    request_retention_days: Optional[int] = Form(None),
+    auto_approve: bool = Form(False),
+    can_request_movies: Optional[bool] = Form(None),
+    can_request_tv: Optional[bool] = Form(None),
+    can_request_4k: Optional[bool] = Form(None),
+    movie_quality_profile_id: Optional[int] = Form(None),
+    tv_quality_profile_id: Optional[int] = Form(None),
+    notification_enabled: bool = Form(False),
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Set user-specific limits and media permissions"""
+    # Get the user
+    statement = select(User).where(User.id == user_id)
+    user = session.exec(statement).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get or create user permissions
+    permissions_service = PermissionsService(session)
+    user_perms = permissions_service.get_user_permissions(user_id)
+    
+    if user_perms:
+        # Update existing permissions
+        if max_requests is not None:
+            user_perms.max_requests = max_requests
+        if request_retention_days is not None:
+            user_perms.request_retention_days = request_retention_days
+        user_perms.auto_approve_enabled = auto_approve
+        if can_request_movies is not None:
+            user_perms.can_request_movies = can_request_movies
+        if can_request_tv is not None:
+            user_perms.can_request_tv = can_request_tv
+        if can_request_4k is not None:
+            user_perms.can_request_4k = can_request_4k
+        if movie_quality_profile_id is not None:
+            user_perms.movie_quality_profile_id = movie_quality_profile_id
+        if tv_quality_profile_id is not None:
+            user_perms.tv_quality_profile_id = tv_quality_profile_id
+        user_perms.notification_enabled = notification_enabled
+        user_perms.updated_at = datetime.utcnow()
+        
+        session.add(user_perms)
+        session.commit()
+    
+    # Content negotiation
+    if request.headers.get("HX-Request"):
+        # Reload the permissions modal content with success message
+        permissions_service = PermissionsService(session)
+        roles = permissions_service.get_all_roles()
+        user_permissions = permissions_service.get_user_permissions(user_id)
+        user_role = permissions_service.get_user_role(user_id)
+        effective_permissions = permissions_service.get_user_effective_permissions(user_id)
+        all_permissions = PermissionFlags.get_all_permissions()
+        
+        base_url = SettingsService.get_base_url(session)
+        context = {
+            "request": request,
+            "current_user": current_user,
+            "target_user": user,
+            "user_permissions": user_permissions,
+            "user_role": user_role,
+            "roles": roles,
+            "effective_permissions": effective_permissions,
+            "all_permissions": all_permissions,
+            "base_url": base_url,
+            "success_message": f'User limits updated for {user.username}'
+        }
+        return create_template_response("admin_user_permissions_modal.html", context)
+    else:
+        return {
+            "success": True,
+            "message": f"User limits updated for {user.username}",
+            "user_id": user_id,
+            "limits": {
+                "max_requests": max_requests,
+                "auto_approve": auto_approve,
+                "can_request_movies": can_request_movies,
+                "can_request_tv": can_request_tv,
+                "can_request_4k": can_request_4k
+            }
+        }
+
+
+@router.get("/roles", response_class=HTMLResponse)
+async def get_roles_management(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get roles management page"""
+    permissions_service = PermissionsService(session)
+    roles = permissions_service.get_all_roles()
+    all_permissions = PermissionFlags.get_all_permissions()
+    
+    # Content negotiation
+    if request.headers.get("HX-Request"):
+        return create_template_response(
+            "admin_roles_management.html",
+            {
+                "request": request,
+                "current_user": current_user,
+                "roles": roles,
+                "all_permissions": all_permissions
+            }
+        )
+    else:
+        return {
+            "roles": [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "display_name": r.display_name,
+                    "description": r.description,
+                    "permissions": r.get_permissions(),
+                    "is_system": r.is_system,
+                    "is_default": r.is_default
+                } for r in roles
+            ],
+            "available_permissions": all_permissions
+        }

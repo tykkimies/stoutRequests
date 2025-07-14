@@ -51,7 +51,108 @@
     </div>
 </div>
 
+<!-- Permissions Modal -->
+<div id="permissions-modal" class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+            <h2 class="text-xl font-semibold text-gray-900">User Permissions</h2>
+            <button 
+                type="button" 
+                class="text-gray-400 hover:text-gray-600"
+                onclick="hidePermissionsModal()"
+            >
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div id="user-permissions-content" class="p-6">
+            <!-- HTMX will load content here -->
+        </div>
+    </div>
+</div>
+
 <script>
+// Show permissions modal
+function showPermissionsModal() {
+    const modal = document.getElementById('permissions-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+// Hide permissions modal
+function hidePermissionsModal() {
+    const modal = document.getElementById('permissions-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+// Handle permissions button clicks
+function handlePermissionsClick(userId) {
+    console.log('handlePermissionsClick called with userId:', userId);
+    // Load permissions content
+    const url = `{{ base_url }}/admin/users/${userId}/permissions`;
+    console.log('Fetching from URL:', url);
+    
+    fetch(url, {
+        headers: {
+            'HX-Request': 'true'
+        }
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        return response.text();
+    })
+    .then(html => {
+        console.log('Received HTML:', html.length, 'characters');
+        const content = document.getElementById('user-permissions-content');
+        if (content) {
+            content.innerHTML = html;
+            console.log('Content updated, showing modal');
+        } else {
+            console.error('Could not find user-permissions-content element');
+        }
+        showPermissionsModal();
+    })
+    .catch(error => {
+        console.error('Error loading permissions:', error);
+    });
+}
+
+// Set up event delegation for permissions buttons after DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, setting up permissions button listener');
+    
+    // Also set up after HTMX loads content
+    document.body.addEventListener('htmx:afterSettle', function() {
+        console.log('HTMX content loaded, checking for permissions buttons');
+    });
+    
+    // Use event delegation on document body to catch dynamically loaded content
+    document.body.addEventListener('click', function(event) {
+        console.log('Click event fired on:', event.target, 'Classes:', event.target.className);
+        
+        // Check if clicked element or parent has permissions-btn class
+        let target = event.target;
+        while (target && target !== document.body) {
+            if (target.classList && target.classList.contains('permissions-btn')) {
+                console.log('Permissions button found!');
+                event.preventDefault();
+                event.stopPropagation();
+                const userId = target.getAttribute('data-user-id');
+                console.log('User ID:', userId);
+                if (userId) {
+                    handlePermissionsClick(userId);
+                }
+                return;
+            }
+            target = target.parentNode;
+        }
+    });
+});
+
 // Refresh users list after import
 document.addEventListener('htmx:afterRequest', function(event) {
     if (event.detail.elt.getAttribute('hx-post') === '{{ base_url }}/auth/import-friends') {
@@ -59,5 +160,19 @@ document.addEventListener('htmx:afterRequest', function(event) {
         htmx.trigger('#users-list', 'refresh');
     }
 });
+
+// Close modal when clicking outside
+document.addEventListener('DOMContentLoaded', function() {
+    const modal = document.getElementById('permissions-modal');
+    if (modal) {
+        modal.addEventListener('click', function(event) {
+            if (event.target === this) {
+                this.classList.add('hidden');
+            }
+        });
+    }
+});
+
+
 </script>
 {% endblock %}

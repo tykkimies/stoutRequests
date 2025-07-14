@@ -138,7 +138,7 @@
             </div>
 
             {% if request.query_params.get('session_id') %}
-            <form method="post" action="{{ url_for('/setup/select-server') }}" class="space-y-6">
+            <form method="post" action="{{ base_url }}/setup/select-server" class="space-y-6">
                 <input type="hidden" name="session_id" value="{{ request.query_params.get('session_id') }}">
                 
                 <!-- Server Selection -->
@@ -197,7 +197,7 @@
                 <p class="text-gray-600 mt-2">Configure Radarr and Sonarr for automatic downloads (you can skip this for now)</p>
             </div>
 
-            <form method="post" action="{{ url_for('/setup/step2') }}" class="space-y-6">
+            <form method="post" action="{{ base_url }}/setup/step2" class="space-y-6">
                 <!-- Radarr Configuration -->
                 <div class="border border-gray-200 rounded-lg p-6">
                     <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">

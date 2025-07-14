@@ -43,21 +43,9 @@
                         {% endif %}
                         
                         <!-- Request Status Badge -->
-                        {% if request_status %}
-                        {% if request_status == 'pending' %}
-                        <span class="bg-yellow-600 text-white px-3 py-1 rounded-full text-sm font-medium">
-                            ⏳ Request Pending
-                        </span>
-                        {% elif request_status == 'approved' %}
-                        <span class="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-medium">
-                            ✓ Request Approved
-                        </span>
-                        {% elif request_status == 'downloading' %}
-                        <span class="bg-purple-600 text-white px-3 py-1 rounded-full text-sm font-medium">
-                            ⬇ Downloading
-                        </span>
-                        {% endif %}
-                        {% endif %}
+                        <div id="request-status-badge">
+                            {% include 'components/status_badge.html' %}
+                        </div>
                     </div>
 
                     <!-- Metadata -->
@@ -125,7 +113,7 @@
                     </div>
 
                     <!-- Request Section -->
-                    {% if (plex_status != 'in_plex' or plex_status == 'partial_plex') and not request_status %}
+                    {% if (plex_status != 'in_plex' or plex_status == 'partial_plex') and not has_complete_request %}
                     <div class="request-section">
                         {% if media_type == 'tv' and media.seasons %}
                         <div class="bg-black bg-opacity-50 rounded-lg p-6">
@@ -168,50 +156,96 @@
                                     <input type="hidden" name="poster_path" value="{{ media.poster_path or '' }}">
                                     <input type="hidden" name="release_date" value="{{ media.release_date or media.first_air_date or '' }}">
                                     
-                                    <!-- Season Accordion -->
-                                    {% for season in media.seasons %}
-                                    {% if season.season_number > 0 %}
-                                    <div class="border border-gray-600 rounded-md">
-                                        <div class="bg-gray-800 bg-opacity-75 px-4 py-3 flex items-center justify-between cursor-pointer" onclick="toggleSeason({{ season.season_number }})">
-                                            <div class="flex items-center space-x-3">
-                                                <input type="checkbox" id="season-{{ season.season_number }}" name="selected_seasons" value="{{ season.season_number }}" class="text-orange-600 focus:ring-orange-500 h-4 w-4" onchange="handleSeasonSelection({{ season.season_number }})">
-                                                <label for="season-{{ season.season_number }}" class="font-medium text-white cursor-pointer">
-                                                    Season {{ season.season_number }}{% if season.name and season.name != "Season " + season.season_number|string %}: {{ season.name }}{% endif %}
-                                                </label>
-                                                <span class="text-sm text-gray-400">({{ season.episode_count or 0 }} episodes)</span>
-                                            </div>
-                                            <svg id="season-arrow-{{ season.season_number }}" class="w-4 h-4 text-gray-400 transition-transform transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                            </svg>
-                                        </div>
-                                        
-                                        <!-- Episode Selection (Hidden by default) -->
-                                        <div id="season-episodes-{{ season.season_number }}" class="hidden bg-gray-700 bg-opacity-50 p-4 border-t border-gray-600">
+                                    <!-- Season Management - Improved Compact Layout -->
+                                    {% set seasons_list = media.seasons|selectattr('season_number', 'gt', 0)|list %}
+                                    {% set total_seasons = seasons_list|length %}
+                                    
+                                    {% if total_seasons > 10 %}
+                                    <!-- Compact Grid Layout for Many Seasons -->
+                                    <div class="space-y-4">
+                                        <!-- Season Overview & Quick Actions -->
+                                        <div class="bg-gray-800 bg-opacity-50 rounded-lg p-4">
                                             <div class="flex items-center justify-between mb-3">
-                                                <span class="text-sm text-gray-300">Select individual episodes:</span>
+                                                <span class="text-sm font-medium text-white">{{ total_seasons }} Seasons Available</span>
                                                 <div class="space-x-2">
-                                                    <button type="button" onclick="selectAllEpisodes({{ season.season_number }})" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded">
-                                                        Select All
+                                                    <button type="button" onclick="selectAllSeasons()" class="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">
+                                                        Select All Seasons
                                                     </button>
-                                                    <button type="button" onclick="deselectAllEpisodes({{ season.season_number }})" class="text-xs bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded">
-                                                        Clear
+                                                    <button type="button" onclick="clearAllSeasons()" class="text-xs bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded">
+                                                        Clear All
                                                     </button>
                                                 </div>
                                             </div>
                                             
-                                            <!-- Generate episode checkboxes for available episodes -->
-                                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
-                                                {% for episode_num in range(1, (season.episode_count or 0) + 1) %}
-                                                <label class="flex items-center space-x-2 text-xs text-gray-300 hover:text-white cursor-pointer">
-                                                    <input type="checkbox" name="selected_episodes_{{ season.season_number }}" value="{{ episode_num }}" class="text-orange-600 focus:ring-orange-500 h-3 w-3 rounded">
-                                                    <span>{{ episode_num }}. Episode {{ episode_num }}</span>
+                                            <!-- Compact Season Grid -->
+                                            <div class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+                                                {% for season in seasons_list %}
+                                                <label class="flex flex-col items-center p-2 bg-gray-700 bg-opacity-50 rounded-md cursor-pointer hover:bg-opacity-75 transition-colors">
+                                                    <input type="checkbox" id="season-{{ season.season_number }}" name="selected_seasons" value="{{ season.season_number }}" class="text-orange-600 focus:ring-orange-500 h-3 w-3 mb-1" onchange="handleSeasonSelection({{ season.season_number }})">
+                                                    <span class="text-xs text-gray-300 font-medium">S{{ season.season_number }}</span>
+                                                    <span class="text-xs text-gray-400">{{ season.episode_count or 0 }}ep</span>
                                                 </label>
                                                 {% endfor %}
                                             </div>
                                         </div>
+                                        
+                                        <!-- Expandable Episode Selection -->
+                                        <div id="episode-selection-area" class="hidden bg-gray-800 bg-opacity-30 rounded-lg p-4">
+                                            <h4 class="text-sm font-medium text-white mb-3">Episode Selection</h4>
+                                            <p class="text-xs text-gray-400 mb-3">Select seasons above, then expand individual seasons to choose specific episodes.</p>
+                                            
+                                            <div id="selected-seasons-episodes" class="space-y-2">
+                                                <!-- Dynamically populated based on selected seasons -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    {% else %}
+                                    <!-- Traditional Accordion for Fewer Seasons -->
+                                    <div class="space-y-2">
+                                        {% for season in seasons_list %}
+                                        <div class="border border-gray-600 rounded-md">
+                                            <div class="bg-gray-800 bg-opacity-75 px-4 py-2 flex items-center justify-between cursor-pointer" onclick="toggleSeason({{ season.season_number }})">
+                                                <div class="flex items-center space-x-3">
+                                                    <input type="checkbox" id="season-{{ season.season_number }}" name="selected_seasons" value="{{ season.season_number }}" class="text-orange-600 focus:ring-orange-500 h-4 w-4" onchange="handleSeasonSelection({{ season.season_number }})">
+                                                    <label for="season-{{ season.season_number }}" class="font-medium text-white cursor-pointer text-sm">
+                                                        Season {{ season.season_number }}{% if season.name and season.name != "Season " + season.season_number|string %}: {{ season.name }}{% endif %}
+                                                    </label>
+                                                    <span class="text-xs text-gray-400">({{ season.episode_count or 0 }} episodes)</span>
+                                                </div>
+                                                <svg id="season-arrow-{{ season.season_number }}" class="w-4 h-4 text-gray-400 transition-transform transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </div>
+                                            
+                                            <!-- Episode Selection (Hidden by default) -->
+                                            <div id="season-episodes-{{ season.season_number }}" class="hidden bg-gray-700 bg-opacity-50 p-3 border-t border-gray-600">
+                                                <div class="flex items-center justify-between mb-2">
+                                                    <span class="text-xs text-gray-300">Select individual episodes:</span>
+                                                    <div class="space-x-2">
+                                                        <button type="button" onclick="selectAllEpisodes({{ season.season_number }})" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded">
+                                                            Select All
+                                                        </button>
+                                                        <button type="button" onclick="deselectAllEpisodes({{ season.season_number }})" class="text-xs bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded">
+                                                            Clear
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- Generate episode checkboxes for available episodes -->
+                                                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1 max-h-32 overflow-y-auto">
+                                                    {% for episode_num in range(1, (season.episode_count or 0) + 1) %}
+                                                    <label class="flex items-center space-x-1 text-xs text-gray-300 hover:text-white cursor-pointer">
+                                                        <input type="checkbox" name="selected_episodes_{{ season.season_number }}" value="{{ episode_num }}" class="text-orange-600 focus:ring-orange-500 h-3 w-3 rounded">
+                                                        <span>{{ episode_num }}</span>
+                                                    </label>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
                                     </div>
                                     {% endif %}
-                                    {% endfor %}
                                     
                                     <!-- Submit Button for Granular Request -->
                                     <div class="mt-4 pt-4 border-t border-gray-600">
@@ -242,49 +276,9 @@
                     {% endif %}
                     
                     <!-- Already Requested Section -->
-                    {% if request_status and not is_in_plex %}
-                    <div class="request-section">
-                        <div class="bg-black bg-opacity-50 rounded-lg p-6">
-                            <h3 class="text-xl font-semibold mb-4 flex items-center">
-                                {% if request_status == 'pending' %}
-                                <svg class="w-5 h-5 mr-2 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                Request Pending Review
-                                {% elif request_status == 'approved' %}
-                                <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                Request Approved
-                                {% elif request_status == 'downloading' %}
-                                <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                </svg>
-                                Downloading
-                                {% endif %}
-                            </h3>
-                            
-                            <div class="text-gray-300">
-                                {% if request_status == 'pending' %}
-                                <p class="mb-4">This {{ media_type }} has already been requested and is waiting for admin approval.</p>
-                                <div class="bg-yellow-600 bg-opacity-20 border border-yellow-600 rounded-md p-4">
-                                    <p class="text-sm">⏳ Your request is in the queue. You'll be notified when it's approved and available.</p>
-                                </div>
-                                {% elif request_status == 'approved' %}
-                                <p class="mb-4">This {{ media_type }} request has been approved and should be downloading soon.</p>
-                                <div class="bg-blue-600 bg-opacity-20 border border-blue-600 rounded-md p-4">
-                                    <p class="text-sm">✅ The download process will begin shortly. It will appear in Plex once available.</p>
-                                </div>
-                                {% elif request_status == 'downloading' %}
-                                <p class="mb-4">This {{ media_type }} is currently being downloaded.</p>
-                                <div class="bg-purple-600 bg-opacity-20 border border-purple-600 rounded-md p-4">
-                                    <p class="text-sm">⬇ Download in progress. It will appear in Plex once complete.</p>
-                                </div>
-                                {% endif %}
-                            </div>
-                        </div>
+                    <div id="request-section" class="request-section">
+                        {% include 'components/request_section.html' %}
                     </div>
-                    {% endif %}
                 </div>
             </div>
         </div>
@@ -907,6 +901,132 @@ function submitGranularRequest() {
         submitButton.disabled = false;
     }, 1000);
 }
+
+// Compact layout functions for shows with many seasons
+function selectAllSeasons() {
+    const seasonCheckboxes = document.querySelectorAll('input[name="selected_seasons"]');
+    seasonCheckboxes.forEach(checkbox => {
+        checkbox.checked = true;
+    });
+    updateSelectionSummary();
+    showEpisodeSelectionArea();
+}
+
+function clearAllSeasons() {
+    const seasonCheckboxes = document.querySelectorAll('input[name="selected_seasons"]');
+    const episodeCheckboxes = document.querySelectorAll('input[name^="selected_episodes_"]');
+    
+    seasonCheckboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    episodeCheckboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    
+    updateSelectionSummary();
+    hideEpisodeSelectionArea();
+}
+
+function showEpisodeSelectionArea() {
+    const area = document.getElementById('episode-selection-area');
+    if (area) {
+        area.classList.remove('hidden');
+        updateSelectedSeasonsEpisodes();
+    }
+}
+
+function hideEpisodeSelectionArea() {
+    const area = document.getElementById('episode-selection-area');
+    if (area) {
+        area.classList.add('hidden');
+    }
+}
+
+function updateSelectedSeasonsEpisodes() {
+    const selectedSeasons = document.querySelectorAll('input[name="selected_seasons"]:checked');
+    const container = document.getElementById('selected-seasons-episodes');
+    
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    selectedSeasons.forEach(seasonCheckbox => {
+        const seasonNum = seasonCheckbox.value;
+        const seasonData = {{ (media.seasons or [])|tojson|safe }};
+        const season = seasonData.find(s => s.season_number == seasonNum);
+        
+        if (!season || season.season_number <= 0) return;
+        
+        const seasonDiv = document.createElement('div');
+        seasonDiv.className = 'border border-gray-600 rounded-md';
+        seasonDiv.innerHTML = `
+            <div class="bg-gray-700 bg-opacity-50 px-3 py-2 flex items-center justify-between cursor-pointer" onclick="toggleCompactSeason(${seasonNum})">
+                <div class="flex items-center space-x-2">
+                    <span class="text-sm font-medium text-white">Season ${seasonNum}</span>
+                    <span class="text-xs text-gray-400">(${season.episode_count || 0} episodes)</span>
+                </div>
+                <svg id="compact-season-arrow-${seasonNum}" class="w-4 h-4 text-gray-400 transition-transform transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+            </div>
+            <div id="compact-season-episodes-${seasonNum}" class="hidden bg-gray-600 bg-opacity-30 p-3 border-t border-gray-600">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs text-gray-300">Select individual episodes:</span>
+                    <div class="space-x-2">
+                        <button type="button" onclick="selectAllEpisodes(${seasonNum})" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded">
+                            Select All
+                        </button>
+                        <button type="button" onclick="deselectAllEpisodes(${seasonNum})" class="text-xs bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1 max-h-32 overflow-y-auto">
+                    ${Array.from({length: season.episode_count || 0}, (_, i) => i + 1).map(episodeNum => `
+                        <label class="flex items-center space-x-1 text-xs text-gray-300 hover:text-white cursor-pointer">
+                            <input type="checkbox" name="selected_episodes_${seasonNum}" value="${episodeNum}" class="text-orange-600 focus:ring-orange-500 h-3 w-3 rounded">
+                            <span>${episodeNum}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        
+        container.appendChild(seasonDiv);
+    });
+}
+
+function toggleCompactSeason(seasonNumber) {
+    const episodesDiv = document.getElementById(`compact-season-episodes-${seasonNumber}`);
+    const arrow = document.getElementById(`compact-season-arrow-${seasonNumber}`);
+    
+    if (episodesDiv && arrow) {
+        if (episodesDiv.classList.contains('hidden')) {
+            episodesDiv.classList.remove('hidden');
+            arrow.classList.add('rotate-180');
+        } else {
+            episodesDiv.classList.add('hidden');
+            arrow.classList.remove('rotate-180');
+        }
+    }
+}
+
+// Enhanced change handler for compact layout
+document.addEventListener('change', function(e) {
+    if (e.target.name === 'selected_seasons') {
+        const selectedSeasons = document.querySelectorAll('input[name="selected_seasons"]:checked');
+        if (selectedSeasons.length > 0) {
+            showEpisodeSelectionArea();
+        } else {
+            hideEpisodeSelectionArea();
+        }
+        updateSelectedSeasonsEpisodes();
+    }
+    
+    if (e.target.name && e.target.name.startsWith('selected_episodes_')) {
+        updateSelectionSummary();
+    }
+});
 
 // Handle episode checkbox changes
 document.addEventListener('change', function(e) {

@@ -11,6 +11,7 @@ class User(SQLModel, table=True):
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
     is_admin: bool = Field(default=False)
+    is_server_owner: bool = Field(default=False)  # Server owner - always admin, unchangeable
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None

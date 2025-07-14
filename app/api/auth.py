@@ -42,11 +42,18 @@ async def get_current_user(
 
 async def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
     """Get current user if they are an admin"""
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Import here to avoid circular imports
+    from ..core.database import get_session
+    from ..core.permissions import is_user_admin
+    
+    # Check admin permissions using new unified function
+    with next(get_session()) as session:
+        if not is_user_admin(current_user, session):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required"
+            )
+    
     return current_user
 
 
@@ -86,8 +93,9 @@ async def get_current_admin_user_flexible(
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Check admin permissions
-        if not user.is_admin:
+        # Check admin permissions using new unified function
+        from ..core.permissions import is_user_admin
+        if not is_user_admin(user, session):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admin access required"

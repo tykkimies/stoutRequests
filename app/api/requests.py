@@ -16,6 +16,7 @@ from ..services.radarr_service import RadarrService
 from ..services.sonarr_service import SonarrService
 from ..services.settings_service import build_app_url
 from ..services.settings_service import SettingsService
+from ..services.permissions_service import PermissionsService
 
 router = APIRouter(prefix="/requests", tags=["requests"])
 templates = Jinja2Templates(directory="app/templates")
@@ -23,7 +24,8 @@ templates = Jinja2Templates(directory="app/templates")
 
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
-    global_context = get_global_template_context()
+    current_user = context.get('current_user')
+    global_context = get_global_template_context(current_user)
     # Merge contexts, with explicit context taking precedence
     merged_context = {**global_context, **context}
     return templates.TemplateResponse(template_name, merged_context)
@@ -55,15 +57,73 @@ async def create_request(
     if not all([tmdb_id, media_type, title]):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
-    # Check if already requested by this user
+    # Initialize permissions service
+    permissions_service = PermissionsService(session)
+    
+    # Check if user can request this media type
+    if not permissions_service.can_request_media_type(current_user.id, media_type):
+        return HTMLResponse(
+            f'''<div class="inline-flex items-center px-3 py-2 border border-red-300 text-sm leading-4 font-medium rounded-md text-red-700 bg-red-50">
+                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                </svg>
+                Not permitted to request {media_type}s
+            </div>'''
+        )
+    
+    # Check request limits
+    can_request, reason = permissions_service.can_make_request(current_user.id)
+    if not can_request:
+        return HTMLResponse(
+            f'''<div class="inline-flex items-center px-3 py-2 border border-orange-300 text-sm leading-4 font-medium rounded-md text-orange-700 bg-orange-50">
+                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                </svg>
+                {reason}
+            </div>'''
+        )
+
+    # Enhanced request checking for TV shows
     statement = select(MediaRequest).where(
         MediaRequest.tmdb_id == tmdb_id,
         MediaRequest.media_type == MediaType(media_type),
         MediaRequest.user_id == current_user.id
     )
-    existing_request = session.exec(statement).first()
-
-    if existing_request:
+    existing_requests = session.exec(statement).all()
+    
+    # For TV shows, check if this conflicts with existing requests
+    if existing_requests and media_type == 'tv':
+        # Check if user already requested the complete series
+        complete_request = next((req for req in existing_requests if not req.is_season_request), None)
+        if complete_request:
+            return HTMLResponse(
+                f'''<div class="inline-flex items-center px-3 py-2 border border-yellow-300 text-sm leading-4 font-medium rounded-md text-yellow-700 bg-yellow-50">
+                    <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                    </svg>
+                    Complete Series Already Requested
+                </div>'''
+            )
+        
+        # If requesting complete series but partial requests exist, allow it (will supersede partials)
+        if not season_number:
+            # This is a complete series request - it's allowed even with existing partial requests
+            pass
+        else:
+            # Check if this specific season is already requested
+            season_request = next((req for req in existing_requests 
+                                 if req.is_season_request and req.season_number == season_number), None)
+            if season_request:
+                return HTMLResponse(
+                    f'''<div class="inline-flex items-center px-3 py-2 border border-yellow-300 text-sm leading-4 font-medium rounded-md text-yellow-700 bg-yellow-50">
+                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                        Season {season_number} Already Requested
+                    </div>'''
+                )
+    elif existing_requests and media_type == 'movie':
+        # Movies are simpler - only one request per movie
         return HTMLResponse(
             f'''<div class="inline-flex items-center px-3 py-2 border border-yellow-300 text-sm leading-4 font-medium rounded-md text-yellow-700 bg-yellow-50">
                 <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
@@ -101,6 +161,16 @@ async def create_request(
         print(f"Error checking Radarr/Sonarr: {e}")
         # Fail silently and proceed with request creation
 
+    # Determine initial status based on auto-approval
+    initial_status = RequestStatus.PENDING
+    approved_by = None
+    approved_at = None
+    
+    if permissions_service.should_auto_approve(current_user.id):
+        initial_status = RequestStatus.APPROVED
+        approved_by = current_user.id
+        approved_at = datetime.utcnow()
+
     # Create new request
     new_request = MediaRequest(
         user_id=current_user.id,
@@ -111,18 +181,55 @@ async def create_request(
         poster_path=poster_path,
         release_date=release_date,
         season_number=season_number,
-        is_season_request=bool(season_number)  # True if requesting specific season
+        is_season_request=bool(season_number),
+        status=initial_status,
+        approved_by=approved_by,
+        approved_at=approved_at
     )
 
     session.add(new_request)
     session.commit()
+    
+    # Increment user request count (only for pending requests)
+    if initial_status == RequestStatus.PENDING:
+        permissions_service.increment_user_request_count(current_user.id)
+    
+    # If auto-approved, try to add to Radarr/Sonarr immediately
+    if initial_status == RequestStatus.APPROVED:
+        try:
+            if media_type == 'movie':
+                radarr_service = RadarrService(session)
+                radarr_result = radarr_service.add_movie(tmdb_id)
+                if radarr_result:
+                    new_request.radarr_id = radarr_result.get('id')
+                    new_request.status = RequestStatus.DOWNLOADING
+            elif media_type == 'tv':
+                sonarr_service = SonarrService(session)
+                sonarr_result = sonarr_service.add_series(tmdb_id)
+                if sonarr_result:
+                    new_request.sonarr_id = sonarr_result.get('id')
+                    new_request.status = RequestStatus.DOWNLOADING
+            
+            session.add(new_request)
+            session.commit()
+        except Exception as e:
+            print(f"Error auto-adding to Radarr/Sonarr: {e}")
+            # Keep status as approved even if Radarr/Sonarr fails
 
+    # Return appropriate message based on status
+    if initial_status == RequestStatus.APPROVED:
+        message = "Auto-approved!"
+        color_class = "blue"
+    else:
+        message = "Requested!"
+        color_class = "green"
+    
     return HTMLResponse(
-        f'''<div class="inline-flex items-center px-3 py-2 border border-green-300 text-sm leading-4 font-medium rounded-md text-green-700 bg-green-50">
+        f'''<div class="inline-flex items-center px-3 py-2 border border-{color_class}-300 text-sm leading-4 font-medium rounded-md text-{color_class}-700 bg-{color_class}-50">
             <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
             </svg>
-            Requested!
+            {message}
         </div>'''
     )
 
@@ -142,7 +249,8 @@ async def unified_requests(
         # Determine what requests to show based on user permissions and settings
         user_lookup = {}  # Dictionary to store user info by request ID
         
-        if current_user.is_admin:
+        from ..core.permissions import is_user_admin
+        if is_user_admin(current_user, session):
             # Admins always see all requests
             statement = select(MediaRequest, User).join(
                 User, MediaRequest.user_id == User.id
@@ -189,8 +297,8 @@ async def unified_requests(
                 "requests": requests_with_users, 
                 "current_user": current_user,
                 "user_lookup": user_lookup,
-                "show_request_user": current_user.is_admin or visibility_config['can_view_request_user'],
-                "can_view_all_requests": current_user.is_admin or visibility_config['can_view_all_requests']
+                "show_request_user": is_user_admin(current_user, session) or visibility_config['can_view_request_user'],
+                "can_view_all_requests": is_user_admin(current_user, session) or visibility_config['can_view_all_requests']
             }
         )
         
@@ -248,12 +356,20 @@ async def approve_request(
     if not media_request:
         raise HTTPException(status_code=404, detail="Request not found")
     
+    # Track if this was previously pending to update user count
+    was_pending = media_request.status == RequestStatus.PENDING
+    
     media_request.status = RequestStatus.APPROVED
     media_request.approved_by = current_user.id
     media_request.approved_at = datetime.utcnow()
     
     session.add(media_request)
     session.commit()
+    
+    # Decrement user request count if it was pending
+    if was_pending:
+        permissions_service = PermissionsService(session)
+        permissions_service.decrement_user_request_count(media_request.user_id)
     
     # Add to Radarr/Sonarr
     try:
@@ -275,14 +391,68 @@ async def approve_request(
     
     # Content negotiation - check if this is an HTMX request
     if request.headers.get("HX-Request"):
-        # Return just the updated status badge HTML
-        return HTMLResponse(f'''
-        <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
-            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                ✓ Approved
+        # Check if this came from media detail page (has different target)
+        hx_target = request.headers.get("HX-Target", "")
+        print(f"🔍 APPROVE: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")
+        print(f"🔍 APPROVE: Target comparison: '{hx_target}' == 'request-section' ? {hx_target == 'request-section'}")
+        if hx_target == "request-section":
+            # From media detail page - return updated request section
+            
+            # Check if user has admin permissions using unified function
+            from ..core.permissions import is_user_admin
+            user_is_admin = is_user_admin(current_user, session)
+            
+            # Create context for the updated request section
+            context = {
+                "request": request,
+                "request_status": "approved",
+                "has_complete_request": not media_request.is_season_request,
+                "has_partial_requests": media_request.is_season_request,
+                "user_partial_requests": [media_request] if media_request.is_season_request else [],
+                "media_type": media_request.media_type.value,
+                "current_user": current_user,
+                "user_is_admin": user_is_admin,
+                "existing_request": media_request,
+                "is_in_plex": False
+            }
+            
+            # Return the request section with out-of-band status badge update
+            from fastapi.templating import Jinja2Templates
+            from ..core.template_context import get_global_template_context
+            templates = Jinja2Templates(directory="app/templates")
+            
+            # Get the global context and render the component
+            global_context = get_global_template_context()
+            merged_context = {**global_context, **context}
+            
+            # Render the request section component
+            request_section_html = templates.get_template("components/request_section.html").render(merged_context)
+            
+            # Return HTML with out-of-band swap for status badge
+            return HTMLResponse(f'''
+            <div hx-swap-oob="innerHTML:#request-status-badge">
+                <span class="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+                    ✓ Request Approved
+                </span>
+            </div>
+            {request_section_html}
+            ''')
+        elif hx_target == "request-status-badge":
+            # From media detail page badge - just update the badge
+            return HTMLResponse(f'''
+            <span class="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+                ✓ Request Approved
             </span>
-        </div>
-        ''')
+            ''')
+        else:
+            # From admin requests list - return status badge
+            return HTMLResponse(f'''
+            <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
+                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    ✓ Approved
+                </span>
+            </div>
+            ''')
     else:
         # Regular API response
         return {"message": "Request approved"}
@@ -302,6 +472,9 @@ async def reject_request(
     if not media_request:
         raise HTTPException(status_code=404, detail="Request not found")
     
+    # Track if this was previously pending to update user count
+    was_pending = media_request.status == RequestStatus.PENDING
+    
     media_request.status = RequestStatus.REJECTED
     media_request.approved_by = current_user.id
     media_request.approved_at = datetime.utcnow()
@@ -309,16 +482,75 @@ async def reject_request(
     session.add(media_request)
     session.commit()
     
+    # Decrement user request count if it was pending
+    if was_pending:
+        permissions_service = PermissionsService(session)
+        permissions_service.decrement_user_request_count(media_request.user_id)
+    
     # Content negotiation - check if this is an HTMX request
     if request.headers.get("HX-Request"):
-        # Return just the updated status badge HTML
-        return HTMLResponse(f'''
-        <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
-            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                ✗ Rejected
+        # Check if this came from media detail page (has different target)
+        hx_target = request.headers.get("HX-Target", "")
+        print(f"🔍 REJECT: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")
+        print(f"🔍 REJECT: Target comparison: '{hx_target}' == 'request-section' ? {hx_target == 'request-section'}")
+        if hx_target == "request-section":
+            # From media detail page - return updated request section
+            
+            # Check if user has admin permissions using unified function
+            from ..core.permissions import is_user_admin
+            user_is_admin = is_user_admin(current_user, session)
+            
+            # Create context for the updated request section
+            context = {
+                "request": request,
+                "request_status": "rejected",
+                "has_complete_request": not media_request.is_season_request,
+                "has_partial_requests": media_request.is_season_request,
+                "user_partial_requests": [media_request] if media_request.is_season_request else [],
+                "media_type": media_request.media_type.value,
+                "current_user": current_user,
+                "user_is_admin": user_is_admin,
+                "existing_request": media_request,
+                "is_in_plex": False
+            }
+            
+            # Return the request section with out-of-band status badge update
+            from fastapi.templating import Jinja2Templates
+            from ..core.template_context import get_global_template_context
+            templates = Jinja2Templates(directory="app/templates")
+            
+            # Get the global context and render the component
+            global_context = get_global_template_context()
+            merged_context = {**global_context, **context}
+            
+            # Render the request section component
+            request_section_html = templates.get_template("components/request_section.html").render(merged_context)
+            
+            # Return HTML with out-of-band swap for status badge
+            return HTMLResponse(f'''
+            <div hx-swap-oob="innerHTML:#request-status-badge">
+                <span class="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+                    ✗ Request Rejected
+                </span>
+            </div>
+            {request_section_html}
+            ''')
+        elif hx_target == "request-status-badge":
+            # From media detail page badge - just update the badge
+            return HTMLResponse(f'''
+            <span class="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+                ✗ Request Rejected
             </span>
-        </div>
-        ''')
+            ''')
+        else:
+            # From admin requests list - return status badge
+            return HTMLResponse(f'''
+            <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
+                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                    ✗ Rejected
+                </span>
+            </div>
+            ''')
     else:
         # Regular API response
         return {"message": "Request rejected"}
@@ -361,7 +593,8 @@ async def delete_request(
         raise HTTPException(status_code=404, detail="Request not found")
     
     # Check permissions: admin or request owner
-    if not current_user.is_admin and media_request.user_id != current_user.id:
+    from ..core.permissions import is_user_admin
+    if not is_user_admin(current_user, session) and media_request.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this request")
     
     # Delete the request
@@ -369,3 +602,37 @@ async def delete_request(
     session.commit()
     
     return {"message": "Request deleted successfully"}
+
+
+@router.get("/{request_id}/status-update", response_class=HTMLResponse)
+async def get_request_status_update(
+    request_id: int,
+    current_user: User = Depends(get_current_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get updated request section HTML for HTMX updates"""
+    statement = select(MediaRequest).where(MediaRequest.id == request_id)
+    media_request = session.exec(statement).first()
+    
+    if not media_request:
+        return HTMLResponse("")
+    
+    # Check if user has admin permissions using unified function
+    from ..core.permissions import is_user_admin
+    user_is_admin = is_user_admin(current_user, session)
+    
+    # Build context for the request section component
+    context = {
+        "request_status": media_request.status.value,
+        "has_complete_request": not media_request.is_season_request,
+        "has_partial_requests": media_request.is_season_request,
+        "user_partial_requests": [media_request] if media_request.is_season_request else [],
+        "media_type": media_request.media_type.value,
+        "current_user": current_user,
+        "user_is_admin": user_is_admin,
+        "existing_request": media_request,
+        "is_in_plex": False,
+        "base_url": ""
+    }
+    
+    return create_template_response("components/request_section.html", context)
