@@ -15,7 +15,7 @@ from .api.requests import router as requests_router
 from .api.admin import router as admin_router
 from .api.setup import router as setup_router
 from .api.services import router as services_router
-from .api.webhooks import router as webhooks_router
+from .api.webhooks import router as webhooks_router, start_webhook_worker, stop_webhook_worker
 from app.api import setup
 from .models import User
 from .services.plex_sync_service import PlexSyncService
@@ -35,10 +35,14 @@ async def lifespan(app: FastAPI):
     # Start background jobs
     await start_background_jobs()
     
+    # Start webhook worker
+    await start_webhook_worker()
+    
     yield
     
     # Shutdown
     await stop_background_jobs()
+    await stop_webhook_worker()
 
 app = FastAPI(title="Stout Requests", version="1.0.0", lifespan=lifespan)
 

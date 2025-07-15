@@ -1,15 +1,13 @@
 """
-Download Status Service - Tracks real download status from Radarr/Sonarr
+Download Status Service - Simple status tracking from Radarr/Sonarr
 
-This service handles the proper status lifecycle:
-1. approved → processing (when successfully sent to Radarr/Sonarr)
-2. processing → downloading (when download starts)
-3. downloading → downloaded (when download completes)
-4. downloaded → available (when found in Plex)
+This service handles the status lifecycle:
+1. approved → downloading (when actively downloading in Radarr/Sonarr)  
+2. downloading → available (handled by Plex library sync)
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 from sqlmodel import Session, select
 from ..models.media_request import MediaRequest, RequestStatus, MediaType
 from ..services.radarr_service import RadarrService
@@ -22,20 +20,19 @@ class DownloadStatusService:
     
     async def check_download_statuses(self) -> Dict[str, int]:
         """
-        Check download status for all requests and update accordingly.
+        Check download status for approved requests and update to downloading if active.
         Returns statistics about updates made.
         """
         print("🚀 DOWNLOAD STATUS SERVICE: Starting check...")
         stats = {
             'checked': 0,
             'updated_to_downloading': 0,
-            'updated_to_downloaded': 0,
             'errors': 0
         }
         
         try:
-            # Get requests that need status checking
-            requests_to_check = self._get_requests_needing_status_check()
+            # Get approved and downloading requests that have been sent to Radarr/Sonarr
+            requests_to_check = self._get_approved_requests()
             stats['checked'] = len(requests_to_check)
             
             print(f"🔄 DOWNLOAD STATUS: Found {len(requests_to_check)} requests to check...")
@@ -44,12 +41,21 @@ class DownloadStatusService:
             
             for request in requests_to_check:
                 try:
-                    updated = await self._update_request_download_status(request)
-                    if updated:
-                        if request.status == RequestStatus.DOWNLOADING:
-                            stats['updated_to_downloading'] += 1
-                        elif request.status == RequestStatus.DOWNLOADED:
-                            stats['updated_to_downloaded'] += 1
+                    is_downloading = await self._is_actively_downloading(request)
+                    
+                    if request.status == RequestStatus.APPROVED and is_downloading:
+                        # Update approved → downloading
+                        request.status = RequestStatus.DOWNLOADING
+                        request.updated_at = datetime.utcnow()
+                        self.session.add(request)
+                        print(f"📦 Updated '{request.title}' status: approved → downloading")
+                        stats['updated_to_downloading'] += 1
+                    elif request.status == RequestStatus.DOWNLOADING and not is_downloading:
+                        # Update downloading → approved (download stopped/failed)
+                        request.status = RequestStatus.APPROVED
+                        request.updated_at = datetime.utcnow()
+                        self.session.add(request)
+                        print(f"📦 Updated '{request.title}' status: downloading → approved (no longer downloading)")
                 except Exception as e:
                     print(f"❌ Error checking status for request {request.id}: {e}")
                     stats['errors'] += 1
@@ -64,121 +70,127 @@ class DownloadStatusService:
         
         return stats
     
-    def _get_requests_needing_status_check(self) -> List[MediaRequest]:
-        """Get requests that need their download status checked"""
+    def _get_approved_requests(self) -> List[MediaRequest]:
+        """Get approved and downloading requests that have been sent to Radarr/Sonarr"""
         statement = select(MediaRequest).where(
-            MediaRequest.status.in_([
-                RequestStatus.APPROVED,     # Just approved, check if in Radarr/Sonarr
-                RequestStatus.DOWNLOADING,  # Currently downloading, check progress
-            ]),
+            MediaRequest.status.in_([RequestStatus.APPROVED, RequestStatus.DOWNLOADING]),
             # Only check requests that have been sent to services
             MediaRequest.radarr_id.isnot(None) | MediaRequest.sonarr_id.isnot(None)
         )
         return list(self.session.exec(statement).all())
     
-    async def _update_request_download_status(self, request: MediaRequest) -> bool:
-        """
-        Update a single request's download status.
-        Returns True if status was updated.
-        """
+    async def _is_actively_downloading(self, request: MediaRequest) -> bool:
+        """Check if a request is actively downloading in Radarr/Sonarr"""
         try:
-            if request.media_type == MediaType.MOVIE:
-                return await self._check_radarr_status(request)
-            elif request.media_type == MediaType.TV:
-                return await self._check_sonarr_status(request)
+            if request.media_type == MediaType.MOVIE and request.radarr_id:
+                return await self._is_movie_downloading(request)
+            elif request.media_type == MediaType.TV and request.sonarr_id:
+                return await self._is_tv_downloading(request)
         except Exception as e:
-            print(f"Error checking status for {request.media_type} request {request.id}: {e}")
-            return False
+            print(f"Error checking download status for request {request.id}: {e}")
         
         return False
     
-    async def _check_radarr_status(self, request: MediaRequest) -> bool:
-        """Check Radarr for movie download status"""
-        if not request.radarr_id:
-            return False
-        
+    async def _is_movie_downloading(self, request: MediaRequest) -> bool:
+        """Check if movie is actively downloading in Radarr"""
         try:
             radarr_service = RadarrService(self.session)
             
-            # Get movie details from Radarr
+            # First check if movie has already been downloaded
             movie_details = radarr_service.get_movie_details(request.radarr_id)
             if not movie_details:
                 return False
             
-            # Check movie status in Radarr
-            old_status = request.status
-            new_status = self._determine_status_from_radarr(movie_details, request.status)
+            # If movie already has file, it's not downloading
+            if movie_details.get('hasFile', False):
+                return False
             
-            if new_status != old_status:
-                request.status = new_status
-                request.updated_at = datetime.utcnow()
-                self.session.add(request)
-                print(f"📦 Movie '{request.title}' status: {old_status.value} → {new_status.value}")
-                return True
+            # Check Radarr queue for active downloads of this movie
+            return self._check_radarr_queue(radarr_service, request.radarr_id)
                 
         except Exception as e:
             print(f"Error checking Radarr status for request {request.id}: {e}")
-        
-        return False
-    
-    async def _check_sonarr_status(self, request: MediaRequest) -> bool:
-        """Check Sonarr for TV show download status"""
-        if not request.sonarr_id:
             return False
-        
+    
+    def _check_radarr_queue(self, radarr_service: RadarrService, radarr_id: int) -> bool:
+        """Check if movie is actively downloading in Radarr queue"""
+        try:
+            import requests
+            
+            if not radarr_service.base_url or not radarr_service.api_key:
+                return False
+            
+            # Check Radarr queue for active downloads
+            response = requests.get(
+                f"{radarr_service.base_url}/api/v3/queue",
+                headers={"X-Api-Key": radarr_service.api_key}
+            )
+            response.raise_for_status()
+            queue_data = response.json()
+            
+            # Look for this movie in the download queue
+            for item in queue_data.get('records', []):
+                if item.get('movieId') == radarr_id:
+                    # Movie is in queue, check if it's actively downloading
+                    status = item.get('status', '').lower()
+                    return status in ['downloading', 'queued', 'grabbing']
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error checking Radarr queue: {e}")
+            return False
+    
+    async def _is_tv_downloading(self, request: MediaRequest) -> bool:
+        """Check if TV show is actively downloading in Sonarr"""
         try:
             sonarr_service = SonarrService(self.session)
-            
-            # Get series details from Sonarr
             series_details = sonarr_service.get_series_details(request.sonarr_id)
+            
             if not series_details:
                 return False
             
-            # Check series status in Sonarr
-            old_status = request.status
-            new_status = self._determine_status_from_sonarr(series_details, request.status)
+            # Check if series has episodes to download
+            statistics = series_details.get('statistics', {})
+            total_episodes = statistics.get('episodeCount', 0)
+            downloaded_episodes = statistics.get('episodeFileCount', 0)
             
-            if new_status != old_status:
-                request.status = new_status
-                request.updated_at = datetime.utcnow()
-                self.session.add(request)
-                print(f"📺 TV Show '{request.title}' status: {old_status.value} → {new_status.value}")
-                return True
+            # If all episodes are downloaded, it's not downloading
+            if downloaded_episodes >= total_episodes:
+                return False
+            
+            # Check Sonarr queue for active downloads of this series
+            return self._check_sonarr_queue(sonarr_service, request.sonarr_id)
                 
         except Exception as e:
             print(f"Error checking Sonarr status for request {request.id}: {e}")
-        
-        return False
+            return False
     
-    def _determine_status_from_radarr(self, movie_details: Dict, current_status: RequestStatus) -> RequestStatus:
-        """Determine request status based on Radarr movie details"""
-        # Check if movie has been downloaded
-        if movie_details.get('hasFile', False):
-            return RequestStatus.DOWNLOADED
-        
-        # Check if movie is currently downloading
-        if movie_details.get('isAvailable', False) or movie_details.get('downloaded', False):
-            return RequestStatus.DOWNLOADED
-        
-        # Check if movie is being monitored and searched
-        if movie_details.get('monitored', False):
-            return RequestStatus.DOWNLOADING
-        
-        # If in Radarr but not monitored, consider it processing
-        return RequestStatus.APPROVED  # Keep as approved until we see download activity
-    
-    def _determine_status_from_sonarr(self, series_details: Dict, current_status: RequestStatus) -> RequestStatus:
-        """Determine request status based on Sonarr series details"""
-        # Check overall series statistics
-        statistics = series_details.get('statistics', {})
-        
-        # If we have any downloaded episodes, consider it downloaded
-        if statistics.get('episodeFileCount', 0) > 0:
-            return RequestStatus.DOWNLOADED
-        
-        # If series is monitored and has episodes, it's downloading
-        if series_details.get('monitored', False) and statistics.get('episodeCount', 0) > 0:
-            return RequestStatus.DOWNLOADING
-        
-        # If in Sonarr but not actively downloading, keep as approved
-        return RequestStatus.APPROVED
+    def _check_sonarr_queue(self, sonarr_service: SonarrService, sonarr_id: int) -> bool:
+        """Check if TV show is actively downloading in Sonarr queue"""
+        try:
+            import requests
+            
+            if not sonarr_service.base_url or not sonarr_service.api_key:
+                return False
+            
+            # Check Sonarr queue for active downloads
+            response = requests.get(
+                f"{sonarr_service.base_url}/api/v3/queue",
+                headers={"X-Api-Key": sonarr_service.api_key}
+            )
+            response.raise_for_status()
+            queue_data = response.json()
+            
+            # Look for this series in the download queue
+            for item in queue_data.get('records', []):
+                if item.get('seriesId') == sonarr_id:
+                    # Series is in queue, check if it's actively downloading
+                    status = item.get('status', '').lower()
+                    return status in ['downloading', 'queued', 'grabbing']
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error checking Sonarr queue: {e}")
+            return False

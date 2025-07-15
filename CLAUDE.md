@@ -53,12 +53,43 @@ async def endpoint_handler(request: Request, ...):
 
 ## 🔧 Technical Standards
 
+### 🚀 **CRITICAL PERFORMANCE PRINCIPLES** 
+**⚠️ These are fundamental rules that MUST be followed in all future development:**
+
+#### **Background Processing First**
+- **Heavy tasks MUST be background jobs** - Never block the UI with slow operations
+- **API calls to external services** → Use immediate integration with proper error handling (don't fail the request if service is down)
+- **Database-heavy operations** → Background processing  
+- **File processing/uploads** → Background processing
+- **Email sending** → Background processing
+- **KEEP IT SIMPLE** - Avoid complex background queuing when immediate + error handling works better
+
+#### **Async Everywhere Possible**
+- **Use `async/await`** for all I/O operations (database, API calls, file operations)
+- **FastAPI endpoints** should be `async def` when doing any I/O
+- **Database sessions** should use async patterns where possible
+- **External API calls** must be async
+
+#### **HTMX Over JavaScript**
+- **Live updates** → Use HTMX `hx-trigger`, `hx-swap-oob`, `hx-target` 
+- **Form submissions** → HTMX forms, not JavaScript fetch
+- **Dynamic content** → HTMX partials and components
+- **Only use JavaScript** when HTMX cannot achieve the desired behavior
+- **Speed is the priority** - HTMX + fast endpoints beats JavaScript + slow endpoints
+
+#### **Endpoint Optimization Rules**
+- **Request creation** → Instant database write, background service integration
+- **Approval/rejection** → Instant status update, background service integration  
+- **Status checks** → Background jobs with HTMX polling for updates
+- **Never combine** user-facing actions with slow external API calls
+
 ### HTMX Best Practices
 - **Always return HTML** for `HX-Request` headers
 - **Use HTMX triggers** for auto-refresh: `hx-trigger="load delay:5s"`
 - **Target specific elements**: `hx-target="#users-list"`
 - **Auto-dismiss notifications**: `hx-get="/admin/clear-feedback"`
 - **Minimal JavaScript**: Let HTMX handle DOM updates
+- **Fast endpoints only**: Never call slow services from HTMX forms
 
 ### API Response Standards
 For non-HTMX requests, return consistent JSON:
@@ -75,6 +106,7 @@ For non-HTMX requests, return consistent JSON:
 - **Always set updated_at**: Use `datetime.utcnow()` on modifications
 - **Filter NULL timestamps**: `.where(Model.updated_at.isnot(None))`
 - **Use proper foreign keys**: Maintain referential integrity
+- **Async database operations**: Use async sessions for I/O heavy operations
 
 ## 🐛 Known Issues & Solutions
 

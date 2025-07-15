@@ -84,10 +84,7 @@
             <div class="flex space-x-3">
                 <button 
                     class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                    hx-post="{{ base_url }}/requests/{{ existing_request.id }}/approve"
-                    hx-target="#request-section"
-                    hx-trigger="click"
-                    hx-confirm="Approve this {{ media_type }} request?"
+                    onclick="approveRequest({{ existing_request.id }})"
                 >
                     <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
@@ -96,10 +93,7 @@
                 </button>
                 <button 
                     class="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                    hx-post="{{ base_url }}/requests/{{ existing_request.id }}/reject"
-                    hx-target="#request-section"
-                    hx-trigger="click"
-                    hx-confirm="Reject this {{ media_type }} request?"
+                    onclick="rejectRequest({{ existing_request.id }})"
                 >
                     <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -112,3 +106,48 @@
     </div>
 </div>
 {% endif %}
+
+<script>
+// Admin actions for request section
+async function approveRequest(requestId) {
+    try {
+        const response = await fetch(`{{ base_url }}/requests/${requestId}/approve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            location.reload(); // Refresh to show updated status
+        } else {
+            alert('Failed to approve request');
+        }
+    } catch (error) {
+        console.error('Error approving request:', error);
+        alert('Error approving request');
+    }
+}
+
+async function rejectRequest(requestId) {
+    if (confirm('Are you sure you want to reject this request?')) {
+        try {
+            const response = await fetch(`{{ base_url }}/requests/${requestId}/reject`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                location.reload(); // Refresh to show updated status
+            } else {
+                alert('Failed to reject request');
+            }
+        } catch (error) {
+            console.error('Error rejecting request:', error);
+            alert('Error rejecting request');
+        }
+    }
+}
+</script>

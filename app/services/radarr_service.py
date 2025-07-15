@@ -129,7 +129,7 @@ class RadarrService:
             print(f"Error searching movie in Radarr: {e}")
             return None
     
-    def add_movie(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None) -> Optional[Dict]:
+    def add_movie(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, user_id: int = None) -> Optional[Dict]:
         """Add movie to Radarr"""
         if not self.base_url:
             print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
@@ -142,45 +142,115 @@ class RadarrService:
             # First search for the movie
             movie_data = self.search_movie(tmdb_id)
             if not movie_data:
+                print(f"❌ Movie not found in Radarr search for TMDB ID: {tmdb_id}")
                 return None
+            
+            print(f"🔍 Found movie in Radarr: {movie_data.get('title', 'Unknown')} (TMDB: {tmdb_id})")
+            
+            # Check if movie already exists in Radarr
+            existing_movie = self.get_movie_by_tmdb_id(tmdb_id)
+            if existing_movie:
+                print(f"⚠️ Movie already exists in Radarr with ID: {existing_movie.get('id')}")
+                return existing_movie  # Return existing movie data instead of failing
             
             # Get default settings if not provided
             if not quality_profile_id:
-                profiles = self.get_quality_profiles()
-                quality_profile_id = profiles[0]['id'] if profiles else 1
+                # First try user permissions
+                if user_id:
+                    from ..models.user_permissions import UserPermissions
+                    from sqlmodel import select
+                    user_perms_stmt = select(UserPermissions).where(UserPermissions.user_id == user_id)
+                    user_perms = self.session.exec(user_perms_stmt).first()
+                    if user_perms and user_perms.movie_quality_profile_id:
+                        quality_profile_id = user_perms.movie_quality_profile_id
+                
+                # Then try service instance settings
+                if not quality_profile_id and self.instance:
+                    settings = self.instance.get_settings()
+                    quality_profile_id = settings.get('quality_profile_id')
+                
+                # Finally fallback to first available
+                if not quality_profile_id:
+                    profiles = self.get_quality_profiles()
+                    if profiles:
+                        quality_profile_id = profiles[0]['id']
+                        print(f"🔍 Using default quality profile: {profiles[0].get('name', 'Unknown')} (ID: {quality_profile_id})")
+                    else:
+                        print("❌ No quality profiles available in Radarr")
+                        return None
             
             if not root_folder_path:
-                folders = self.get_root_folders()
-                root_folder_path = folders[0]['path'] if folders else '/movies'
+                # Try service instance settings first
+                if self.instance:
+                    settings = self.instance.get_settings()
+                    root_folder_path = settings.get('root_folder_path')
+                
+                # Fallback to first available
+                if not root_folder_path:
+                    folders = self.get_root_folders()
+                    if folders:
+                        root_folder_path = folders[0]['path']
+                        print(f"🔍 Using default root folder: {root_folder_path}")
+                    else:
+                        print("❌ No root folders available in Radarr")
+                        return None
             
-            # Prepare movie data for adding
+            # Get additional settings from service instance
+            settings = self.instance.get_settings() if self.instance else {}
+            minimum_availability = settings.get('minimum_availability', 'released')
+            monitored = settings.get('monitored', True)
+            search_for_movie = settings.get('search_for_movie', True)
+            
+            # Prepare movie data for adding - ensure required fields are present
             add_data = {
-                'title': movie_data['title'],
+                'title': movie_data.get('title', 'Unknown Title'),
                 'qualityProfileId': quality_profile_id,
                 'rootFolderPath': root_folder_path,
                 'tmdbId': tmdb_id,
-                'monitored': True,
-                'minimumAvailability': 'released',
+                'monitored': monitored,
+                'minimumAvailability': minimum_availability,
                 'addOptions': {
-                    'searchForMovie': True
+                    'searchForMovie': search_for_movie
                 }
             }
             
-            # Add any additional fields from the search result
-            for field in ['year', 'images', 'runtime', 'overview']:
-                if field in movie_data:
+            # Add required fields from movie lookup
+            if 'year' in movie_data:
+                add_data['year'] = movie_data['year']
+            if 'titleSlug' in movie_data:
+                add_data['titleSlug'] = movie_data['titleSlug']
+            
+            # Add optional fields if present
+            optional_fields = ['images', 'runtime', 'overview', 'studio', 'genres', 'ratings']
+            for field in optional_fields:
+                if field in movie_data and movie_data[field] is not None:
                     add_data[field] = movie_data[field]
+            
+            # Add tags if configured
+            tags = settings.get('tags', [])
+            if tags:
+                add_data['tags'] = tags
+            
+            print(f"🔍 Radarr payload for '{movie_data['title']}': {add_data}")
             
             response = requests.post(
                 f"{self.base_url}/api/v3/movie",
                 headers=self.headers,
                 json=add_data
             )
+            
+            if not response.ok:
+                print(f"❌ Radarr API error {response.status_code}: {response.text}")
+                print(f"🔍 Request URL: {response.url}")
+                print(f"🔍 Request headers: {self.headers}")
+            
             response.raise_for_status()
             return response.json()
             
         except Exception as e:
             print(f"Error adding movie to Radarr: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"🔍 Response content: {e.response.text}")
             return None
     
     def get_movie_by_tmdb_id(self, tmdb_id: int) -> Optional[Dict]:

@@ -122,7 +122,7 @@
                             </div>
                             
                             <!-- Status Badge -->
-                            <div class="ml-2 flex-shrink-0">
+                            <div class="ml-2 flex-shrink-0" id="status-{{ request.id }}">
                                 {% if request.status.value == 'pending' %}
                                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                                     ⏳ Pending
@@ -137,7 +137,7 @@
                                 </span>
                                 {% elif request.status.value == 'downloading' %}
                                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                                    ⬇ Processing
+                                    ⬇ Downloading
                                 </span>
                                 {% elif request.status.value == 'rejected' %}
                                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
@@ -626,5 +626,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 }
 </style>
+
 
 {% endblock %}

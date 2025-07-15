@@ -1,0 +1,161 @@
+<!-- Scheduled Jobs Content -->
+<div class="max-w-7xl mx-auto">
+    <div class="mb-8">
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">Scheduled Jobs</h2>
+        <p class="text-gray-600">Monitor and manage background tasks that keep your server running smoothly.</p>
+    </div>
+
+    <!-- Jobs Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-1 gap-6">
+        
+        <!-- Download Status Check Job -->
+        <div class="bg-white shadow-lg rounded-lg overflow-hidden">
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+                <div class="flex items-center">
+                    <div class="bg-white bg-opacity-20 rounded-full p-2 mr-3">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                    </div>
+                    <div class="text-white">
+                        <h3 class="text-lg font-semibold">{{ jobs.download_status_check.name }}</h3>
+                        <p class="text-blue-100 text-sm">{{ jobs.download_status_check.description }}</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="px-6 py-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <!-- Status -->
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                {% if jobs.download_status_check.running %}
+                                    <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                                {% else %}
+                                    <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+                                {% endif %}
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm font-medium text-gray-900">Status</p>
+                                <p class="text-sm text-gray-500">
+                                    {% if jobs.download_status_check.running %}Running{% else %}Stopped{% endif %}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Interval -->
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm font-medium text-gray-900">Interval</p>
+                                <p class="text-sm text-gray-500">{{ jobs.download_status_check.interval }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Last Run -->
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm font-medium text-gray-900">Last Run</p>
+                                <p class="text-sm text-gray-500">{{ jobs.download_status_check.last_run }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                {% if jobs.download_status_check.next_run %}
+                <div class="bg-blue-50 rounded-lg p-4 mb-6">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-blue-900">Next Run</p>
+                            <p class="text-sm text-blue-700">{{ jobs.download_status_check.next_run }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Actions -->
+                <div class="flex space-x-3">
+                    <button 
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                        hx-post="{{ base_url }}/admin/jobs/trigger-download-status"
+                        hx-target="#settings-feedback"
+                        hx-indicator="#download-status-loading">
+                        <span id="download-status-loading" class="htmx-indicator">
+                            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </span>
+                        Trigger Now
+                    </button>
+                    
+                    <button 
+                        class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                        hx-get="{{ base_url }}/admin/jobs/content"
+                        hx-target="#jobs-frame">
+                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Future Jobs Section -->
+        <div class="bg-white shadow-lg rounded-lg overflow-hidden">
+            <div class="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-4">
+                <div class="flex items-center">
+                    <div class="bg-white bg-opacity-20 rounded-full p-2 mr-3">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                        </svg>
+                    </div>
+                    <div class="text-white">
+                        <h3 class="text-lg font-semibold">Future Jobs</h3>
+                        <p class="text-purple-100 text-sm">Additional scheduled tasks will appear here as they're added</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="px-6 py-8">
+                <div class="text-center">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
+                    </svg>
+                    <h4 class="text-lg font-medium text-gray-900 mb-2">More Jobs Coming Soon</h4>
+                    <p class="text-gray-600">Additional scheduled tasks like library sync and cleanup jobs will be added here in future updates.</p>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+</div>
+
+<!-- Auto-refresh every 30 seconds -->
+<script>
+    setInterval(function() {
+        htmx.ajax('GET', '{{ base_url }}/admin/jobs/content', {
+            target: '#jobs-frame'
+        });
+    }, 30000);
+</script>

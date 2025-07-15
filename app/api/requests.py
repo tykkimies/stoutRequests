@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pydantic import BaseModel
 from fastapi import Form
+import asyncio
 from ..core.database import get_session
 from ..core.template_context import get_global_template_context
 from ..models.user import User
@@ -133,33 +134,8 @@ async def create_request(
             </div>'''
         )
 
-    # Check Radarr/Sonarr
-    try:
-        if media_type == 'movie':
-            radarr_service = RadarrService(session)
-            if radarr_service.get_movie_by_tmdb_id(tmdb_id):
-                return HTMLResponse(
-                    f'''<div class="inline-flex items-center px-3 py-2 border border-blue-300 text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-50">
-                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                        </svg>
-                        In Radarr
-                    </div>'''
-                )
-        elif media_type == 'tv':
-            sonarr_service = SonarrService(session)
-            if sonarr_service.get_series_by_tmdb_id(tmdb_id):
-                return HTMLResponse(
-                    f'''<div class="inline-flex items-center px-3 py-2 border border-blue-300 text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-50">
-                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                        </svg>
-                        In Sonarr
-                    </div>'''
-                )
-    except Exception as e:
-        print(f"Error checking Radarr/Sonarr: {e}")
-        # Fail silently and proceed with request creation
+    # Note: Removed slow Radarr/Sonarr checks during request creation
+    # These will be handled by the background download status service
 
     # Determine initial status based on auto-approval
     initial_status = RequestStatus.PENDING
@@ -194,47 +170,19 @@ async def create_request(
     if initial_status == RequestStatus.PENDING:
         permissions_service.increment_user_request_count(current_user.id)
     
-    # If auto-approved, try to add to Radarr/Sonarr immediately
-    service_error = None
+    # For auto-approved requests, schedule background processing
     if initial_status == RequestStatus.APPROVED:
-        try:
-            if media_type == 'movie':
-                radarr_service = RadarrService(session)
-                radarr_result = radarr_service.add_movie(tmdb_id)
-                if radarr_result:
-                    new_request.radarr_id = radarr_result.get('id')
-                    # Keep as APPROVED - will be updated to DOWNLOADING by sync service
-                    # when Radarr actually starts downloading
-                else:
-                    service_error = "Failed to add movie to Radarr"
-            elif media_type == 'tv':
-                sonarr_service = SonarrService(session)
-                sonarr_result = sonarr_service.add_series(tmdb_id)
-                if sonarr_result:
-                    new_request.sonarr_id = sonarr_result.get('id')
-                    # Keep as APPROVED - will be updated to DOWNLOADING by sync service
-                    # when Sonarr actually starts downloading
-                else:
-                    service_error = "Failed to add series to Sonarr"
-            
-            session.add(new_request)
-            session.commit()
-        except Exception as e:
-            service_error = f"Service integration error: {str(e)}"
-            print(f"Error auto-adding to Radarr/Sonarr: {e}")
-            # Keep status as approved even if Radarr/Sonarr fails
+        session.add(new_request)
+        session.commit()
+        
+        # Trigger background processing without changing status
+        from ..services.background_jobs import trigger_service_integration
+        asyncio.create_task(trigger_service_integration(new_request.id))
 
-    # Return appropriate message based on status and service integration
+    # Return appropriate message based on initial status
     if initial_status == RequestStatus.APPROVED:
-        if service_error:
-            message = f"Approved (Service Error: {service_error})"
-            color_class = "yellow"
-        elif service_success:
-            message = "Auto-approved & sent to service!"
-            color_class = "blue"
-        else:
-            message = "Auto-approved!"
-            color_class = "blue"
+        message = "Auto-approved! Adding to download queue..."
+        color_class = "blue"
     else:
         message = "Requested!"
         color_class = "green"
@@ -386,35 +334,16 @@ async def approve_request(
         permissions_service = PermissionsService(session)
         permissions_service.decrement_user_request_count(media_request.user_id)
     
-    # Add to Radarr/Sonarr with enhanced error tracking
-    service_error = None
-    service_success = False
-    try:
-        if media_request.media_type == MediaType.MOVIE:
-            radarr_service = RadarrService(session)
-            radarr_result = radarr_service.add_movie(media_request.tmdb_id)
-            if radarr_result:
-                media_request.radarr_id = radarr_result.get('id')
-                # Keep as APPROVED - will be updated to DOWNLOADING by sync service
-                service_success = True
-            else:
-                service_error = "Failed to add movie to Radarr"
-        elif media_request.media_type == MediaType.TV:
-            sonarr_service = SonarrService(session)
-            sonarr_result = sonarr_service.add_series(media_request.tmdb_id)
-            if sonarr_result:
-                media_request.sonarr_id = sonarr_result.get('id')
-                # Keep as APPROVED - will be updated to DOWNLOADING by sync service
-                service_success = True
-            else:
-                service_error = "Failed to add series to Sonarr"
-    except Exception as e:
-        service_error = f"Service integration error: {str(e)}"
-        print(f"Error adding to Radarr/Sonarr: {e}")
-        # Keep status as approved even if Radarr/Sonarr fails
+    session.add(media_request)
+    session.commit()
+    
+    # Trigger background service integration
+    from ..services.background_jobs import trigger_service_integration
+    import asyncio
+    asyncio.create_task(trigger_service_integration(media_request.id))
     
     # Content negotiation - check if this is an HTMX request
-    if request.headers.get("HX-Request"):
+    if False:  # Disable HTMX content negotiation
         # Check if this came from media detail page (has different target)
         hx_target = request.headers.get("HX-Target", "")
         print(f"🔍 APPROVE: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")
@@ -469,16 +398,9 @@ async def approve_request(
             </span>
             ''')
         else:
-            # From admin requests list - return status badge with service feedback
-            if service_success:
-                badge_text = "✓ Sent to Service"
-                badge_class = "bg-blue-100 text-blue-800"
-            elif service_error:
-                badge_text = f"⚠ Approved ({service_error})"
-                badge_class = "bg-yellow-100 text-yellow-800"
-            else:
-                badge_text = "✓ Approved"
-                badge_class = "bg-blue-100 text-blue-800"
+            # From admin requests list - return status badge
+            badge_text = "✓ Approved"
+            badge_class = "bg-blue-100 text-blue-800"
                 
             return HTMLResponse(f'''
             <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
@@ -522,7 +444,7 @@ async def reject_request(
         permissions_service.decrement_user_request_count(media_request.user_id)
     
     # Content negotiation - check if this is an HTMX request
-    if request.headers.get("HX-Request"):
+    if False:  # Disable HTMX content negotiation
         # Check if this came from media detail page (has different target)
         hx_target = request.headers.get("HX-Target", "")
         print(f"🔍 REJECT: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")

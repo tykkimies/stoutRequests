@@ -1693,3 +1693,130 @@ async def get_roles_management(
             ],
             "available_permissions": all_permissions
         }
+
+
+@router.get("/jobs/content", response_class=HTMLResponse)
+async def admin_jobs_content(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get scheduled jobs content for admin dashboard"""
+    try:
+        from ..services.background_jobs import background_jobs
+        
+        # Get job status information
+        jobs_info = {
+            "download_status_check": {
+                "name": "Download Status Check",
+                "description": "Checks Radarr/Sonarr for download status updates",
+                "interval": "2 minutes",
+                "running": background_jobs.running,
+                "last_run": background_jobs.last_download_check.strftime("%Y-%m-%d %H:%M:%S UTC") if background_jobs.last_download_check else "Never",
+                "next_run": None  # Will be calculated
+            }
+        }
+        
+        # Calculate next run time
+        if background_jobs.last_download_check:
+            from datetime import timedelta
+            next_run = background_jobs.last_download_check + timedelta(seconds=background_jobs.download_status_interval)
+            jobs_info["download_status_check"]["next_run"] = next_run.strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        return create_template_response("admin_jobs.html", {
+            "request": request,
+            "current_user": current_user,
+            "jobs": jobs_info
+        })
+        
+    except Exception as e:
+        print(f"Error loading jobs content: {e}")
+        return HTMLResponse(f'<div class="text-red-600">Error loading jobs: {str(e)}</div>')
+
+
+@router.post("/jobs/trigger-download-status")
+async def trigger_download_status_job(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Manually trigger download status check job"""
+    try:
+        from ..services.background_jobs import trigger_download_status_check
+        
+        stats = await trigger_download_status_check()
+        
+        # Content negotiation
+        if request.headers.get("HX-Request"):
+            # HTMX web client - return HTML
+            base_url = SettingsService.get_base_url(session)
+            
+            if stats.get('errors', 0) > 0:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md" 
+                         hx-get="{base_url}/admin/clear-feedback"
+                         hx-trigger="load delay:5s">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div class="ml-3 text-sm text-yellow-700">
+                                <p><strong>Download status check completed with errors!</strong></p>
+                                <p>Checked {stats.get('checked', 0)} requests. Updated {stats.get('updated_to_downloading', 0)} to downloading, {stats.get('updated_to_downloaded', 0)} to downloaded. {stats.get('errors', 0)} errors occurred.</p>
+                            </div>
+                        </div>
+                    </div>
+                """)
+            else:
+                checked = stats.get('checked', 0)
+                downloading = stats.get('updated_to_downloading', 0)
+                downloaded = stats.get('updated_to_downloaded', 0)
+                
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
+                         hx-get="{base_url}/admin/clear-feedback"
+                         hx-trigger="load delay:5s">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div class="ml-3 text-sm text-green-700">
+                                <p><strong>Download status check completed!</strong></p>
+                                <p>Checked {checked} requests. Updated {downloading} to downloading, {downloaded} to downloaded.</p>
+                            </div>
+                        </div>
+                    </div>
+                """)
+        else:
+            # API client - return JSON
+            return {
+                "success": True,
+                "message": "Download status check triggered successfully",
+                "stats": stats
+            }
+            
+    except Exception as e:
+        print(f"Error triggering download status check: {e}")
+        if request.headers.get("HX-Request"):
+            base_url = SettingsService.get_base_url(session)
+            return HTMLResponse(f"""
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
+                     hx-get="{base_url}/admin/clear-feedback"
+                     hx-trigger="load delay:5s">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div class="ml-3 text-sm text-red-700">
+                            <p><strong>Error triggering download status check!</strong></p>
+                            <p>{str(e)}</p>
+                        </div>
+                    </div>
+                </div>
+            """)
+        else:
+            return {
+                "success": False,
+                "message": f"Error triggering download status check: {str(e)}"
+            }
+
