@@ -15,10 +15,12 @@ from .api.requests import router as requests_router
 from .api.admin import router as admin_router
 from .api.setup import router as setup_router
 from .api.services import router as services_router
+from .api.webhooks import router as webhooks_router
 from app.api import setup
 from .models import User
 from .services.plex_sync_service import PlexSyncService
 from .services.permissions_service import PermissionsService
+from .services.background_jobs import start_background_jobs, stop_background_jobs
 
 
 @asynccontextmanager
@@ -30,8 +32,13 @@ async def lifespan(app: FastAPI):
     with Session(engine) as session:
         PermissionsService.ensure_default_roles(session)
     
+    # Start background jobs
+    await start_background_jobs()
+    
     yield
-    # Shutdown (if needed)
+    
+    # Shutdown
+    await stop_background_jobs()
 
 app = FastAPI(title="Stout Requests", version="1.0.0", lifespan=lifespan)
 
@@ -45,6 +52,7 @@ app.include_router(requests_router)
 app.include_router(admin_router)
 app.include_router(setup_router)
 app.include_router(services_router)
+app.include_router(webhooks_router)
 # app.include_router(setup.router)
 
 # Setup templates
@@ -307,6 +315,9 @@ async def discover_page(
         if rating_source == "tmdb" and rating_min:
             rating_filter = float(rating_min)
         
+        # Convert streaming providers to comma-separated string for TMDB
+        streaming_filter = ",".join(streaming) if streaming else None
+        
         # Check if we should use pure TMDB discover endpoint instead of content sources
         use_discover_endpoint = (
             not content_sources or  # No sources selected
@@ -337,6 +348,7 @@ async def discover_page(
                             sort_by="popularity.desc",  # Sort by popularity but search all content
                             with_genres=genre_filter,
                             vote_average_gte=rating_filter,
+                            with_watch_providers=streaming_filter,
                         )
                     else:  # tv
                         discover_results = tmdb_service.discover_tv(
@@ -344,6 +356,7 @@ async def discover_page(
                             sort_by="popularity.desc",  # Sort by popularity but search all content
                             with_genres=genre_filter,
                             vote_average_gte=rating_filter,
+                            with_watch_providers=streaming_filter,
                         )
                     
                     # Add media_type and source info to all items
@@ -374,23 +387,27 @@ async def discover_page(
                         if target_media_type == "movie":
                             return tmdb_service.discover_movies(
                                 page=page, sort_by="popularity.desc", 
-                                with_genres=genre_filter, vote_average_gte=rating_filter
+                                with_genres=genre_filter, vote_average_gte=rating_filter,
+                                with_watch_providers=streaming_filter
                             )
                         else:
                             return tmdb_service.discover_tv(
                                 page=page, sort_by="popularity.desc",
-                                with_genres=genre_filter, vote_average_gte=rating_filter
+                                with_genres=genre_filter, vote_average_gte=rating_filter,
+                                with_watch_providers=streaming_filter
                             )
                     elif source == "top_rated":
                         if target_media_type == "movie":
                             return tmdb_service.discover_movies(
                                 page=page, sort_by="vote_average.desc",
-                                with_genres=genre_filter, vote_average_gte=rating_filter
+                                with_genres=genre_filter, vote_average_gte=rating_filter,
+                                with_watch_providers=streaming_filter
                             )
                         else:
                             return tmdb_service.discover_tv(
                                 page=page, sort_by="vote_average.desc",
-                                with_genres=genre_filter, vote_average_gte=rating_filter
+                                with_genres=genre_filter, vote_average_gte=rating_filter,
+                                with_watch_providers=streaming_filter
                             )
                     elif source == "upcoming" and target_media_type == "movie":
                         return tmdb_service.get_upcoming_movies(page)
@@ -502,45 +519,7 @@ async def discover_page(
             
             results['results'] = filtered_results
         
-        # Filter by streaming services if specified (using watch providers from TMDB)
-        if streaming and results.get('results'):
-            streaming_ids = [int(streaming_id) for streaming_id in streaming]
-            filtered_results = []
-            
-            print(f"🔍 Filtering by streaming services: {streaming_ids}")
-            
-            for item in results['results']:
-                try:
-                    # Get the actual media type for the item (important for mixed content)
-                    item_media_type = item.get('media_type', media_type)
-                    
-                    # Get watch providers for this item
-                    watch_providers = tmdb_service.get_watch_providers(item['id'], item_media_type)
-                    us_providers = watch_providers.get('results', {}).get('US', {})
-                    
-                    # Check flatrate (subscription) providers primarily
-                    all_providers = []
-                    all_providers.extend(us_providers.get('flatrate', []))
-                    # Also include buy/rent for broader results, but prioritize subscription
-                    all_providers.extend(us_providers.get('buy', []))
-                    all_providers.extend(us_providers.get('rent', []))
-                    
-                    provider_ids = [provider.get('provider_id') for provider in all_providers]
-                    
-                    if any(streaming_id in provider_ids for streaming_id in streaming_ids):
-                        print(f"✅ Item {item['id']} ({item.get('title') or item.get('name')}) matched streaming filters")
-                        filtered_results.append(item)
-                    else:
-                        print(f"❌ Item {item['id']} ({item.get('title') or item.get('name')}) has providers {provider_ids}, doesn't match {streaming_ids}")
-                        
-                except Exception as e:
-                    print(f"⚠️ Error checking streaming providers for item {item['id']}: {e}")
-                    # For now, exclude items with errors to avoid showing irrelevant content
-                    # But this could be changed back to include them if needed
-                    pass
-            
-            print(f"📊 Streaming filter results: {len(filtered_results)} out of {len(results.get('results', []))} items")
-            results['results'] = filtered_results
+        # Note: Streaming filters are now handled natively by TMDB via with_watch_providers parameter
         
         # Fast status check using database lookup with fallback
         try:

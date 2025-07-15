@@ -20,6 +20,13 @@
             </div>
         </div>
 
+        <!-- Service Status Notifications (Admin Only) -->
+        {% if user_is_admin %}
+        <div id="service-notifications" class="mb-6" hx-get="{{ base_url }}/admin/service-status" hx-trigger="load" hx-swap="innerHTML">
+            <!-- Service status will be loaded here -->
+        </div>
+        {% endif %}
+
         <!-- Primary Tab Navigation (Media Type) -->
         <div class="border-b border-gray-200 mb-6">
             <nav class="-mb-px flex space-x-8" aria-label="Media Type Tabs">

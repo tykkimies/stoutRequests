@@ -345,7 +345,7 @@ class PlexSyncService:
             update_query = text("""
                 UPDATE mediarequest 
                 SET status = 'available', updated_at = NOW()
-                WHERE status IN ('pending', 'approved', 'downloading')
+                WHERE status IN ('pending', 'approved', 'downloading', 'downloaded')
                 AND EXISTS (
                     SELECT 1 FROM plex_library_item 
                     WHERE plex_library_item.tmdb_id = mediarequest.tmdb_id 

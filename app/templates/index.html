@@ -1097,6 +1097,11 @@ document.addEventListener('DOMContentLoaded', function() {
             allSourcesCheckbox.checked = checkedCount === totalCount;
             allSourcesCheckbox.indeterminate = checkedCount > 0 && checkedCount < totalCount;
             
+            // Clear category context when user manually changes filters
+            if (window.currentCategoryContext) {
+                clearCategoryContext();
+            }
+            
             updateFilterClearButtons();
         });
     });
@@ -1123,6 +1128,12 @@ document.addEventListener('DOMContentLoaded', function() {
             clearSearchButton.classList.add('hidden');
         }
         
+        // Hide any existing category context since this is manual filter application
+        hideFilterContext();
+        
+        // Show context for manual filter application
+        showManualFilterContext();
+        
         // Get filter values
         const mediaType = document.getElementById('media-type').value;
         const selectedContentSources = Array.from(document.querySelectorAll('input[name="content-sources"]:checked:not(#sources-all)')).map(cb => cb.value);
@@ -1148,14 +1159,56 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     
     function showFilteredResults(mediaType, selectedContentSources, selectedGenres, ratingSource, ratingValue, selectedStudios, selectedStreaming) {
-        const categoriesContainer = document.querySelector('.space-y-8');
+        const allCategories = document.querySelectorAll('.category-section');
         const reorderButton = document.getElementById('reorder-toggle');
+        
+        // Build URL with filter parameters for proper back button behavior
+        const currentUrl = new URL(window.location);
+        currentUrl.searchParams.set('view', 'filtered-results');
+        currentUrl.searchParams.set('media_type', mediaType);
+        
+        // Add filter parameters to URL
+        currentUrl.searchParams.delete('content_sources'); // Clear existing
+        if (selectedContentSources && selectedContentSources.length > 0) {
+            selectedContentSources.forEach(source => {
+                currentUrl.searchParams.append('content_sources', source);
+            });
+        }
+        
+        currentUrl.searchParams.delete('genres'); // Clear existing
+        if (selectedGenres && selectedGenres.length > 0) {
+            selectedGenres.forEach(genre => {
+                currentUrl.searchParams.append('genres', genre);
+            });
+        }
+        
+        if (ratingSource) {
+            currentUrl.searchParams.set('rating_source', ratingSource);
+            currentUrl.searchParams.set('rating_min', ratingValue);
+        } else {
+            currentUrl.searchParams.delete('rating_source');
+            currentUrl.searchParams.delete('rating_min');
+        }
+        
+        currentUrl.searchParams.delete('studios'); // Clear existing
+        if (selectedStudios && selectedStudios.length > 0) {
+            selectedStudios.forEach(studio => {
+                currentUrl.searchParams.append('studios', studio);
+            });
+        }
+        
+        currentUrl.searchParams.delete('streaming'); // Clear existing
+        if (selectedStreaming && selectedStreaming.length > 0) {
+            selectedStreaming.forEach(streaming => {
+                currentUrl.searchParams.append('streaming', streaming);
+            });
+        }
         
         // Push state to browser history for proper back button behavior
         window.history.pushState(
-            { view: 'filtered' }, 
+            { view: 'category', categoryId: 'filtered-results' }, 
             'Filtered Results - Stout Requests', 
-            window.location.href
+            currentUrl.toString()
         );
         
         // Hide reorder button in filtered view
@@ -1163,28 +1216,40 @@ document.addEventListener('DOMContentLoaded', function() {
             reorderButton.classList.add('hidden');
         }
         
-        // Replace categories with filtered results
-        categoriesContainer.innerHTML = `
-            <div class="category-section">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                        <svg class="w-5 h-5 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.207A1 1 0 013 6.5V4z"></path>
-                        </svg>
-                        ${selectedContentSources.length === 0 ? 'Discover' : 'Filtered Results'}: ${mediaType === 'movie' ? 'Movies' : mediaType === 'tv' ? 'TV Shows' : 'Movies & TV'}${selectedContentSources.length > 0 ? ' • ' + (selectedContentSources.length === 5 ? 'All Sources' : selectedContentSources.map(s => s.replace('_', ' ')).join(', ')) : ' • All Content'}
-                    </h2>
-                    <button onclick="resetToCategories()" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
-                        ← Back to Categories
-                    </button>
-                </div>
-                <div id="filtered-content">
-                    <div class="text-center py-12">
-                        <div class="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p class="text-gray-500 font-medium">Loading filtered results...</p>
-                    </div>
+        // Hide all existing categories (same as category expansion)
+        allCategories.forEach(section => {
+            section.classList.add('hidden-for-expansion');
+            setTimeout(() => {
+                section.style.display = 'none';
+            }, 300);
+        });
+        
+        // Create virtual filtered category section
+        const categoriesContainer = document.querySelector('.space-y-8');
+        const filteredSection = document.createElement('div');
+        filteredSection.className = 'category-section expanded';
+        filteredSection.setAttribute('data-category', 'filtered-results');
+        filteredSection.innerHTML = `
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <svg class="w-5 h-5 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.207A1 1 0 013 6.5V4z"></path>
+                    </svg>
+                    ${selectedContentSources.length === 0 ? 'Discover' : 'Filtered Results'}: ${mediaType === 'movie' ? 'Movies' : mediaType === 'tv' ? 'TV Shows' : 'Movies & TV'}${selectedContentSources.length > 0 ? ' • ' + (selectedContentSources.length === 5 ? 'All Sources' : selectedContentSources.map(s => s.replace('_', ' ')).join(', ')) : ' • All Content'}
+                </h2>
+                <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('filtered-results')">
+                    ← Back to Categories
+                </button>
+            </div>
+            <div id="filtered-results-content">
+                <div class="text-center py-12">
+                    <div class="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                    <p class="text-gray-500 font-medium">Loading filtered results...</p>
                 </div>
             </div>
         `;
+        
+        categoriesContainer.appendChild(filteredSection);
         
         // Build query parameters
         const params = new URLSearchParams({
@@ -1223,11 +1288,40 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
         
+        // Determine the correct endpoint based on filters
+        const hasContentSources = selectedContentSources && selectedContentSources.length > 0;
+        const hasAdditionalFilters = (selectedGenres && selectedGenres.length > 0) || 
+                                   (ratingSource && ratingValue) || 
+                                   (selectedStudios && selectedStudios.length > 0) || 
+                                   (selectedStreaming && selectedStreaming.length > 0);
+        
+        let endpoint;
+        let finalParams;
+        
+        if (hasContentSources && selectedContentSources.length === 1 && !hasAdditionalFilters && mediaType !== 'mixed') {
+            // Use category endpoint for SINGLE content source filtering (for identical results)
+            console.log(`🔧 Using category endpoint for simple content source: ${selectedContentSources[0]}`);
+            endpoint = `{{ base_url }}/discover/category`;
+            
+            finalParams = new URLSearchParams();
+            finalParams.set('type', mediaType);
+            finalParams.set('sort', selectedContentSources[0]);
+            finalParams.set('view', 'grid'); // For infinite scroll
+            
+        } else {
+            // Use discover endpoint for complex filtering or no content sources
+            console.log(`🔧 Using discover endpoint - hasContentSources: ${hasContentSources}, hasAdditionalFilters: ${hasAdditionalFilters}, mediaType: ${mediaType}`);
+            endpoint = `{{ base_url }}/discover`;
+            finalParams = params;
+        }
+        
+        console.log(`📍 Final endpoint: ${endpoint}?${finalParams.toString()}`);
+        
         // Fetch filtered results
-        fetch(`{{ base_url }}/discover?${params}`)
+        fetch(`${endpoint}?${finalParams.toString()}`)
             .then(response => response.text())
             .then(html => {
-                const filteredContent = document.getElementById('filtered-content');
+                const filteredContent = document.getElementById('filtered-results-content');
                 filteredContent.innerHTML = html;
                 
                 // Process HTMX attributes on new content
@@ -1235,11 +1329,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     htmx.process(filteredContent);
                 }
                 
-                // Initialize infinite scroll for the loaded content
-                initializeFilteredResultsInfiniteScroll(params.toString());
+                // Initialize infinite scroll for the loaded content - use the correct endpoint and params
+                if (hasContentSources && selectedContentSources.length === 1 && !hasAdditionalFilters && mediaType !== 'mixed') {
+                    // For single content source, use category-style infinite scroll
+                    const contentDiv = document.getElementById('filtered-results-content');
+                    initializeCategoryInfiniteScroll('filtered-results', finalParams.toString(), contentDiv);
+                } else {
+                    // For complex filtering or no content sources, use discover-style infinite scroll
+                    initializeFilteredResultsInfiniteScroll(finalParams.toString());
+                }
             })
             .catch(error => {
-                document.getElementById('filtered-content').innerHTML = `
+                document.getElementById('filtered-results-content').innerHTML = `
                     <div class="text-center py-8 text-red-600">
                         <p>Error loading filtered results: ${error.message}</p>
                         <button onclick="applyFilters()" class="mt-2 bg-orange-600 text-white px-4 py-2 rounded">
@@ -1251,7 +1352,20 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     window.resetToCategories = function() {
-        // Reset to the original categories view
+        console.log('🔧 Resetting to categories view');
+        
+        // Clear any category context
+        clearCategoryContext();
+        
+        // Update browser history to clear all parameters
+        const currentUrl = new URL(window.location);
+        // Keep only essential path, remove all query parameters
+        window.history.pushState(
+            { view: 'categories' }, 
+            'Stout Requests', 
+            currentUrl.pathname
+        );
+        
         const searchInput = document.getElementById('search-input');
         const searchContainer = document.getElementById('content-results');
         const categoriesContainer = document.getElementById('categories-container');
@@ -1260,6 +1374,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Clear search input
         if (searchInput) {
             searchInput.value = '';
+            document.getElementById('clear-search')?.classList.add('hidden');
         }
         
         // Hide search results if visible
@@ -1283,35 +1398,250 @@ document.addEventListener('DOMContentLoaded', function() {
             searchResultsContent.innerHTML = '';
         }
         
-        // Reset the categories container to original state by reloading the page
-        // This ensures all filters and expanded states are cleared
-        window.location.href = window.location.pathname;
+        // Remove any virtual filtered category
+        const filteredSection = document.querySelector('.category-section[data-category="filtered-results"]');
+        if (filteredSection) {
+            filteredSection.remove();
+        }
+        
+        // Find any expanded category and collapse it properly
+        const expandedCategory = document.querySelector('.category-section.expanded:not([data-category="filtered-results"])');
+        if (expandedCategory) {
+            // Get the category ID from the content div
+            const contentDiv = expandedCategory.querySelector('[id$="-content"]');
+            if (contentDiv) {
+                const categoryId = contentDiv.id.replace('-content', '');
+                console.log(`🔧 Found expanded category ${categoryId}, collapsing it`);
+                collapseCategory(categoryId);
+            }
+        } else {
+            // No expanded category, just make sure all categories are visible
+            setTimeout(() => {
+                document.querySelectorAll('.category-section:not([data-category="filtered-results"])').forEach(section => {
+                    section.style.display = 'block';
+                    section.classList.remove('hidden-for-expansion', 'expanded', 'expanding', 'collapsing');
+                });
+            }, 100);
+        }
     };
 });
 
-// Category expand/collapse functionality
+// Category expand/collapse functionality - UNIFIED APPROACH
 window.expandCategory = function(categoryId) {
     const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
-    const allCategories = document.querySelectorAll('.category-section');
-    const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
     
     // Check if this category is already expanded
-    const isExpanded = categorySection.classList.contains('expanded');
+    const isExpanded = categorySection && categorySection.classList.contains('expanded');
     
     if (isExpanded) {
         // Collapse this category
         collapseCategory(categoryId);
     } else {
-        // Expand this category and hide others
-        doExpandCategory(categoryId);
+        // Expand this category using unified filter approach
+        doExpandCategoryUnified(categoryId);
     }
 };
 
-function doExpandCategory(categoryId) {
+function doExpandCategoryUnified(categoryId) {
+    const config = categoryConfigs[categoryId];
+    
+    // Check if this category has special backend logic OR if it's a TMDB-based category
+    // TMDB categories (trending, popular, etc.) should use the category endpoint, not filter endpoint
+    const isSpecialCategory = config && (config.customType || config.contentSources.length > 0);
+    
+    if (isSpecialCategory) {
+        // Use the legacy approach for categories that have specific backend implementations
+        console.log(`🔧 Expanding category ${categoryId} using legacy approach (special/TMDB category)`);
+        doExpandCategoryLegacy(categoryId);
+        return;
+    }
+    
+    // For truly filter-based categories (none exist currently, but this is for future use)
+    console.log(`🔧 Expanding category ${categoryId} using unified filter approach`);
+    
+    // 1. Populate the filter bar with category's settings
+    populateFilterBarFromCategory(categoryId);
+    
+    // 2. Show filter context
+    showFilterContext(categoryId);
+    
+    // 3. Apply filters using the existing filter system (which creates a virtual category)
+    // Note: We'll override the category ID to match the original category for consistency
+    const originalApplyFilters = window.applyFilters;
+    
+    // Temporarily override applyFilters to use the correct category ID
+    window.applyFilters = function() {
+        // Clear search input when using discover
+        const searchInput = document.getElementById('search-input');
+        const clearSearchButton = document.getElementById('clear-search');
+        if (searchInput.value.trim()) {
+            searchInput.value = '';
+            clearSearchButton.classList.add('hidden');
+        }
+        
+        // Get filter values
+        const mediaType = document.getElementById('media-type').value;
+        const selectedContentSources = Array.from(document.querySelectorAll('input[name="content-sources"]:checked:not(#sources-all)')).map(cb => cb.value);
+        const selectedGenres = Array.from(document.querySelectorAll('input[name="genres"]:checked')).map(cb => cb.value);
+        const ratingSource = document.getElementById('rating-source').value;
+        const ratingValue = ratingSource ? document.getElementById('rating-range').value : '';
+        const selectedStudios = Array.from(document.querySelectorAll('input[name="studios"]:checked')).map(cb => cb.value);
+        const selectedStreaming = Array.from(document.querySelectorAll('input[name="streaming"]:checked')).map(cb => cb.value);
+        
+        // Use the category's display name for the virtual category
+        showFilteredResultsAsCategory(categoryId, mediaType, selectedContentSources, selectedGenres, ratingSource, ratingValue, selectedStudios, selectedStreaming);
+    };
+    
+    // Apply the filters
+    window.applyFilters();
+    
+    // Restore original function
+    window.applyFilters = originalApplyFilters;
+}
+
+function showFilteredResultsAsCategory(categoryId, mediaType, selectedContentSources, selectedGenres, ratingSource, ratingValue, selectedStudios, selectedStreaming) {
+    const allCategories = document.querySelectorAll('.category-section');
+    const reorderButton = document.getElementById('reorder-toggle');
+    const config = categoryConfigs[categoryId] || {};
+    
+    // Push state to browser history for proper back button behavior (using same pattern as category expansion)
+    const currentUrl = new URL(window.location);
+    currentUrl.searchParams.set('view', categoryId);
+    window.history.pushState(
+        { view: 'category', categoryId: categoryId }, 
+        `${config.displayName || getCategoryDisplayName(categoryId)} - Stout Requests`, 
+        currentUrl
+    );
+    
+    // Hide reorder button in expanded view
+    if (reorderButton) {
+        reorderButton.classList.add('hidden');
+    }
+    
+    // Hide all existing categories (same as category expansion)
+    allCategories.forEach(section => {
+        section.classList.add('hidden-for-expansion');
+        setTimeout(() => {
+            section.style.display = 'none';
+        }, 300);
+    });
+    
+    // Create virtual category section
+    const categoriesContainer = document.querySelector('.space-y-8');
+    const expandedSection = document.createElement('div');
+    expandedSection.className = 'category-section expanded';
+    expandedSection.setAttribute('data-category', categoryId);
+    expandedSection.innerHTML = `
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                <span class="text-xl mr-3">${config.icon || '🎬'}</span>
+                ${config.displayName || getCategoryDisplayName(categoryId)}
+            </h2>
+            <button class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors" onclick="expandCategory('${categoryId}')">
+                ← Back to Categories
+            </button>
+        </div>
+        <div id="${categoryId}-content">
+            <div class="text-center py-12">
+                <div class="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                <p class="text-gray-500 font-medium">Loading content...</p>
+            </div>
+        </div>
+    `;
+    
+    categoriesContainer.appendChild(expandedSection);
+    
+    // Build query parameters (same as applyFilters logic)
+    const params = new URLSearchParams();
+    
+    // For special categories, use their custom backend logic
+    if (config.customType) {
+        params.set('type', config.customType);
+        if (config.customSort) {
+            params.set('sort', config.customSort);
+        }
+    } else {
+        // For regular filter-based categories
+        params.set('media_type', mediaType);
+        
+        if (selectedContentSources && selectedContentSources.length > 0) {
+            selectedContentSources.forEach(source => {
+                params.append('content_sources', source);
+            });
+        }
+        
+        if (selectedGenres && selectedGenres.length > 0) {
+            selectedGenres.forEach(genre => {
+                params.append('genres', genre);
+            });
+        }
+        
+        if (ratingSource) {
+            params.set('rating_source', ratingSource);
+            params.set('rating_min', ratingValue);
+        }
+        
+        if (selectedStudios && selectedStudios.length > 0) {
+            selectedStudios.forEach(studio => {
+                params.append('studios', studio);
+            });
+        }
+        
+        if (selectedStreaming && selectedStreaming.length > 0) {
+            selectedStreaming.forEach(streaming => {
+                params.append('streaming', streaming);
+            });
+        }
+    }
+    
+    // Determine the endpoint to use
+    const endpoint = config.customType ? `{{ base_url }}/discover/category?${params}` : `{{ base_url }}/discover?${params}`;
+    
+    // Fetch and load content
+    fetch(endpoint)
+        .then(response => response.text())
+        .then(html => {
+            const contentDiv = document.getElementById(`${categoryId}-content`);
+            contentDiv.innerHTML = html;
+            
+            // Process HTMX attributes on new content
+            if (typeof htmx !== 'undefined') {
+                htmx.process(contentDiv);
+            }
+            
+            // Initialize infinite scroll for the loaded content
+            if (config.customType) {
+                // Use vertical scroll for category content
+                initializeVerticalScrollView(categoryId, params.toString(), contentDiv);
+            } else {
+                // Use filtered results infinite scroll for filter-based content
+                initializeFilteredResultsInfiniteScroll(params.toString());
+            }
+        })
+        .catch(error => {
+            document.getElementById(`${categoryId}-content`).innerHTML = `
+                <div class="text-center py-8 text-red-600">
+                    <p>Error loading content: ${error.message}</p>
+                    <button onclick="expandCategory('${categoryId}')" class="mt-2 bg-orange-600 text-white px-4 py-2 rounded">
+                        Try Again
+                    </button>
+                </div>
+            `;
+        });
+}
+
+// Legacy category expansion for special categories (plex, requests, recommendations, and TMDB categories)
+function doExpandCategoryLegacy(categoryId) {
     const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
     const allCategories = document.querySelectorAll('.category-section');
     const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
     const contentDiv = document.querySelector(`#${categoryId}-content`);
+    
+    // 1. Populate the filter bar with category's settings (for context)
+    populateFilterBarFromCategory(categoryId);
+    
+    // 2. Show filter context
+    showFilterContext(categoryId);
     
     // Push state to browser history for proper back button behavior
     const currentUrl = new URL(window.location);
@@ -1361,10 +1691,12 @@ function doExpandCategory(categoryId) {
 }
 
 function collapseCategory(categoryId) {
-    const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
-    const allCategories = document.querySelectorAll('.category-section');
-    const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
-    const contentDiv = document.querySelector(`#${categoryId}-content`);
+    console.log(`🔧 Collapsing category ${categoryId}`);
+    
+    // Hide filter context when collapsing any category
+    hideFilterContext();
+    
+    const reorderButton = document.getElementById('reorder-toggle');
     
     // Update browser history to remove the view parameter
     const currentUrl = new URL(window.location);
@@ -1375,116 +1707,408 @@ function collapseCategory(categoryId) {
         currentUrl
     );
     
-    // Clean up infinite scroll observer if it exists
-    if (contentDiv.scrollObserver) {
-        contentDiv.scrollObserver.disconnect();
-        delete contentDiv.scrollObserver;
-        delete contentDiv.loadMoreItems;
-    }
+    // Check if this is a virtual category (created by unified approach) or legacy category
+    const expandedVirtualSection = document.querySelector(`.category-section.expanded[data-category="${categoryId}"]`);
+    const allOriginalCategories = document.querySelectorAll('.category-section:not(.expanded)');
     
-    // Add collapsing animation to current category
-    categorySection.classList.add('collapsing');
-    categorySection.classList.remove('expanded');
-    
-    // Show all categories again with smooth animation
-    setTimeout(() => {
-        allCategories.forEach(section => {
-            section.style.display = 'block';
-            section.classList.remove('hidden-for-expansion');
-        });
+    if (expandedVirtualSection) {
+        // This is a virtual category created by unified approach or filtered results
+        console.log(`🔧 Removing virtual category ${categoryId}`);
         
-        // Clean up animation classes
-        categorySection.classList.remove('collapsing');
-    }, 100);
-    
-    // Update button text
-    expandButton.innerHTML = 'View All →';
-    
-    // Reload horizontal scroll data
-    const categoryParams = getCategoryParams(categoryId);
-    
-    // Show loading state
-    contentDiv.innerHTML = `
-        <div class="text-center py-8">
-            <div class="animate-spin w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-            <p class="text-gray-500 text-sm">Loading...</p>
-        </div>
-    `;
-    
-    // Fetch horizontal scroll data
-    fetch(`{{ base_url }}/discover/category?${categoryParams}&limit=20`)
-        .then(response => response.text())
-        .then(html => {
-            contentDiv.innerHTML = html;
-            // Add fade-in animation to loaded content
-            contentDiv.classList.add('category-content-loaded');
-            setTimeout(() => {
-                contentDiv.classList.remove('category-content-loaded');
-            }, 500);
-        })
-        .catch(error => {
+        // Remove the virtual category
+        expandedVirtualSection.remove();
+        
+        // Show all original categories again
+        setTimeout(() => {
+            document.querySelectorAll('.category-section').forEach(section => {
+                section.style.display = 'block';
+                section.classList.remove('hidden-for-expansion');
+            });
+        }, 100);
+        
+    } else {
+        // This is a legacy category that was expanded in place
+        console.log(`🔧 Collapsing legacy category ${categoryId}`);
+        
+        const categorySection = document.querySelector(`#${categoryId}-content`).closest('.category-section');
+        const allCategories = document.querySelectorAll('.category-section');
+        const expandButton = categorySection.querySelector('button[onclick*="expandCategory"]');
+        const contentDiv = document.querySelector(`#${categoryId}-content`);
+        
+        // Clean up infinite scroll observer if it exists
+        if (contentDiv && contentDiv.scrollObserver) {
+            contentDiv.scrollObserver.disconnect();
+            delete contentDiv.scrollObserver;
+            delete contentDiv.loadMoreItems;
+        }
+        
+        // Add collapsing animation to current category
+        if (categorySection) {
+            categorySection.classList.add('collapsing');
+            categorySection.classList.remove('expanded');
+        }
+        
+        // Show all categories again with smooth animation
+        setTimeout(() => {
+            allCategories.forEach(section => {
+                section.style.display = 'block';
+                section.classList.remove('hidden-for-expansion');
+            });
+            
+            // Clean up animation classes
+            if (categorySection) {
+                categorySection.classList.remove('collapsing');
+            }
+        }, 100);
+        
+        // Update button text
+        if (expandButton) {
+            expandButton.innerHTML = 'View All →';
+        }
+        
+        // Reload horizontal scroll data for legacy categories
+        if (contentDiv) {
+            const categoryParams = getCategoryParams(categoryId);
+            
+            // Show loading state
             contentDiv.innerHTML = `
-                <div class="text-center py-8 text-red-600">
-                    <p>Error loading content</p>
+                <div class="text-center py-8">
+                    <div class="animate-spin w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                    <p class="text-gray-500 text-sm">Loading...</p>
                 </div>
             `;
-        });
+            
+            // Fetch horizontal scroll data
+            fetch(`{{ base_url }}/discover/category?${categoryParams}&limit=20`)
+                .then(response => response.text())
+                .then(html => {
+                    contentDiv.innerHTML = html;
+                    // Add fade-in animation to loaded content
+                    contentDiv.classList.add('category-content-loaded');
+                    setTimeout(() => {
+                        contentDiv.classList.remove('category-content-loaded');
+                    }, 500);
+                })
+                .catch(error => {
+                    contentDiv.innerHTML = `
+                        <div class="text-center py-8 text-red-600">
+                            <p>Error loading content</p>
+                        </div>
+                    `;
+                });
+        }
+    }
+    
+    // Show reorder button when returning to categories
+    if (reorderButton) {
+        reorderButton.classList.remove('hidden');
+    }
 }
 
-function getCategoryParams(categoryId) {
-    const params = new URLSearchParams();
-    
-    switch(categoryId) {
-        case 'recently-added':
-            params.set('type', 'plex');
-            params.set('sort', 'recently_added');
-            break;
-        case 'recent-requests':
-            params.set('type', 'requests');
-            params.set('sort', 'recent');
-            break;
-        case 'trending-movies':
-            params.set('type', 'movie');
-            params.set('sort', 'trending');
-            break;
-        case 'popular-movies':
-            params.set('type', 'movie');
-            params.set('sort', 'popular');
-            break;
-        case 'trending-tv':
-            params.set('type', 'tv');
-            params.set('sort', 'trending');
-            break;
-        case 'popular-tv':
-            params.set('type', 'tv');
-            params.set('sort', 'popular');
-            break;
-        case 'upcoming-movies':
-            params.set('type', 'movie');
-            params.set('sort', 'upcoming');
-            break;
-        case 'personalized-recommendations':
-            params.set('type', 'recommendations');
-            params.set('sort', 'personalized');
-            break;
+// Unified Category Configuration System
+const categoryConfigs = {
+    'recently-added': {
+        mediaType: 'mixed',
+        contentSources: [],
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'plex', // For special backend handling
+        customSort: 'recently_added',
+        displayName: 'Recently Added to Plex',
+        icon: '🟢'
+    },
+    'recent-requests': {
+        mediaType: 'mixed',
+        contentSources: [],
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'requests',
+        customSort: 'recent',
+        displayName: 'Recent Requests',
+        icon: '🟣'
+    },
+    'personalized-recommendations': {
+        mediaType: 'mixed',
+        contentSources: [],
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'recommendations',
+        customSort: 'personalized',
+        displayName: 'Recommended for You',
+        icon: '💖'
+    },
+    'trending-movies': {
+        mediaType: 'movie',
+        contentSources: ['trending'], // This populates the filter bar for context
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'movie', // Backend uses category endpoint
+        customSort: 'trending',
+        displayName: 'Trending Movies',
+        icon: '🔥'
+    },
+    'popular-movies': {
+        mediaType: 'movie',
+        contentSources: ['popular'],
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'movie',
+        customSort: 'popular',
+        displayName: 'Popular Movies',
+        icon: '⭐'
+    },
+    'trending-tv': {
+        mediaType: 'tv',
+        contentSources: ['trending'],
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'tv',
+        customSort: 'trending',
+        displayName: 'Trending TV Shows',
+        icon: '🔥'
+    },
+    'popular-tv': {
+        mediaType: 'tv',
+        contentSources: ['popular'],
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'tv',
+        customSort: 'popular',
+        displayName: 'Popular TV Shows',
+        icon: '⭐'
+    },
+    'upcoming-movies': {
+        mediaType: 'movie',
+        contentSources: ['upcoming'],
+        genres: [],
+        ratingSource: '',
+        ratingValue: '',
+        studios: [],
+        streaming: [],
+        customType: 'movie',
+        customSort: 'upcoming',
+        displayName: 'Upcoming Movies',
+        icon: '🗓️'
     }
+};
+
+// Legacy function for backward compatibility - now uses category configs
+function getCategoryParams(categoryId) {
+    const config = categoryConfigs[categoryId];
+    if (!config) return '';
+    
+    // For special categories with custom backend handling
+    if (config.customType) {
+        const params = new URLSearchParams();
+        params.set('type', config.customType);
+        if (config.customSort) {
+            params.set('sort', config.customSort);
+        }
+        return params.toString();
+    }
+    
+    // For regular categories, build filter parameters
+    const params = new URLSearchParams({
+        media_type: config.mediaType
+    });
+    
+    config.contentSources.forEach(source => {
+        params.append('content_sources', source);
+    });
+    
+    config.genres.forEach(genre => {
+        params.append('genres', genre);
+    });
+    
+    if (config.ratingSource) {
+        params.set('rating_source', config.ratingSource);
+        params.set('rating_min', config.ratingValue);
+    }
+    
+    config.studios.forEach(studio => {
+        params.append('studios', studio);
+    });
+    
+    config.streaming.forEach(service => {
+        params.append('streaming', service);
+    });
     
     return params.toString();
 }
 
 // Helper function to get display names for categories
 function getCategoryDisplayName(categoryId) {
-    const categoryNames = {
-        'recently-added': 'Recently Added to Plex',
-        'recent-requests': 'Recent Requests',
-        'personalized-recommendations': 'Recommended for You',
-        'trending-movies': 'Trending Movies',
-        'popular-movies': 'Popular Movies',
-        'trending-tv': 'Trending TV Shows',
-        'popular-tv': 'Popular TV Shows',
-        'upcoming-movies': 'Upcoming Movies'
-    };
-    return categoryNames[categoryId] || 'Category';
+    // Use the new category configs
+    const config = categoryConfigs[categoryId];
+    if (config) {
+        return config.displayName;
+    }
+    
+    // Fallback for special categories
+    if (categoryId === 'filtered-results') {
+        return 'Filtered Results';
+    }
+    
+    return 'Category';
+}
+
+// Filter Bar Management Functions
+function setFilterValue(filterId, value) {
+    const element = document.getElementById(filterId);
+    if (element) {
+        if (element.type === 'select-one') {
+            element.value = value;
+        } else if (element.type === 'checkbox' || element.type === 'radio') {
+            element.checked = value;
+        } else {
+            element.value = value;
+        }
+    }
+}
+
+function setContentSources(sources) {
+    // Clear all content source checkboxes first
+    const allCheckboxes = document.querySelectorAll('input[name="content-sources"]');
+    allCheckboxes.forEach(cb => cb.checked = false);
+    
+    // Set the specified sources
+    sources.forEach(source => {
+        const checkbox = document.querySelector(`input[name="content-sources"][value="${source}"]`);
+        if (checkbox) {
+            checkbox.checked = true;
+        }
+    });
+    
+    // Update the "All Sources" checkbox state
+    const allSourcesCheckbox = document.getElementById('sources-all');
+    const individualCheckboxes = document.querySelectorAll('input[name="content-sources"]:not(#sources-all)');
+    const checkedCount = document.querySelectorAll('input[name="content-sources"]:not(#sources-all):checked').length;
+    
+    if (allSourcesCheckbox && individualCheckboxes.length > 0) {
+        allSourcesCheckbox.checked = checkedCount === individualCheckboxes.length;
+        allSourcesCheckbox.indeterminate = checkedCount > 0 && checkedCount < individualCheckboxes.length;
+    }
+}
+
+function setMultiSelectValues(name, values) {
+    // Clear all checkboxes first
+    const allCheckboxes = document.querySelectorAll(`input[name="${name}"]`);
+    allCheckboxes.forEach(cb => cb.checked = false);
+    
+    // Set the specified values
+    values.forEach(value => {
+        const checkbox = document.querySelector(`input[name="${name}"][value="${value}"]`);
+        if (checkbox) {
+            checkbox.checked = true;
+        }
+    });
+}
+
+function populateFilterBarFromCategory(categoryId) {
+    const config = categoryConfigs[categoryId];
+    if (!config) return;
+    
+    // Store current category context for future reference
+    window.currentCategoryContext = categoryId;
+    
+    // Set media type
+    setFilterValue('media-type', config.mediaType);
+    
+    // Set content sources
+    setContentSources(config.contentSources);
+    
+    // Set genres
+    setMultiSelectValues('genres', config.genres);
+    
+    // Set rating filters
+    setFilterValue('rating-source', config.ratingSource);
+    if (config.ratingSource && config.ratingValue) {
+        setFilterValue('rating-range', config.ratingValue);
+        updateRatingValue(); // Update the display
+    }
+    
+    // Set studios
+    setMultiSelectValues('studios', config.studios);
+    
+    // Set streaming services
+    setMultiSelectValues('streaming', config.streaming);
+    
+    // Update filter clear buttons
+    updateFilterClearButtons();
+}
+
+function clearCategoryContext() {
+    // Clear the category context when user manually changes filters
+    window.currentCategoryContext = null;
+    hideFilterContext();
+}
+
+function showFilterContext(categoryId) {
+    const config = categoryConfigs[categoryId];
+    if (!config) return;
+    
+    // Create or update a context indicator in the filter bar
+    let contextIndicator = document.getElementById('filter-context');
+    if (!contextIndicator) {
+        contextIndicator = document.createElement('div');
+        contextIndicator.id = 'filter-context';
+        contextIndicator.className = 'mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg';
+        
+        // Insert after the Discover header
+        const discoverSection = document.querySelector('.space-y-3').parentElement;
+        const firstFilterDiv = discoverSection.querySelector('.space-y-3 > div:first-child');
+        firstFilterDiv.insertAdjacentElement('afterend', contextIndicator);
+    }
+    
+    contextIndicator.className = 'mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg';
+    contextIndicator.innerHTML = `
+        <div class="flex items-center justify-between">
+            <div class="flex items-center">
+                <span class="text-lg mr-2">${config.icon}</span>
+                <div>
+                    <h4 class="text-sm font-medium text-blue-800">Viewing: ${config.displayName}</h4>
+                    <p class="text-xs text-blue-600">Filters auto-populated from category. Modify to further refine results.</p>
+                </div>
+            </div>
+            <button onclick="clearCategoryContext()" class="text-xs text-blue-600 hover:text-blue-800 underline">
+                Clear Context
+            </button>
+        </div>
+    `;
+}
+
+function hideFilterContext() {
+    const contextIndicator = document.getElementById('filter-context');
+    if (contextIndicator) {
+        contextIndicator.remove();
+    }
+}
+
+function showManualFilterContext() {
+    // Remove any existing filter context to avoid duplicates
+    hideFilterContext();
+    // Note: We rely only on the sidebar active filters display now
 }
 
 // Browser history management for back button support
@@ -1493,25 +2117,17 @@ window.addEventListener('popstate', function(event) {
     
     if (event.state) {
         if (event.state.view === 'categories') {
-            // User pressed back to return to categories view
-            // Check if we're in filtered mode or category expanded mode
-            const filteredContent = document.getElementById('filtered-content');
+            // User pressed back to return to categories view - find any expanded category and collapse it
             const expandedCategory = document.querySelector('.category-section.expanded');
-            
-            if (filteredContent) {
-                // We're in filtered view - use resetToCategories like the button does
-                resetToCategories();
-            } else if (expandedCategory) {
-                // We're in category expanded view - use collapseCategory like the button does
-                const categoryId = expandedCategory.querySelector('[id$="-content"]').id.replace('-content', '');
+            if (expandedCategory) {
+                // Check if this is a filtered-results category or regular category
+                const categoryId = expandedCategory.getAttribute('data-category') || 
+                                 expandedCategory.querySelector('[id$="-content"]').id.replace('-content', '');
                 collapseCategory(categoryId);
             }
         } else if (event.state.view === 'category' && event.state.categoryId) {
             // User navigated to a specific category view
             doExpandCategoryWithoutHistory(event.state.categoryId);
-        } else if (event.state.view === 'filtered') {
-            // User navigated back to filtered results - not much to do since they're already shown
-            // This handles forward navigation after going back from filtered view
         }
     } else {
         // No state - could be initial navigation or back to start
@@ -1523,16 +2139,11 @@ window.addEventListener('popstate', function(event) {
             window.history.replaceState({ view: 'categories' }, 'Stout Requests', newUrl);
         }
         
-        // Check if we're in filtered mode or category expanded mode  
-        const filteredContent = document.getElementById('filtered-content');
+        // Collapse any expanded category (filtered or regular) 
         const expandedCategory = document.querySelector('.category-section.expanded');
-        
-        if (filteredContent) {
-            // We're in filtered view - use resetToCategories
-            resetToCategories();
-        } else if (expandedCategory) {
-            // We're in category expanded view - use collapseCategory
-            const categoryId = expandedCategory.querySelector('[id$="-content"]').id.replace('-content', '');
+        if (expandedCategory) {
+            const categoryId = expandedCategory.getAttribute('data-category') || 
+                             expandedCategory.querySelector('[id$="-content"]').id.replace('-content', '');
             collapseCategory(categoryId);
         }
     }
@@ -1776,8 +2387,8 @@ function initializeCategoryInfiniteScroll(categoryId, categoryParams, contentDiv
 function initializeFilteredResultsInfiniteScroll(searchParams) {
     console.log('🔧 Initializing filtered results infinite scroll with params:', searchParams);
     
-    const resultsGrid = document.querySelector('#filtered-content #results-grid');
-    const filteredContent = document.getElementById('filtered-content');
+    const resultsGrid = document.querySelector('#filtered-results-content #results-grid');
+    const filteredContent = document.getElementById('filtered-results-content');
     
     if (!resultsGrid || !filteredContent) {
         console.error('❌ Missing elements for filtered results infinite scroll');
@@ -2599,6 +3210,9 @@ function clearContentSources() {
 }
 
 function clearAllFilters() {
+    // Clear category context
+    clearCategoryContext();
+    
     document.getElementById('media-type').value = 'mixed';
     // Reset content sources to none (discover mode)
     document.querySelectorAll('input[name="content-sources"]:checked').forEach(cb => cb.checked = false);
@@ -2608,7 +3222,15 @@ function clearAllFilters() {
     document.querySelectorAll('input[name="studios"]:checked').forEach(cb => cb.checked = false);
     document.querySelectorAll('input[name="streaming"]:checked').forEach(cb => cb.checked = false);
     updateFilterClearButtons();
-    applyFilters();
+    
+    // Hide active filters display
+    const activeFiltersContainer = document.getElementById('active-filters');
+    if (activeFiltersContainer) {
+        activeFiltersContainer.classList.add('hidden');
+    }
+    
+    // Instead of applying empty filters, return to categories view
+    resetToCategories();
 }
 
 function updateFilterClearButtons() {
@@ -2627,18 +3249,71 @@ function updateFilterClearButtons() {
 document.addEventListener('DOMContentLoaded', function() {
     // Add listeners for genre checkboxes
     document.querySelectorAll('input[name="genres"]').forEach(cb => {
-        cb.addEventListener('change', updateFilterClearButtons);
+        cb.addEventListener('change', function() {
+            // Clear category context when user manually changes filters
+            if (window.currentCategoryContext) {
+                clearCategoryContext();
+            }
+            updateFilterClearButtons();
+        });
     });
     
     // Add listeners for studios checkboxes
     document.querySelectorAll('input[name="studios"]').forEach(cb => {
-        cb.addEventListener('change', updateFilterClearButtons);
+        cb.addEventListener('change', function() {
+            // Clear category context when user manually changes filters
+            if (window.currentCategoryContext) {
+                clearCategoryContext();
+            }
+            updateFilterClearButtons();
+        });
     });
     
     // Add listeners for streaming checkboxes
     document.querySelectorAll('input[name="streaming"]').forEach(cb => {
-        cb.addEventListener('change', updateFilterClearButtons);
+        cb.addEventListener('change', function() {
+            // Clear category context when user manually changes filters
+            if (window.currentCategoryContext) {
+                clearCategoryContext();
+            }
+            updateFilterClearButtons();
+        });
     });
+    
+    // Add listener for media type dropdown
+    const mediaTypeSelect = document.getElementById('media-type');
+    if (mediaTypeSelect) {
+        mediaTypeSelect.addEventListener('change', function() {
+            // Clear category context when user manually changes filters
+            if (window.currentCategoryContext) {
+                clearCategoryContext();
+            }
+        });
+    }
+    
+    // Add listener for rating source dropdown
+    const ratingSourceSelect = document.getElementById('rating-source');
+    if (ratingSourceSelect) {
+        ratingSourceSelect.addEventListener('change', function() {
+            // Clear category context when user manually changes filters
+            if (window.currentCategoryContext) {
+                clearCategoryContext();
+            }
+            updateRatingFilter();
+        });
+    }
+    
+    // Add listener for rating range slider
+    const ratingRange = document.getElementById('rating-range');
+    if (ratingRange) {
+        ratingRange.addEventListener('input', function() {
+            // Clear category context when user manually changes filters
+            if (window.currentCategoryContext) {
+                clearCategoryContext();
+            }
+            updateRatingValue();
+        });
+    }
 });
 
 // Category scrolling functionality

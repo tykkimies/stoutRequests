@@ -13,6 +13,7 @@ class RequestStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     DOWNLOADING = "downloading"
+    DOWNLOADED = "downloaded"  # Download completed in Radarr/Sonarr, not yet in Plex
     AVAILABLE = "available"
     REJECTED = "rejected"
 

@@ -16,10 +16,40 @@ class RadarrService:
             self.session = session
             self._owns_session = False
         
-        # Get configuration from database
-        config = SettingsService.get_radarr_config(self.session)
-        self.base_url = config['url'].rstrip('/') if config['url'] else None
-        self.api_key = config['api_key']
+        # Get configuration from ServiceInstance (new system) or fallback to legacy settings
+        self.base_url = None
+        self.api_key = None
+        self.instance = None
+        
+        # Try new ServiceInstance system first
+        from ..models.service_instance import ServiceInstance, ServiceType
+        from sqlmodel import select
+        
+        statement = select(ServiceInstance).where(
+            ServiceInstance.service_type == ServiceType.RADARR,
+            ServiceInstance.is_enabled == True
+        ).order_by(ServiceInstance.id)  # Use first enabled instance
+        
+        self.instance = self.session.exec(statement).first()
+        
+        if self.instance:
+            # Use new ServiceInstance configuration
+            raw_url = self.instance.url
+            if raw_url and raw_url.strip():
+                self.base_url = raw_url.strip().rstrip('/')
+            else:
+                self.base_url = None
+            self.api_key = self.instance.api_key if self.instance.api_key else None
+        else:
+            # Fallback to legacy settings
+            config = SettingsService.get_radarr_config(self.session)
+            raw_url = config.get('url', '')
+            if raw_url and raw_url.strip():
+                self.base_url = raw_url.strip().rstrip('/')
+            else:
+                self.base_url = None
+            self.api_key = config.get('api_key', '') if config.get('api_key') else None
+        
         self.headers = {
             'X-Api-Key': self.api_key,
             'Content-Type': 'application/json'
@@ -47,6 +77,9 @@ class RadarrService:
     
     def get_root_folders(self) -> List[Dict]:
         """Get available root folders"""
+        if not self.base_url or not self.api_key:
+            return []
+            
         try:
             response = requests.get(
                 f"{self.base_url}/api/v3/rootfolder",
@@ -60,6 +93,9 @@ class RadarrService:
     
     def get_quality_profiles(self) -> List[Dict]:
         """Get available quality profiles"""
+        if not self.base_url or not self.api_key:
+            return []
+            
         try:
             response = requests.get(
                 f"{self.base_url}/api/v3/qualityprofile",
@@ -73,6 +109,13 @@ class RadarrService:
     
     def search_movie(self, tmdb_id: int) -> Optional[Dict]:
         """Search for movie by TMDB ID"""
+        if not self.base_url:
+            print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
+            return None
+        if not self.api_key:
+            print("Radarr error: No API key configured. Please add an API key in the Services section.")
+            return None
+            
         try:
             response = requests.get(
                 f"{self.base_url}/api/v3/movie/lookup",
@@ -88,6 +131,13 @@ class RadarrService:
     
     def add_movie(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None) -> Optional[Dict]:
         """Add movie to Radarr"""
+        if not self.base_url:
+            print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
+            return None
+        if not self.api_key:
+            print("Radarr error: No API key configured. Please add an API key in the Services section.")
+            return None
+            
         try:
             # First search for the movie
             movie_data = self.search_movie(tmdb_id)
@@ -135,6 +185,13 @@ class RadarrService:
     
     def get_movie_by_tmdb_id(self, tmdb_id: int) -> Optional[Dict]:
         """Check if movie already exists in Radarr"""
+        if not self.base_url:
+            print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
+            return None
+        if not self.api_key:
+            print("Radarr error: No API key configured. Please add an API key in the Services section.")
+            return None
+            
         try:
             response = requests.get(
                 f"{self.base_url}/api/v3/movie",
@@ -150,4 +207,25 @@ class RadarrService:
             
         except Exception as e:
             print(f"Error checking movie in Radarr: {e}")
+            return None
+    
+    def get_movie_details(self, radarr_id: int) -> Optional[Dict]:
+        """Get detailed movie information from Radarr by internal ID"""
+        if not self.base_url:
+            print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
+            return None
+        if not self.api_key:
+            print("Radarr error: No API key configured. Please add an API key in the Services section.")
+            return None
+            
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v3/movie/{radarr_id}",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+            
+        except Exception as e:
+            print(f"Error getting movie details from Radarr: {e}")
             return None

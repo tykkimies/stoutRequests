@@ -195,6 +195,7 @@ async def create_request(
         permissions_service.increment_user_request_count(current_user.id)
     
     # If auto-approved, try to add to Radarr/Sonarr immediately
+    service_error = None
     if initial_status == RequestStatus.APPROVED:
         try:
             if media_type == 'movie':
@@ -202,24 +203,38 @@ async def create_request(
                 radarr_result = radarr_service.add_movie(tmdb_id)
                 if radarr_result:
                     new_request.radarr_id = radarr_result.get('id')
-                    new_request.status = RequestStatus.DOWNLOADING
+                    # Keep as APPROVED - will be updated to DOWNLOADING by sync service
+                    # when Radarr actually starts downloading
+                else:
+                    service_error = "Failed to add movie to Radarr"
             elif media_type == 'tv':
                 sonarr_service = SonarrService(session)
                 sonarr_result = sonarr_service.add_series(tmdb_id)
                 if sonarr_result:
                     new_request.sonarr_id = sonarr_result.get('id')
-                    new_request.status = RequestStatus.DOWNLOADING
+                    # Keep as APPROVED - will be updated to DOWNLOADING by sync service
+                    # when Sonarr actually starts downloading
+                else:
+                    service_error = "Failed to add series to Sonarr"
             
             session.add(new_request)
             session.commit()
         except Exception as e:
+            service_error = f"Service integration error: {str(e)}"
             print(f"Error auto-adding to Radarr/Sonarr: {e}")
             # Keep status as approved even if Radarr/Sonarr fails
 
-    # Return appropriate message based on status
+    # Return appropriate message based on status and service integration
     if initial_status == RequestStatus.APPROVED:
-        message = "Auto-approved!"
-        color_class = "blue"
+        if service_error:
+            message = f"Approved (Service Error: {service_error})"
+            color_class = "yellow"
+        elif service_success:
+            message = "Auto-approved & sent to service!"
+            color_class = "blue"
+        else:
+            message = "Auto-approved!"
+            color_class = "blue"
     else:
         message = "Requested!"
         color_class = "green"
@@ -371,21 +386,30 @@ async def approve_request(
         permissions_service = PermissionsService(session)
         permissions_service.decrement_user_request_count(media_request.user_id)
     
-    # Add to Radarr/Sonarr
+    # Add to Radarr/Sonarr with enhanced error tracking
+    service_error = None
+    service_success = False
     try:
         if media_request.media_type == MediaType.MOVIE:
             radarr_service = RadarrService(session)
             radarr_result = radarr_service.add_movie(media_request.tmdb_id)
             if radarr_result:
                 media_request.radarr_id = radarr_result.get('id')
-                media_request.status = RequestStatus.DOWNLOADING
+                # Keep as APPROVED - will be updated to DOWNLOADING by sync service
+                service_success = True
+            else:
+                service_error = "Failed to add movie to Radarr"
         elif media_request.media_type == MediaType.TV:
             sonarr_service = SonarrService(session)
             sonarr_result = sonarr_service.add_series(media_request.tmdb_id)
             if sonarr_result:
                 media_request.sonarr_id = sonarr_result.get('id')
-                media_request.status = RequestStatus.DOWNLOADING
+                # Keep as APPROVED - will be updated to DOWNLOADING by sync service
+                service_success = True
+            else:
+                service_error = "Failed to add series to Sonarr"
     except Exception as e:
+        service_error = f"Service integration error: {str(e)}"
         print(f"Error adding to Radarr/Sonarr: {e}")
         # Keep status as approved even if Radarr/Sonarr fails
     
@@ -445,11 +469,21 @@ async def approve_request(
             </span>
             ''')
         else:
-            # From admin requests list - return status badge
+            # From admin requests list - return status badge with service feedback
+            if service_success:
+                badge_text = "✓ Sent to Service"
+                badge_class = "bg-blue-100 text-blue-800"
+            elif service_error:
+                badge_text = f"⚠ Approved ({service_error})"
+                badge_class = "bg-yellow-100 text-yellow-800"
+            else:
+                badge_text = "✓ Approved"
+                badge_class = "bg-blue-100 text-blue-800"
+                
             return HTMLResponse(f'''
             <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
-                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    ✓ Approved
+                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {badge_class}" title="{service_error if service_error else ''}">
+                    {badge_text}
                 </span>
             </div>
             ''')

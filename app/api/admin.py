@@ -1040,6 +1040,197 @@ async def clear_feedback():
     return HTMLResponse("")
 
 
+@router.get("/service-status", response_class=HTMLResponse)
+async def get_service_status(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get service status for admin dashboard"""
+    try:
+        from ..services.radarr_service import RadarrService
+        from ..services.sonarr_service import SonarrService
+        
+        status_items = []
+        
+        # Check Radarr connection
+        try:
+            radarr_service = RadarrService(session)
+            if not radarr_service.base_url or not radarr_service.api_key:
+                status_items.append({
+                    "service": "Radarr",
+                    "status": "not_configured",
+                    "message": "Service not configured",
+                    "color": "gray"
+                })
+            elif radarr_service.test_connection():
+                status_items.append({
+                    "service": "Radarr",
+                    "status": "connected",
+                    "message": "Connection active",
+                    "color": "green"
+                })
+            else:
+                status_items.append({
+                    "service": "Radarr", 
+                    "status": "disconnected",
+                    "message": "Connection failed",
+                    "color": "red"
+                })
+        except Exception as e:
+            status_items.append({
+                "service": "Radarr",
+                "status": "error", 
+                "message": f"Error: {str(e)[:50]}...",
+                "color": "yellow"
+            })
+        
+        # Check Sonarr connection
+        try:
+            sonarr_service = SonarrService(session)
+            if not sonarr_service.base_url or not sonarr_service.api_key:
+                status_items.append({
+                    "service": "Sonarr",
+                    "status": "not_configured",
+                    "message": "Service not configured",
+                    "color": "gray"
+                })
+            elif sonarr_service.test_connection():
+                status_items.append({
+                    "service": "Sonarr",
+                    "status": "connected", 
+                    "message": "Connection active",
+                    "color": "green"
+                })
+            else:
+                status_items.append({
+                    "service": "Sonarr",
+                    "status": "disconnected",
+                    "message": "Connection failed", 
+                    "color": "red"
+                })
+        except Exception as e:
+            status_items.append({
+                "service": "Sonarr",
+                "status": "error",
+                "message": f"Error: {str(e)[:50]}...",
+                "color": "yellow"
+            })
+        
+        # Generate HTML for service status notifications
+        if any(item["status"] not in ["connected", "not_configured"] for item in status_items):
+            # Show warnings for disconnected/error services (but not unconfigured ones)
+            html_content = ""
+            for item in status_items:
+                if item["status"] not in ["connected", "not_configured"]:
+                    icon = "⚠️" if item["status"] == "error" else "❌"
+                    html_content += f'''
+                    <div class="mb-2 p-3 bg-{item["color"]}-50 border border-{item["color"]}-200 rounded-md">
+                        <div class="flex">
+                            <span class="text-{item["color"]}-600 mr-2">{icon}</span>
+                            <div class="text-sm text-{item["color"]}-700">
+                                <strong>{item["service"]}:</strong> {item["message"]}
+                            </div>
+                        </div>
+                    </div>
+                    '''
+            
+            return HTMLResponse(html_content)
+        else:
+            # All services connected or not configured - return empty content
+            return HTMLResponse("")
+    
+    except Exception as e:
+        print(f"Error getting service status: {e}")
+        return HTMLResponse(f'''
+        <div class="mb-2 p-3 bg-red-50 border border-red-200 rounded-md">
+            <div class="flex">
+                <span class="text-red-600 mr-2">❌</span>
+                <div class="text-sm text-red-700">
+                    <strong>Service Status:</strong> Unable to check service connections
+                </div>
+            </div>
+        </div>
+        ''')
+
+
+@router.post("/check-download-status")
+async def check_download_status(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Manually trigger download status check for testing"""
+    try:
+        from ..services.background_jobs import trigger_download_status_check
+        
+        stats = await trigger_download_status_check()
+        
+        # Content negotiation
+        if request.headers.get("HX-Request"):
+            # HTMX web client - return HTML
+            base_url = SettingsService.get_base_url(session)
+            
+            if stats.get('errors', 0) > 0:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md" 
+                         hx-get="{base_url}/admin/clear-feedback" 
+                         hx-trigger="load delay:5s" 
+                         hx-swap="outerHTML">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-yellow-700">Download status check completed with {stats.get('errors', 0)} errors</p>
+                        </div>
+                    </div>
+                """)
+            else:
+                checked = stats.get('checked', 0)
+                downloading = stats.get('updated_to_downloading', 0)
+                downloaded = stats.get('updated_to_downloaded', 0)
+                
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
+                         hx-get="{base_url}/admin/clear-feedback" 
+                         hx-trigger="load delay:5s" 
+                         hx-swap="outerHTML">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div class="ml-3 text-sm text-green-700">
+                                <p><strong>Download status check completed!</strong></p>
+                                <p>Checked {checked} requests. Updated {downloading} to downloading, {downloaded} to downloaded.</p>
+                            </div>
+                        </div>
+                    </div>
+                """)
+        else:
+            # API client - return JSON
+            return {"success": True, "stats": stats}
+            
+    except Exception as e:
+        print(f"Error in download status check: {e}")
+        if request.headers.get("HX-Request"):
+            base_url = SettingsService.get_base_url(session)
+            return HTMLResponse(f"""
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
+                     hx-get="{base_url}/admin/clear-feedback" 
+                     hx-trigger="load delay:5s" 
+                     hx-swap="outerHTML">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-red-700">Download status check failed: {str(e)}</p>
+                    </div>
+                </div>
+            """)
+        else:
+            return {"success": False, "error": str(e)}
+
+
 @router.post("/library/preferences")
 async def update_library_preferences(
     request: Request,
