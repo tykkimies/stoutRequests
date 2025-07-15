@@ -177,7 +177,16 @@ async def create_request(
         
         # Trigger background processing without changing status
         from ..services.background_jobs import trigger_service_integration
-        asyncio.create_task(trigger_service_integration(new_request.id))
+        
+        # Create task to run in background without blocking
+        try:
+            # Get the current event loop and schedule the task
+            loop = asyncio.get_event_loop()
+            loop.create_task(trigger_service_integration(new_request.id))
+            print(f"✅ Scheduled background service integration for request {new_request.id}")
+        except Exception as e:
+            print(f"⚠️ Could not schedule background task: {e}")
+            # Task will be picked up by periodic background job anyway
 
     # Return appropriate message based on initial status
     if initial_status == RequestStatus.APPROVED:
@@ -326,9 +335,6 @@ async def approve_request(
     media_request.approved_by = current_user.id
     media_request.approved_at = datetime.utcnow()
     
-    session.add(media_request)
-    session.commit()
-    
     # Decrement user request count if it was pending
     if was_pending:
         permissions_service = PermissionsService(session)
@@ -340,7 +346,16 @@ async def approve_request(
     # Trigger background service integration
     from ..services.background_jobs import trigger_service_integration
     import asyncio
-    asyncio.create_task(trigger_service_integration(media_request.id))
+    
+    # Create task to run in background without blocking
+    try:
+        # Get the current event loop and schedule the task
+        loop = asyncio.get_event_loop()
+        loop.create_task(trigger_service_integration(media_request.id))
+        print(f"✅ Scheduled background service integration for request {media_request.id}")
+    except Exception as e:
+        print(f"⚠️ Could not schedule background task: {e}")
+        # Task will be picked up by periodic background job anyway
     
     # Content negotiation - check if this is an HTMX request
     if False:  # Disable HTMX content negotiation

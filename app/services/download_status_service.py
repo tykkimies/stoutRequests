@@ -27,6 +27,7 @@ class DownloadStatusService:
         stats = {
             'checked': 0,
             'updated_to_downloading': 0,
+            'updated_to_downloaded': 0,
             'errors': 0
         }
         
@@ -43,19 +44,33 @@ class DownloadStatusService:
                 try:
                     is_downloading = await self._is_actively_downloading(request)
                     
-                    if request.status == RequestStatus.APPROVED and is_downloading:
+                    if request.status.value == 'approved' and is_downloading:
                         # Update approved → downloading
                         request.status = RequestStatus.DOWNLOADING
                         request.updated_at = datetime.utcnow()
                         self.session.add(request)
                         print(f"📦 Updated '{request.title}' status: approved → downloading")
                         stats['updated_to_downloading'] += 1
-                    elif request.status == RequestStatus.DOWNLOADING and not is_downloading:
-                        # Update downloading → approved (download stopped/failed)
-                        request.status = RequestStatus.APPROVED
-                        request.updated_at = datetime.utcnow()
-                        self.session.add(request)
-                        print(f"📦 Updated '{request.title}' status: downloading → approved (no longer downloading)")
+                    elif request.status.value == 'downloading' and not is_downloading:
+                        # Check if file exists (download completed) or failed
+                        has_file = await self._has_downloaded_file(request)
+                        if has_file:
+                            # Update downloading → downloaded (file exists)
+                            request.status = RequestStatus.DOWNLOADED
+                            request.updated_at = datetime.utcnow()
+                            self.session.add(request)
+                            print(f"📦 Updated '{request.title}' status: downloading → downloaded (file available)")
+                            stats['updated_to_downloaded'] = stats.get('updated_to_downloaded', 0) + 1
+                        else:
+                            # Download failed or was cancelled - revert to approved for retry
+                            request.status = RequestStatus.APPROVED
+                            request.updated_at = datetime.utcnow()
+                            self.session.add(request)
+                            print(f"📦 Updated '{request.title}' status: downloading → approved (download failed/cancelled)")
+                    elif request.status.value == 'downloaded':
+                        # Downloaded files should remain downloaded (no action needed)
+                        # This status is handled by Plex sync service for available → in_plex
+                        print(f"📁 '{request.title}' remains downloaded (file available)")
                 except Exception as e:
                     print(f"❌ Error checking status for request {request.id}: {e}")
                     stats['errors'] += 1
@@ -71,11 +86,16 @@ class DownloadStatusService:
         return stats
     
     def _get_approved_requests(self) -> List[MediaRequest]:
-        """Get approved and downloading requests that have been sent to Radarr/Sonarr"""
+        """Get approved, downloading, and downloaded requests that have been sent to Radarr/Sonarr"""
+        # Use individual OR conditions to avoid enum case issues
         statement = select(MediaRequest).where(
-            MediaRequest.status.in_([RequestStatus.APPROVED, RequestStatus.DOWNLOADING]),
+            (
+                (MediaRequest.status == RequestStatus.APPROVED) |
+                (MediaRequest.status == RequestStatus.DOWNLOADING) |
+                (MediaRequest.status == RequestStatus.DOWNLOADED)
+            ),
             # Only check requests that have been sent to services
-            MediaRequest.radarr_id.isnot(None) | MediaRequest.sonarr_id.isnot(None)
+            (MediaRequest.radarr_id.isnot(None)) | (MediaRequest.sonarr_id.isnot(None))
         )
         return list(self.session.exec(statement).all())
     
@@ -88,6 +108,49 @@ class DownloadStatusService:
                 return await self._is_tv_downloading(request)
         except Exception as e:
             print(f"Error checking download status for request {request.id}: {e}")
+        
+        return False
+    
+    async def _has_downloaded_file(self, request: MediaRequest) -> bool:
+        """Check if a request has downloaded files available"""
+        try:
+            if request.media_type == MediaType.MOVIE and request.radarr_id:
+                return await self._movie_has_file(request)
+            elif request.media_type == MediaType.TV and request.sonarr_id:
+                return await self._tv_has_files(request)
+        except Exception as e:
+            print(f"Error checking file status for request {request.id}: {e}")
+        
+        return False
+    
+    async def _movie_has_file(self, request: MediaRequest) -> bool:
+        """Check if movie has downloaded file in Radarr"""
+        try:
+            radarr_service = RadarrService(self.session)
+            movie_details = radarr_service.get_movie_details(request.radarr_id)
+            
+            if movie_details:
+                return movie_details.get('hasFile', False)
+                
+        except Exception as e:
+            print(f"Error checking movie file status for request {request.id}: {e}")
+        
+        return False
+    
+    async def _tv_has_files(self, request: MediaRequest) -> bool:
+        """Check if TV show has downloaded files in Sonarr"""
+        try:
+            sonarr_service = SonarrService(self.session)
+            series_details = sonarr_service.get_series_details(request.sonarr_id)
+            
+            if series_details:
+                # Check if any episodes have been downloaded
+                statistics = series_details.get('statistics', {})
+                downloaded_episodes = statistics.get('episodeFileCount', 0)
+                return downloaded_episodes > 0
+                
+        except Exception as e:
+            print(f"Error checking TV file status for request {request.id}: {e}")
         
         return False
     

@@ -233,4 +233,9 @@ When native mobile development begins:
 - **Crew Section**: Shows key crew members (Director, Producer, etc.) with clickable person links
 - **Grid-based Details**: Technical information in responsive card grid layout
 
+## 🔬 Development Insights
+
+### Potential Gotchas
+- **enums are case sensitive and might be a mismatch between database and python**
+
 This document should be updated as the architecture evolves.

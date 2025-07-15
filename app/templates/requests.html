@@ -60,12 +60,12 @@
                     ✓ Approved
                     <span id="status-count-approved" class="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full"></span>
                 </button>
-                <button onclick="showStatus('downloading')" id="status-tab-downloading" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
-                    ⬇ Processing
-                    <span id="status-count-downloading" class="ml-2 text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full"></span>
+                <button onclick="showStatus('processing')" id="status-tab-processing" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                    ⚙️ Processing
+                    <span id="status-count-processing" class="ml-2 text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full"></span>
                 </button>
                 <button onclick="showStatus('available')" id="status-tab-available" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
-                    📁 Available
+                    ✅ In Plex
                     <span id="status-count-available" class="ml-2 text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full"></span>
                 </button>
                 {% if user_is_admin %}
@@ -139,6 +139,10 @@
                                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                                     ⬇ Downloading
                                 </span>
+                                {% elif request.status.value == 'downloaded' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                                    📁 Downloaded
+                                </span>
                                 {% elif request.status.value == 'rejected' %}
                                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                                     ✗ Rejected
@@ -195,7 +199,7 @@
                                 >
                                     ✗ Reject
                                 </button>
-                                {% elif request.status.value == 'approved' or request.status.value == 'downloading' %}
+                                {% elif request.status.value == 'approved' or request.status.value == 'downloading' or request.status.value == 'downloaded' %}
                                 <button 
                                     onclick="markAsAvailable({{ request.id }}); event.stopPropagation();"
                                     class="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
@@ -315,7 +319,12 @@ function filterRequests() {
         
         // Apply status filter
         if (currentStatus !== 'all') {
-            shouldShow = shouldShow && (status === currentStatus);
+            if (currentStatus === 'processing') {
+                // Include both downloading and downloaded in processing filter
+                shouldShow = shouldShow && (status === 'downloading' || status === 'downloaded');
+            } else {
+                shouldShow = shouldShow && (status === currentStatus);
+            }
         }
         
         item.style.display = shouldShow ? 'block' : 'none';
@@ -330,7 +339,7 @@ function updateCounts() {
     // Status counts
     const pendingItems = document.querySelectorAll('.request-item[data-status="pending"]');
     const approvedItems = document.querySelectorAll('.request-item[data-status="approved"]');
-    const downloadingItems = document.querySelectorAll('.request-item[data-status="downloading"]');
+    const processingItems = document.querySelectorAll('.request-item[data-status="downloading"], .request-item[data-status="downloaded"]');
     const availableItems = document.querySelectorAll('.request-item[data-status="available"]');
     const rejectedItems = document.querySelectorAll('.request-item[data-status="rejected"]');
     
@@ -347,14 +356,14 @@ function updateCounts() {
     const statusCountAll = document.getElementById('status-count-all');
     const statusCountPending = document.getElementById('status-count-pending');
     const statusCountApproved = document.getElementById('status-count-approved');
-    const statusCountDownloading = document.getElementById('status-count-downloading');
+    const statusCountProcessing = document.getElementById('status-count-processing');
     const statusCountAvailable = document.getElementById('status-count-available');
     const statusCountRejected = document.getElementById('status-count-rejected');
     
     if (statusCountAll) statusCountAll.textContent = allItems.length;
     if (statusCountPending) statusCountPending.textContent = pendingItems.length;
     if (statusCountApproved) statusCountApproved.textContent = approvedItems.length;
-    if (statusCountDownloading) statusCountDownloading.textContent = downloadingItems.length;
+    if (statusCountProcessing) statusCountProcessing.textContent = processingItems.length;
     if (statusCountAvailable) statusCountAvailable.textContent = availableItems.length;
     if (statusCountRejected) statusCountRejected.textContent = rejectedItems.length;
     

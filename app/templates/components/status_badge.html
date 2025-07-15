@@ -11,6 +11,14 @@
 <span class="bg-purple-600 text-white px-3 py-1 rounded-full text-sm font-medium">
     ⬇ Downloading
 </span>
+{% elif request_status == 'downloaded' %}
+<span class="bg-indigo-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+    📁 Downloaded
+</span>
+{% elif request_status == 'available' %}
+<span class="bg-green-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+    ✅ Available in Plex
+</span>
 {% elif request_status == 'rejected' %}
 <span class="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-medium">
     ✗ Request Rejected
