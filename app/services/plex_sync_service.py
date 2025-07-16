@@ -784,18 +784,18 @@ class PlexSyncService:
             request_statement = select(MediaRequest).where(
                 MediaRequest.tmdb_id.in_(tmdb_ids),
                 MediaRequest.media_type == media_type,
-                MediaRequest.status.in_(['pending', 'approved', 'downloading', 'available'])
+                MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.AVAILABLE, RequestStatus.REJECTED])
             )
             
             # Override with request status if exists (but don't override partial_plex)
             for request in self.session.exec(request_statement):
-                if request.status == 'available':
+                if request.status == RequestStatus.AVAILABLE:
                     if status_map.get(request.tmdb_id) != 'partial_plex':
                         status_map[request.tmdb_id] = 'in_plex'
                 else:
                     # Only override if not already in plex (complete or partial)
                     if status_map.get(request.tmdb_id) not in ['in_plex', 'partial_plex']:
-                        status_map[request.tmdb_id] = f'requested_{request.status}'
+                        status_map[request.tmdb_id] = f'requested_{request.status.value.lower()}'
             
             return status_map
             

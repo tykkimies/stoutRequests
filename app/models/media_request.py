@@ -10,12 +10,10 @@ class MediaType(str, Enum):
 
 
 class RequestStatus(str, Enum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    DOWNLOADING = "downloading"
-    DOWNLOADED = "downloaded"  # Download completed in Radarr/Sonarr, not yet in Plex
-    AVAILABLE = "available"
-    REJECTED = "rejected"
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    AVAILABLE = "AVAILABLE"
+    REJECTED = "REJECTED"
 
 
 class MediaRequest(SQLModel, table=True):
@@ -28,8 +26,6 @@ class MediaRequest(SQLModel, table=True):
     poster_path: Optional[str] = None
     release_date: Optional[str] = None
     status: RequestStatus = Field(default=RequestStatus.PENDING)
-    radarr_id: Optional[int] = None
-    sonarr_id: Optional[int] = None
     season_number: Optional[int] = None  # For TV shows
     is_season_request: bool = Field(default=False)  # True if requesting specific season
     created_at: datetime = Field(default_factory=datetime.utcnow)

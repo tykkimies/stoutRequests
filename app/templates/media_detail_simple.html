@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/status_display.html' import media_status_badge %}
 
 {% block title %}{{ media.title or media.name }} - Stout Requests{% endblock %}
 
@@ -42,10 +43,12 @@
                         </span>
                         {% endif %}
                         
-                        <!-- Request Status Badge -->
+                        <!-- Request Status Badge (only show if not fully in Plex) -->
+                        {% if not (plex_status == 'in_plex' or is_in_plex) %}
                         <div id="request-status-badge">
                             {% include 'components/status_badge.html' %}
                         </div>
+                        {% endif %}
                     </div>
 
                     <!-- Metadata -->
@@ -449,7 +452,7 @@
         <div class="overflow-x-auto">
             <div class="flex space-x-4 pb-4" style="width: max-content;">
                 {% for item in similar %}
-                <div class="movie-card-horizontal group flex-shrink-0 w-48 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
+                <div id="similar-card-{{ item.id }}" class="movie-card-horizontal group flex-shrink-0 w-48 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
                     <div class="relative">
                         {% if item.poster_path %}
                         <img src="https://image.tmdb.org/t/p/w300{{ item.poster_path }}" alt="{{ item.title or item.name }}" class="w-full h-72 object-cover">
@@ -494,67 +497,15 @@
                                     </div>
                                     
                                     <!-- Action button / Status -->
-                                    {% set status = item.status if item.status else 'available' %}
-                                    {% if status == 'in_plex' or item.in_plex %}
-                                    <div class="w-full bg-green-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ✓ In Plex
-                                    </div>
-                                    {% elif status == 'partial_plex' %}
-                                    <div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        📺 Partial
-                                    </div>
-                                    {% elif status == 'requested_pending' %}
-                                    <div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ⏳ Pending
-                                    </div>
-                                    {% elif status == 'requested_approved' %}
-                                    <div class="w-full bg-blue-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ✓ Approved
-                                    </div>
-                                    {% elif status == 'requested_downloading' %}
-                                    <div class="w-full bg-purple-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ⬇ Downloading
-                                    </div>
-                                    {% else %}
-                                    <form hx-post="{{ base_url }}/requests/create" hx-target="this" hx-swap="outerHTML" class="w-full relative z-30" onclick="event.stopPropagation();">
-                                        <input type="hidden" name="tmdb_id" value="{{ item.id }}">
-                                        <input type="hidden" name="media_type" value="{{ item.media_type }}">
-                                        <input type="hidden" name="title" value="{{ (item.title or item.name)|e }}">
-                                        <input type="hidden" name="overview" value="{{ (item.overview or '')|e }}">
-                                        <input type="hidden" name="poster_path" value="{{ item.poster_path or '' }}">
-                                        <input type="hidden" name="release_date" value="{{ item.release_date or item.first_air_date or '' }}">
-                                        <button type="submit" class="w-full bg-orange-600/90 hover:bg-orange-700/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium transition-colors" onclick="event.stopPropagation();">
-                                            Request
-                                        </button>
-                                    </form>
-                                    {% endif %}
+                                    {{ media_status_badge(item, style='button', size='md') }}
                                 </div>
                             </div>
                         </div>
                         
                         <!-- Top badges (always visible) -->
                         <div class="absolute top-2 left-2">
-                            {% set status = item.status if item.status else 'available' %}
-                            {% if status == 'in_plex' or item.in_plex %}
-                            <span class="bg-green-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                In Plex
-                            </span>
-                            {% elif status == 'partial_plex' %}
-                            <span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Partial
-                            </span>
-                            {% elif status == 'requested_pending' %}
-                            <span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Pending
-                            </span>
-                            {% elif status == 'requested_approved' %}
-                            <span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Approved
-                            </span>
-                            {% elif status == 'requested_downloading' %}
-                            <span class="bg-purple-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Downloading
-                            </span>
+                            {% if item.status or item.in_plex %}
+                            {{ media_status_badge(item, style='overlay', size='sm') }}
                             {% endif %}
                         </div>
                         
@@ -587,7 +538,7 @@
         <div class="overflow-x-auto">
             <div class="flex space-x-4 pb-4" style="width: max-content;">
                 {% for item in recommendations %}
-                <div class="movie-card-horizontal group flex-shrink-0 w-48 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
+                <div id="recommended-card-{{ item.id }}" class="movie-card-horizontal group flex-shrink-0 w-48 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
                     <div class="relative">
                         {% if item.poster_path %}
                         <img src="https://image.tmdb.org/t/p/w300{{ item.poster_path }}" alt="{{ item.title or item.name }}" class="w-full h-72 object-cover">
@@ -632,67 +583,15 @@
                                     </div>
                                     
                                     <!-- Action button / Status -->
-                                    {% set status = item.status if item.status else 'available' %}
-                                    {% if status == 'in_plex' or item.in_plex %}
-                                    <div class="w-full bg-green-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ✓ In Plex
-                                    </div>
-                                    {% elif status == 'partial_plex' %}
-                                    <div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        📺 Partial
-                                    </div>
-                                    {% elif status == 'requested_pending' %}
-                                    <div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ⏳ Pending
-                                    </div>
-                                    {% elif status == 'requested_approved' %}
-                                    <div class="w-full bg-blue-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ✓ Approved
-                                    </div>
-                                    {% elif status == 'requested_downloading' %}
-                                    <div class="w-full bg-purple-600/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium text-center">
-                                        ⬇ Downloading
-                                    </div>
-                                    {% else %}
-                                    <form hx-post="{{ base_url }}/requests/create" hx-target="this" hx-swap="outerHTML" class="w-full relative z-30" onclick="event.stopPropagation();">
-                                        <input type="hidden" name="tmdb_id" value="{{ item.id }}">
-                                        <input type="hidden" name="media_type" value="{{ item.media_type }}">
-                                        <input type="hidden" name="title" value="{{ (item.title or item.name)|e }}">
-                                        <input type="hidden" name="overview" value="{{ (item.overview or '')|e }}">
-                                        <input type="hidden" name="poster_path" value="{{ item.poster_path or '' }}">
-                                        <input type="hidden" name="release_date" value="{{ item.release_date or item.first_air_date or '' }}">
-                                        <button type="submit" class="w-full bg-orange-600/90 hover:bg-orange-700/90 backdrop-blur-sm text-white px-2 py-2 rounded text-xs font-medium transition-colors" onclick="event.stopPropagation();">
-                                            Request
-                                        </button>
-                                    </form>
-                                    {% endif %}
+                                    {{ media_status_badge(item, style='button', size='md') }}
                                 </div>
                             </div>
                         </div>
                         
                         <!-- Top badges (always visible) -->
                         <div class="absolute top-2 left-2">
-                            {% set status = item.status if item.status else 'available' %}
-                            {% if status == 'in_plex' or item.in_plex %}
-                            <span class="bg-green-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                In Plex
-                            </span>
-                            {% elif status == 'partial_plex' %}
-                            <span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Partial
-                            </span>
-                            {% elif status == 'requested_pending' %}
-                            <span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Pending
-                            </span>
-                            {% elif status == 'requested_approved' %}
-                            <span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Approved
-                            </span>
-                            {% elif status == 'requested_downloading' %}
-                            <span class="bg-purple-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">
-                                Downloading
-                            </span>
+                            {% if item.status or item.in_plex %}
+                            {{ media_status_badge(item, style='overlay', size='sm') }}
                             {% endif %}
                         </div>
                         
@@ -1038,6 +937,33 @@ document.addEventListener('change', function(e) {
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
     updateSelectionSummary();
+});
+
+// Listen for status badge refresh events
+document.body.addEventListener('refreshStatusBadges', function(event) {
+    const { updatedItemId, newStatus } = event.detail;
+    
+    // Update the overlay badge for the specific item
+    const similarCard = document.getElementById(`similar-card-${updatedItemId}`);
+    const recommendedCard = document.getElementById(`recommended-card-${updatedItemId}`);
+    
+    function updateCardBadge(card, status) {
+        if (!card) return;
+        
+        const badgeContainer = card.querySelector('.absolute.top-2.left-2');
+        if (badgeContainer) {
+            let badgeHtml = '';
+            if (status === 'PENDING') {
+                badgeHtml = '<span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Pending</span>';
+            } else if (status === 'APPROVED') {
+                badgeHtml = '<span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Approved</span>';
+            }
+            badgeContainer.innerHTML = badgeHtml;
+        }
+    }
+    
+    updateCardBadge(similarCard, newStatus);
+    updateCardBadge(recommendedCard, newStatus);
 });
 </script>
 {% endblock %}

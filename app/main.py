@@ -15,12 +15,10 @@ from .api.requests import router as requests_router
 from .api.admin import router as admin_router
 from .api.setup import router as setup_router
 from .api.services import router as services_router
-from .api.webhooks import router as webhooks_router, start_webhook_worker, stop_webhook_worker
 from app.api import setup
 from .models import User
 from .services.plex_sync_service import PlexSyncService
 from .services.permissions_service import PermissionsService
-from .services.background_jobs import start_background_jobs, stop_background_jobs
 
 
 @asynccontextmanager
@@ -32,17 +30,7 @@ async def lifespan(app: FastAPI):
     with Session(engine) as session:
         PermissionsService.ensure_default_roles(session)
     
-    # Start background jobs
-    await start_background_jobs()
-    
-    # Start webhook worker
-    await start_webhook_worker()
-    
     yield
-    
-    # Shutdown
-    await stop_background_jobs()
-    await stop_webhook_worker()
 
 app = FastAPI(title="Stout Requests", version="1.0.0", lifespan=lifespan)
 
@@ -56,7 +44,6 @@ app.include_router(requests_router)
 app.include_router(admin_router)
 app.include_router(setup_router)
 app.include_router(services_router)
-app.include_router(webhooks_router)
 # app.include_router(setup.router)
 
 # Setup templates
@@ -800,7 +787,14 @@ async def discover_category(
                         try:
                             # Handle enum values safely
                             media_type_str = request_item.media_type.value if hasattr(request_item.media_type, 'value') else str(request_item.media_type)
-                            status_str = request_item.status.value if hasattr(request_item.status, 'value') else str(request_item.status)
+                            raw_status = request_item.status.value.lower() if hasattr(request_item.status, 'value') else str(request_item.status).lower()
+                            # Map database status to template status
+                            if raw_status == 'available':
+                                # AVAILABLE means it's now in Plex
+                                request_status = 'in_plex'
+                            else:
+                                # PENDING, APPROVED, REJECTED get the requested_ prefix
+                                request_status = f'requested_{raw_status}'
                             
                             if media_type_str == 'movie':
                                 tmdb_data = tmdb_service.get_movie_details(request_item.tmdb_id)
@@ -821,8 +815,8 @@ async def discover_category(
                                 'first_air_date': tmdb_data.get('first_air_date'),
                                 'vote_average': tmdb_data.get('vote_average', 0),
                                 'media_type': media_type_str,
-                                'in_plex': False,  # Recent requests are not in Plex yet
-                                'status': f'requested_{status_str}',
+                                'in_plex': request_status == 'in_plex',
+                                'status': request_status,
                                 'user': user,  # Include user who made the request
                                 'created_at': request_item.created_at,  # Include request date
                                 'request_id': request_item.id,  # Include request DB ID for admin actions
@@ -835,7 +829,14 @@ async def discover_category(
                             # Use basic info from request item
                             # Handle enum values safely
                             media_type_str = request_item.media_type.value if hasattr(request_item.media_type, 'value') else str(request_item.media_type)
-                            status_str = request_item.status.value if hasattr(request_item.status, 'value') else str(request_item.status)
+                            raw_status = request_item.status.value.lower() if hasattr(request_item.status, 'value') else str(request_item.status).lower()
+                            # Map database status to template status
+                            if raw_status == 'available':
+                                # AVAILABLE means it's now in Plex
+                                request_status = 'in_plex'
+                            else:
+                                # PENDING, APPROVED, REJECTED get the requested_ prefix
+                                request_status = f'requested_{raw_status}'
                             
                             item = {
                                 'id': request_item.tmdb_id,
@@ -850,8 +851,8 @@ async def discover_category(
                                 'first_air_date': request_item.release_date or '',
                                 'vote_average': 0,
                                 'media_type': media_type_str,
-                                'in_plex': False,
-                                'status': f'requested_{status_str}',
+                                'in_plex': request_status == 'in_plex',
+                                'status': request_status,
                                 'user': user,  # Include user who made the request
                                 'created_at': request_item.created_at,  # Include request date
                                 'request_id': request_item.id,  # Include request DB ID for admin actions
@@ -899,13 +900,14 @@ async def discover_category(
                     "request": request, 
                     "results": recent_items,
                     "current_user": current_user,
+                    "user_is_admin": user_is_admin,
+                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
+                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests'],
                     "media_type": "mixed",  # Mixed content type
                     "sort_by": sort,
                     "has_more": has_more,
                     "next_offset": offset + limit,
-                    "current_offset": offset,
-                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
-                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests']
+                    "current_offset": offset
                 }
             )
         
@@ -1320,7 +1322,7 @@ async def media_detail(
         existing_request_statement = select(MediaRequest).where(
             MediaRequest.tmdb_id == media_id,
             MediaRequest.media_type == media_type,
-            MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.DOWNLOADING])
+            MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED])
         )
         existing_requests = session.exec(existing_request_statement).all()
         
@@ -1335,7 +1337,7 @@ async def media_detail(
             complete_request = next((req for req in existing_requests if not req.is_season_request), None)
             if complete_request:
                 has_complete_request = True
-                request_status = complete_request.status
+                request_status = complete_request.status.value
             else:
                 # Only partial requests exist
                 has_partial_requests = True
@@ -1343,7 +1345,7 @@ async def media_detail(
                 user_partial_requests = [req for req in existing_requests if req.user_id == current_user.id] if current_user else []
                 # Use the status of the most recent partial request
                 if user_partial_requests:
-                    request_status = user_partial_requests[-1].status
+                    request_status = user_partial_requests[-1].status.value
         
         # For template context, use the first existing request or None
         existing_request = existing_requests[0] if existing_requests else None
@@ -1355,13 +1357,20 @@ async def media_detail(
         # Add status information to the main media object
         media['in_plex'] = is_in_plex
         media['status'] = plex_status
+        
+        # Set request_status based on existing request or plex_status
         if existing_request:
             if existing_request.status == RequestStatus.PENDING:
                 media['request_status'] = 'requested_pending'
             elif existing_request.status == RequestStatus.APPROVED:
-                media['request_status'] = 'requested_approved' 
-            elif existing_request.status == RequestStatus.DOWNLOADING:
-                media['request_status'] = 'requested_downloading'
+                media['request_status'] = 'requested_approved'
+            elif existing_request.status == RequestStatus.AVAILABLE:
+                media['request_status'] = 'in_plex'
+            elif existing_request.status == RequestStatus.REJECTED:
+                media['request_status'] = 'requested_rejected'
+        elif plex_status.startswith('requested_'):
+            # If PlexSyncService returned a request status, use it
+            media['request_status'] = plex_status 
         
         # Get additional data
         if media_type == 'movie':
@@ -1391,7 +1400,7 @@ async def media_detail(
                     item_request_statement = select(MediaRequest).where(
                         MediaRequest.tmdb_id == item['id'],
                         MediaRequest.media_type == media_type,
-                        MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.DOWNLOADING])
+                        MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED])
                     )
                     item_existing_request = session.exec(item_request_statement).first()
                     
@@ -1405,8 +1414,6 @@ async def media_detail(
                             item['status'] = 'requested_pending'
                         elif item_existing_request.status == RequestStatus.APPROVED:
                             item['status'] = 'requested_approved'
-                        elif item_existing_request.status == RequestStatus.DOWNLOADING:
-                            item['status'] = 'requested_downloading'
                     else:
                         item['status'] = 'available'
         

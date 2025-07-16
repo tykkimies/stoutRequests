@@ -1,12 +1,12 @@
 {% if (has_complete_request or has_partial_requests) and not is_in_plex %}
 <div class="bg-black bg-opacity-50 rounded-lg p-6">
     <h3 class="text-xl font-semibold mb-4 flex items-center">
-        {% if request_status == 'pending' %}
+        {% if request_status == 'PENDING' %}
         <svg class="w-5 h-5 mr-2 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
         </svg>
         {% if has_complete_request %}Request Pending Review{% else %}Partial Requests Pending{% endif %}
-        {% elif request_status == 'approved' %}
+        {% elif request_status == 'APPROVED' %}
         <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
         </svg>
@@ -16,7 +16,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
         </svg>
         {% if has_complete_request %}Downloading{% else %}Partial Content Downloading{% endif %}
-        {% elif request_status == 'rejected' %}
+        {% elif request_status == 'REJECTED' %}
         <svg class="w-5 h-5 mr-2 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
         </svg>
@@ -25,7 +25,7 @@
     </h3>
     
     <div class="text-gray-300">
-        {% if request_status == 'pending' %}
+        {% if request_status == 'PENDING' %}
         {% if has_complete_request %}
         <p class="mb-4">This {{ media_type }} has already been requested and is waiting for admin approval.</p>
         {% else %}
@@ -57,7 +57,7 @@
             {% endif %}
         </div>
         
-        {% elif request_status == 'approved' %}
+        {% elif request_status == 'APPROVED' %}
         <p class="mb-4">This {{ media_type }} request has been approved and should be downloading soon.</p>
         <div class="bg-blue-600 bg-opacity-20 border border-blue-600 rounded-md p-4">
             <p class="text-sm">✅ The download process will begin shortly. It will appear in Plex once available.</p>
@@ -67,7 +67,7 @@
         <div class="bg-purple-600 bg-opacity-20 border border-purple-600 rounded-md p-4">
             <p class="text-sm">⬇ Download in progress. It will appear in Plex once complete.</p>
         </div>
-        {% elif request_status == 'rejected' %}
+        {% elif request_status == 'REJECTED' %}
         <p class="mb-4">This {{ media_type }} request has been rejected.</p>
         <div class="bg-red-600 bg-opacity-20 border border-red-600 rounded-md p-4">
             <p class="text-sm">✗ The request was not approved. You may request again if needed.</p>
@@ -75,7 +75,7 @@
         {% endif %}
         
         <!-- Admin Action Buttons (only show for pending requests) -->
-        {% if user_is_admin and existing_request and request_status == 'pending' %}
+        {% if user_is_admin and existing_request and request_status == 'PENDING' %}
         <div class="mt-6 pt-4 border-t border-gray-600">
             <div class="flex items-center justify-between mb-3">
                 <h4 class="text-lg font-medium text-white">Admin Actions</h4>

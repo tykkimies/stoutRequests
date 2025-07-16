@@ -1,0 +1,185 @@
+<!-- Unified Media Status Badge Component -->
+<!-- Usage: {% include 'components/media_status_badge.html' %} -->
+<!-- Required variables: status (or item.status), media_type, tmdb_id -->
+<!-- Optional variables: size ('sm', 'md', 'lg'), style ('badge', 'button', 'overlay', 'search') -->
+
+{% set computed_status = status if status else (item.status if item and item.status else 'available') %}
+{% set size_class = 'sm' if not size else size %}
+{% set display_style = 'badge' if not style else style %}
+
+<!-- Size classes -->
+{% if size_class == 'sm' %}
+    {% set text_size = 'text-xs' %}
+    {% set padding = 'px-2 py-1' %}
+{% elif size_class == 'lg' %}
+    {% set text_size = 'text-sm' %}
+    {% set padding = 'px-3 py-2' %}
+{% else %}
+    {% set text_size = 'text-xs' %}
+    {% set padding = 'px-2 py-1' %}
+{% endif %}
+
+<!-- Status display logic -->
+{% if computed_status == 'in_plex' or (item and item.in_plex) %}
+    {% if display_style == 'button' %}
+        <div class="w-full bg-green-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium text-center">
+            ✓ In Plex
+        </div>
+    {% elif display_style == 'overlay' %}
+        <span class="bg-green-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium">
+            In Plex
+        </span>
+    {% elif display_style == 'search' %}
+        <div class="inline-flex items-center px-3 py-2 border border-green-300 text-sm leading-4 font-medium rounded-md text-green-700 bg-green-50">
+            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            In Plex
+        </div>
+    {% else %}
+        <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-green-100 text-green-800">
+            ✓ In Plex
+        </span>
+    {% endif %}
+
+{% elif computed_status == 'partial_plex' %}
+    {% if display_style == 'button' %}
+        <div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium text-center">
+            📺 Partial
+        </div>
+    {% elif display_style == 'overlay' %}
+        <span class="bg-yellow-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium">
+            Partial
+        </span>
+    {% elif display_style == 'search' %}
+        <div class="inline-flex items-center px-3 py-2 border border-yellow-300 text-sm leading-4 font-medium rounded-md text-yellow-700 bg-yellow-50">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            Partial
+        </div>
+    {% else %}
+        <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-yellow-100 text-yellow-800">
+            📺 Partial
+        </span>
+    {% endif %}
+
+{% elif computed_status == 'requested_pending' %}
+    {% if display_style == 'button' %}
+        <div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium text-center">
+            ⏳ Pending
+        </div>
+    {% elif display_style == 'overlay' %}
+        <span class="bg-yellow-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium">
+            Pending
+        </span>
+    {% elif display_style == 'search' %}
+        <div class="inline-flex items-center px-3 py-2 border border-yellow-300 text-sm leading-4 font-medium rounded-md text-yellow-700 bg-yellow-50">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            Requested
+        </div>
+    {% else %}
+        <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-yellow-100 text-yellow-800">
+            ⏳ Pending
+        </span>
+    {% endif %}
+
+{% elif computed_status == 'requested_approved' %}
+    {% if display_style == 'button' %}
+        <div class="w-full bg-blue-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium text-center">
+            ✓ Approved
+        </div>
+    {% elif display_style == 'overlay' %}
+        <span class="bg-blue-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium">
+            Approved
+        </span>
+    {% elif display_style == 'search' %}
+        <div class="inline-flex items-center px-3 py-2 border border-blue-300 text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-50">
+            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            Approved
+        </div>
+    {% else %}
+        <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-blue-100 text-blue-800">
+            ✓ Approved
+        </span>
+    {% endif %}
+
+{% elif computed_status == 'requested_downloading' %}
+    {% if display_style == 'button' %}
+        <div class="w-full bg-purple-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium text-center">
+            ⬇ Downloading
+        </div>
+    {% elif display_style == 'overlay' %}
+        <span class="bg-purple-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium">
+            Downloading
+        </span>
+    {% elif display_style == 'search' %}
+        <div class="inline-flex items-center px-3 py-2 border border-purple-300 text-sm leading-4 font-medium rounded-md text-purple-700 bg-purple-50">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+            </svg>
+            Downloading
+        </div>
+    {% else %}
+        <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-purple-100 text-purple-800">
+            ⬇ Downloading
+        </span>
+    {% endif %}
+
+{% elif computed_status == 'rejected' %}
+    {% if display_style == 'button' %}
+        <div class="w-full bg-red-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium text-center">
+            ✗ Rejected
+        </div>
+    {% elif display_style == 'overlay' %}
+        <span class="bg-red-600/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium">
+            Rejected
+        </span>
+    {% elif display_style == 'search' %}
+        <div class="inline-flex items-center px-3 py-2 border border-red-300 text-sm leading-4 font-medium rounded-md text-red-700 bg-red-50">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+            Rejected
+        </div>
+    {% else %}
+        <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-red-100 text-red-800">
+            ✗ Rejected
+        </span>
+    {% endif %}
+
+{% else %}
+    <!-- Available status - show request button instead -->
+    {% if display_style == 'button' %}
+        <form hx-post="{{ base_url }}/requests/create" hx-target="this" hx-swap="outerHTML" class="w-full relative z-30" onclick="event.stopPropagation();">
+            <input type="hidden" name="tmdb_id" value="{{ tmdb_id or (item.id if item else '') }}">
+            <input type="hidden" name="media_type" value="{{ media_type or (item.media_type if item else '') }}">
+            <input type="hidden" name="title" value="{{ ((item.title or item.name)|e) if item else '' }}">
+            <input type="hidden" name="overview" value="{{ ((item.overview or '')|e) if item else '' }}">
+            <input type="hidden" name="poster_path" value="{{ (item.poster_path or '') if item else '' }}">
+            <input type="hidden" name="release_date" value="{{ (item.release_date or item.first_air_date or '') if item else '' }}">
+            <button type="submit" class="w-full bg-orange-600/90 hover:bg-orange-700/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium transition-colors" onclick="event.stopPropagation();">
+                Request
+            </button>
+        </form>
+    {% elif display_style == 'search' %}
+        <form hx-post="{{ base_url }}/requests/create" hx-target="this" hx-swap="outerHTML" class="inline-block relative z-30" onclick="event.stopPropagation();">
+            <input type="hidden" name="tmdb_id" value="{{ tmdb_id or (item.id if item else '') }}">
+            <input type="hidden" name="media_type" value="{{ media_type or (item.media_type if item else '') }}">
+            <input type="hidden" name="title" value="{{ ((item.title or item.name)|e) if item else '' }}">
+            <input type="hidden" name="overview" value="{{ ((item.overview or '')|e) if item else '' }}">
+            <input type="hidden" name="poster_path" value="{{ (item.poster_path or '') if item else '' }}">
+            <input type="hidden" name="release_date" value="{{ (item.release_date or item.first_air_date or '') if item else '' }}">
+            <button type="submit" class="inline-flex items-center px-3 py-2 border border-orange-300 text-sm leading-4 font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors" onclick="event.stopPropagation();">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+                Request
+            </button>
+        </form>
+    {% endif %}
+{% endif %}

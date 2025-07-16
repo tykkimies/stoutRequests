@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/status_display.html' import media_status_badge %}
 
 {% block title %}Requests - Stout Requests{% endblock %}
 
@@ -60,10 +61,6 @@
                     ✓ Approved
                     <span id="status-count-approved" class="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full"></span>
                 </button>
-                <button onclick="showStatus('processing')" id="status-tab-processing" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
-                    ⚙️ Processing
-                    <span id="status-count-processing" class="ml-2 text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full"></span>
-                </button>
                 <button onclick="showStatus('available')" id="status-tab-available" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
                     ✅ In Plex
                     <span id="status-count-available" class="ml-2 text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full"></span>
@@ -123,31 +120,8 @@
                             
                             <!-- Status Badge -->
                             <div class="ml-2 flex-shrink-0" id="status-{{ request.id }}">
-                                {% if request.status.value == 'pending' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                    ⏳ Pending
-                                </span>
-                                {% elif request.status.value == 'approved' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                    ✓ Approved
-                                </span>
-                                {% elif request.status.value == 'available' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                    ✓ Available
-                                </span>
-                                {% elif request.status.value == 'downloading' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                                    ⬇ Downloading
-                                </span>
-                                {% elif request.status.value == 'downloaded' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                                    📁 Downloaded
-                                </span>
-                                {% elif request.status.value == 'rejected' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                    ✗ Rejected
-                                </span>
-                                {% endif %}
+                                {% set computed_status = 'in_plex' if request.status.value == 'AVAILABLE' else 'requested_' + request.status.value.lower() %}
+                                {{ media_status_badge(request, style='badge', size='sm', status=computed_status, tmdb_id=request.tmdb_id, media_type=request.media_type.value) }}
                             </div>
                         </div>
 
@@ -199,7 +173,7 @@
                                 >
                                     ✗ Reject
                                 </button>
-                                {% elif request.status.value == 'approved' or request.status.value == 'downloading' or request.status.value == 'downloaded' %}
+                                {% elif request.status.value == 'approved' %}
                                 <button 
                                     onclick="markAsAvailable({{ request.id }}); event.stopPropagation();"
                                     class="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
@@ -215,7 +189,7 @@
                         
                         <!-- Delete button and metadata -->
                         <div class="flex items-center space-x-2">
-                            {% if request.status.value in ['approved', 'downloading', 'available'] and request.approved_by %}
+                            {% if request.status.value in ['approved', 'available'] and request.approved_by %}
                             <span class="text-xs text-gray-400" title="Approved by admin">👤 Admin</span>
                             {% endif %}
                             
@@ -319,12 +293,7 @@ function filterRequests() {
         
         // Apply status filter
         if (currentStatus !== 'all') {
-            if (currentStatus === 'processing') {
-                // Include both downloading and downloaded in processing filter
-                shouldShow = shouldShow && (status === 'downloading' || status === 'downloaded');
-            } else {
-                shouldShow = shouldShow && (status === currentStatus);
-            }
+            shouldShow = shouldShow && (status === currentStatus);
         }
         
         item.style.display = shouldShow ? 'block' : 'none';
@@ -339,7 +308,6 @@ function updateCounts() {
     // Status counts
     const pendingItems = document.querySelectorAll('.request-item[data-status="pending"]');
     const approvedItems = document.querySelectorAll('.request-item[data-status="approved"]');
-    const processingItems = document.querySelectorAll('.request-item[data-status="downloading"], .request-item[data-status="downloaded"]');
     const availableItems = document.querySelectorAll('.request-item[data-status="available"]');
     const rejectedItems = document.querySelectorAll('.request-item[data-status="rejected"]');
     
@@ -356,14 +324,12 @@ function updateCounts() {
     const statusCountAll = document.getElementById('status-count-all');
     const statusCountPending = document.getElementById('status-count-pending');
     const statusCountApproved = document.getElementById('status-count-approved');
-    const statusCountProcessing = document.getElementById('status-count-processing');
     const statusCountAvailable = document.getElementById('status-count-available');
     const statusCountRejected = document.getElementById('status-count-rejected');
     
     if (statusCountAll) statusCountAll.textContent = allItems.length;
     if (statusCountPending) statusCountPending.textContent = pendingItems.length;
     if (statusCountApproved) statusCountApproved.textContent = approvedItems.length;
-    if (statusCountProcessing) statusCountProcessing.textContent = processingItems.length;
     if (statusCountAvailable) statusCountAvailable.textContent = availableItems.length;
     if (statusCountRejected) statusCountRejected.textContent = rejectedItems.length;
     

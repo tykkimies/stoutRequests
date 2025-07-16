@@ -6,7 +6,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pydantic import BaseModel
 from fastapi import Form
-import asyncio
 from ..core.database import get_session
 from ..core.template_context import get_global_template_context
 from ..models.user import User
@@ -50,6 +49,7 @@ async def create_request(
     release_date: str = Form(""),
     request_type: str = Form(""),  # For TV shows: complete, season, episode
     season_number: Optional[int] = Form(None),  # For season-specific requests
+    request_source: str = Form("main"),  # "main" for main media, "similar_recommended" for cards
     current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
 ):
@@ -135,7 +135,6 @@ async def create_request(
         )
 
     # Note: Removed slow Radarr/Sonarr checks during request creation
-    # These will be handled by the background download status service
 
     # Determine initial status based on auto-approval
     initial_status = RequestStatus.PENDING
@@ -170,40 +169,72 @@ async def create_request(
     if initial_status == RequestStatus.PENDING:
         permissions_service.increment_user_request_count(current_user.id)
     
-    # For auto-approved requests, schedule background processing
-    if initial_status == RequestStatus.APPROVED:
-        session.add(new_request)
-        session.commit()
-        
-        # Trigger background processing without changing status
-        from ..services.background_jobs import trigger_service_integration
-        
-        # Create task to run in background without blocking
-        try:
-            # Get the current event loop and schedule the task
-            loop = asyncio.get_event_loop()
-            loop.create_task(trigger_service_integration(new_request.id))
-            print(f"✅ Scheduled background service integration for request {new_request.id}")
-        except Exception as e:
-            print(f"⚠️ Could not schedule background task: {e}")
-            # Task will be picked up by periodic background job anyway
 
     # Return appropriate message based on initial status
     if initial_status == RequestStatus.APPROVED:
-        message = "Auto-approved! Adding to download queue..."
+        message = "Auto-approved!"
         color_class = "blue"
     else:
         message = "Requested!"
         color_class = "green"
     
-    return HTMLResponse(
-        f'''<div class="inline-flex items-center px-3 py-2 border border-{color_class}-300 text-sm leading-4 font-medium rounded-md text-{color_class}-700 bg-{color_class}-50">
-            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-            </svg>
-            {message}
+    # Determine status badge HTML based on the request status
+    if initial_status == RequestStatus.PENDING:
+        badge_html = '''<span class="bg-yellow-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+            ⏳ Request Pending
+        </span>'''
+    else:  # APPROVED
+        badge_html = '''<span class="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+            ✓ Request Approved
+        </span>'''
+    
+    # Prepare out-of-band updates for any cards that might need refreshing
+    card_updates = ""
+    
+    # If this request came from the similar/recommended section, trigger a refresh
+    # We'll use a JavaScript trigger to refresh status badges on the page
+    script_trigger = '''
+    <script>
+        // Trigger refresh of all status badges on the page
+        document.body.dispatchEvent(new CustomEvent('refreshStatusBadges', {
+            detail: { 
+                updatedItemId: ''' + str(tmdb_id) + ''',
+                newStatus: "''' + ("PENDING" if initial_status == RequestStatus.PENDING else "APPROVED") + '''"
+            }
+        }));
+    </script>
+    '''
+    
+    # Build the main response message
+    response_html = f'''<div class="inline-flex items-center px-3 py-2 border border-{color_class}-300 text-sm leading-4 font-medium rounded-md text-{color_class}-700 bg-{color_class}-50">
+        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+        </svg>
+        {message}
+    </div>'''
+    
+    # Only add OOB updates for main media requests
+    if request_source == "main":
+        response_html += f'''
+        <div hx-swap-oob="innerHTML:#request-status-badge">
+            {badge_html}
+        </div>
+        <div hx-swap-oob="innerHTML:#request-section">
+            <div class="bg-black bg-opacity-50 rounded-lg p-6 mt-6">
+                <div class="text-green-400 text-center">
+                    <svg class="w-8 h-8 mx-auto mb-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                    </svg>
+                    <p class="font-semibold">Request submitted successfully!</p>
+                    <p class="text-sm text-gray-300 mt-1">{message}</p>
+                </div>
+            </div>
         </div>'''
-    )
+    
+    # Always add the script trigger for similar/recommended card updates
+    response_html += script_trigger
+    
+    return HTMLResponse(response_html)
 
 
 
@@ -343,22 +374,9 @@ async def approve_request(
     session.add(media_request)
     session.commit()
     
-    # Trigger background service integration
-    from ..services.background_jobs import trigger_service_integration
-    import asyncio
-    
-    # Create task to run in background without blocking
-    try:
-        # Get the current event loop and schedule the task
-        loop = asyncio.get_event_loop()
-        loop.create_task(trigger_service_integration(media_request.id))
-        print(f"✅ Scheduled background service integration for request {media_request.id}")
-    except Exception as e:
-        print(f"⚠️ Could not schedule background task: {e}")
-        # Task will be picked up by periodic background job anyway
     
     # Content negotiation - check if this is an HTMX request
-    if False:  # Disable HTMX content negotiation
+    if request.headers.get("HX-Request"):
         # Check if this came from media detail page (has different target)
         hx_target = request.headers.get("HX-Target", "")
         print(f"🔍 APPROVE: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")
@@ -412,6 +430,15 @@ async def approve_request(
                 ✓ Request Approved
             </span>
             ''')
+        elif hx_target.startswith("status-badge-"):
+            # From recent requests horizontal - update just the status badge
+            return HTMLResponse(f'''
+            <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                    ✓ Approved
+                </span>
+            </div>
+            ''')
         else:
             # From admin requests list - return status badge
             badge_text = "✓ Approved"
@@ -419,7 +446,7 @@ async def approve_request(
                 
             return HTMLResponse(f'''
             <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
-                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {badge_class}" title="{service_error if service_error else ''}">
+                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {badge_class}">
                     {badge_text}
                 </span>
             </div>
@@ -459,7 +486,7 @@ async def reject_request(
         permissions_service.decrement_user_request_count(media_request.user_id)
     
     # Content negotiation - check if this is an HTMX request
-    if False:  # Disable HTMX content negotiation
+    if request.headers.get("HX-Request"):
         # Check if this came from media detail page (has different target)
         hx_target = request.headers.get("HX-Target", "")
         print(f"🔍 REJECT: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")
@@ -512,6 +539,15 @@ async def reject_request(
             <span class="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-medium">
                 ✗ Request Rejected
             </span>
+            ''')
+        elif hx_target.startswith("status-badge-"):
+            # From recent requests horizontal - update just the status badge
+            return HTMLResponse(f'''
+            <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                    ✗ Rejected
+                </span>
+            </div>
             ''')
         else:
             # From admin requests list - return status badge

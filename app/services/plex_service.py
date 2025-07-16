@@ -431,6 +431,7 @@ class PlexService:
             
             if not self.plex_url or not self.plex_token:
                 print("❌ Plex URL or token not configured")
+                
                 return []
             
             print("🔗 Connecting to Plex server...")
