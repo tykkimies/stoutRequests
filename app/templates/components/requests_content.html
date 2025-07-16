@@ -1,0 +1,168 @@
+{% from 'macros/status_display.html' import media_status_badge %}
+
+{% if requests %}
+<div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+    {% for request in requests %}
+    <div class="request-item bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer" 
+         data-media-type="{{ request.media_type.value }}" 
+         data-status="{{ request.status.value }}"
+         onclick="openMediaInfo('{{ request.media_type.value }}', '{{ request.tmdb_id }}')">
+         
+        
+        <!-- Card Header -->
+        <div class="flex min-h-0">
+            <!-- Poster -->
+            <div class="flex-shrink-0 w-20">
+                {% if request.poster_path %}
+                <img 
+                    src="https://image.tmdb.org/t/p/w185{{ request.poster_path }}" 
+                    alt="{{ request.title }}"
+                    class="w-full h-32 object-cover"
+                >
+                {% else %}
+                <div class="w-full h-32 bg-gray-200 flex items-center justify-center">
+                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 002 2z"></path>
+                    </svg>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- Main Content -->
+            <div class="flex-1 p-3 flex flex-col min-h-0">
+                <!-- Title and Status Row -->
+                <div class="flex items-start justify-between mb-2">
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-sm font-semibold text-gray-900 truncate">{{ request.title }}</h3>
+                        <div class="flex items-center space-x-2 mt-1">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                                {% if request.media_type.value == 'movie' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
+                                {{ '🎬' if request.media_type.value == 'movie' else '📺' }}
+                            </span>
+                            {% if request.release_date %}
+                            <span class="text-xs text-gray-500">{{ request.release_date[:4] }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <!-- Status Badge -->
+                    <div class="ml-2 flex-shrink-0" id="status-{{ request.id }}">
+                        {% set computed_status = 'in_plex' if request.status.value == 'AVAILABLE' else 'requested_' + request.status.value.lower() %}
+                        {{ media_status_badge(request, style='badge', size='sm', status=computed_status, tmdb_id=request.tmdb_id, media_type=request.media_type.value) }}
+                    </div>
+                </div>
+
+                <!-- User info and overview -->
+                <div class="flex-1 min-h-0">
+                    {% if show_request_user and user_lookup.get(request.id) %}
+                    <div class="mb-1">
+                        <span class="text-xs text-gray-600">👤 {{ user_lookup[request.id].username if user_lookup[request.id].username else 'Unknown' }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if request.overview %}
+                    <p class="text-xs text-gray-600 line-clamp-2">{{ request.overview[:80] }}{% if request.overview|length > 80 %}...{% endif %}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Card Footer -->
+        <div class="border-t border-gray-100 px-3 py-2 bg-gray-50" onclick="event.stopPropagation()">
+            <!-- Request date and time info -->
+            <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
+                <div class="flex items-center space-x-3">
+                    <span title="Requested on">📅 {{ request.created_at.strftime('%b %d, %Y') }}</span>
+                    <span title="Request time">🕒 {{ request.created_at.strftime('%I:%M %p') }}</span>
+                </div>
+                {% if request.approved_at %}
+                <span title="Approved on" class="text-blue-600">✓ {{ request.approved_at.strftime('%b %d') }}</span>
+                {% endif %}
+            </div>
+            
+            <!-- Action buttons -->
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-1">
+                    <!-- Admin Actions -->
+                    {% if user_is_admin %}
+                        {% if request.status.value == 'PENDING' %}
+                        <button 
+                            hx-post="{{ base_url }}/requests/{{ request.id }}/approve?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
+                            hx-target="#requests-content"
+                            hx-confirm="Approve this request?"
+                            onclick="event.stopPropagation();"
+                            class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                            title="Approve Request"
+                        >
+                            ✓ Approve
+                        </button>
+                        <button 
+                            hx-post="{{ base_url }}/requests/{{ request.id }}/reject?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
+                            hx-target="#requests-content"
+                                            hx-confirm="Reject this request?"
+                            onclick="event.stopPropagation();"
+                            class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                            title="Reject Request"
+                        >
+                            ✗ Reject
+                        </button>
+                        {% elif request.status.value == 'APPROVED' %}
+                        <button 
+                            hx-post="{{ base_url }}/requests/{{ request.id }}/mark-available?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
+                            hx-target="#requests-content"
+                                            hx-confirm="Mark this request as available in Plex?"
+                            onclick="event.stopPropagation();"
+                            class="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                            title="Mark as Available in Plex"
+                        >
+                            📁 Mark Available
+                        </button>
+                        {% elif request.status.value == 'AVAILABLE' %}
+                        <span class="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">📁 Available in Plex</span>
+                        {% endif %}
+                    {% endif %}
+                </div>
+                
+                <!-- Delete button and metadata -->
+                <div class="flex items-center space-x-2">
+                    {% if request.status.value in ['APPROVED', 'AVAILABLE'] and request.approved_by %}
+                    <span class="text-xs text-gray-400" title="Approved by admin">👤 Admin</span>
+                    {% endif %}
+                    
+                    <!-- Delete button (visible to admins or request owner) -->
+                    {% if user_is_admin or (user_lookup.get(request.id) and user_lookup[request.id].id == current_user.id) %}
+                    <button 
+                        hx-delete="{{ base_url }}/requests/{{ request.id }}/delete?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
+                        hx-target="#requests-content"
+                                    hx-confirm="Are you sure you want to delete this request? This action cannot be undone."
+                        onclick="event.stopPropagation();"
+                        class="bg-gray-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
+                        title="Delete Request"
+                    >
+                        🗑️ Delete
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-12">
+    <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+    </svg>
+    <h3 class="text-lg font-medium text-gray-900 mb-2">No requests yet</h3>
+    <p class="text-gray-500 mb-4">
+        {% if user_is_admin %}
+        No users have made any content requests yet.
+        {% else %}
+        You haven't requested any content yet.
+        {% endif %}
+    </p>
+    <a href="{{ base_url }}/" class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg text-sm font-medium">
+        Search for Content
+    </a>
+</div>
+{% endif %}

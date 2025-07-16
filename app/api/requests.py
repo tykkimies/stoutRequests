@@ -241,6 +241,10 @@ async def create_request(
 @router.get("/", response_class=HTMLResponse)
 async def unified_requests(
     request: Request,
+    status: Optional[str] = None,
+    media_type: Optional[str] = None,
+    page: int = 1,
+    limit: int = 24,
     current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
 ):
@@ -254,58 +258,119 @@ async def unified_requests(
         
         from ..core.permissions import is_user_admin
         user_is_admin = is_user_admin(current_user, session)
-        if user_is_admin:
-            # Admins always see all requests
-            statement = select(MediaRequest, User).join(
-                User, MediaRequest.user_id == User.id
-            ).order_by(MediaRequest.created_at.desc())
-            results = session.exec(statement).all()
+        
+        # Build query parameters once
+        def build_base_query(include_user=True, include_status_filter=True, include_media_filter=True):
+            if user_is_admin or (visibility_config['can_view_all_requests'] and visibility_config['can_view_request_user']):
+                if include_user:
+                    query = select(MediaRequest, User).join(User, MediaRequest.user_id == User.id)
+                else:
+                    query = select(MediaRequest)
+            elif visibility_config['can_view_all_requests']:
+                query = select(MediaRequest)
+            else:
+                # Regular users can only see their own requests
+                query = select(MediaRequest).where(MediaRequest.user_id == current_user.id)
             
-            requests_with_users = []
+            # Apply filters
+            if include_status_filter and status and status != 'all':
+                try:
+                    status_enum = RequestStatus(status.upper())
+                    query = query.where(MediaRequest.status == status_enum)
+                except ValueError:
+                    pass
+            
+            if include_media_filter and media_type and media_type != 'all':
+                try:
+                    media_type_enum = MediaType(media_type.lower())
+                    query = query.where(MediaRequest.media_type == media_type_enum)
+                except ValueError:
+                    pass
+            
+            return query.order_by(MediaRequest.created_at.desc())
+        
+        # Get total count for pagination
+        count_statement = build_base_query(include_user=False)
+        total_requests = len(session.exec(count_statement).all())
+        
+        # Apply pagination
+        offset = (page - 1) * limit
+        statement = build_base_query(include_user=True).offset(offset).limit(limit)
+        
+        user_lookup = {}
+        requests_with_users = []
+        
+        if user_is_admin or (visibility_config['can_view_all_requests'] and visibility_config['can_view_request_user']):
+            # Query returns both MediaRequest and User
+            results = session.exec(statement).all()
             for media_request, user in results:
                 user_lookup[media_request.id] = user
                 requests_with_users.append(media_request)
-                
-        elif visibility_config['can_view_all_requests']:
-            # Regular users can see all requests if setting is enabled
-            if visibility_config['can_view_request_user']:
-                # Show user info if enabled
-                statement = select(MediaRequest, User).join(
-                    User, MediaRequest.user_id == User.id
-                ).order_by(MediaRequest.created_at.desc())
-                results = session.exec(statement).all()
-                
-                requests_with_users = []
-                for media_request, user in results:
-                    user_lookup[media_request.id] = user
-                    requests_with_users.append(media_request)
-            else:
-                # Hide user info - just get requests without user data
-                statement = select(MediaRequest).order_by(MediaRequest.created_at.desc())
-                requests_with_users = session.exec(statement).all()
         else:
-            # Regular users can only see their own requests
-            statement = select(MediaRequest).where(
-                MediaRequest.user_id == current_user.id
-            ).order_by(MediaRequest.created_at.desc())
+            # Query returns only MediaRequest
             requests_with_users = session.exec(statement).all()
             
-            # Add current user info for their own requests
-            for media_request in requests_with_users:
-                user_lookup[media_request.id] = current_user
+            # Add current user info for their own requests if needed
+            if not visibility_config['can_view_all_requests']:
+                for media_request in requests_with_users:
+                    user_lookup[media_request.id] = current_user
         
-        return create_template_response(
-            "requests.html",
-            {
-                "request": request, 
-                "requests": requests_with_users, 
-                "current_user": current_user,
-                "user_lookup": user_lookup,
-                "user_is_admin": user_is_admin,
-                "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
-                "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests']
-            }
-        )
+        # Calculate pagination info
+        total_pages = (total_requests + limit - 1) // limit
+        has_next = page < total_pages
+        has_prev = page > 1
+        
+        # Check if this is an HTMX request for fragments
+        hx_target = request.headers.get("HX-Target", "")
+        if request.headers.get("HX-Request") and hx_target in ["requests-content", "main-content"]:
+            template_name = "components/main_content.html" if hx_target == "main-content" else "components/requests_content.html"
+            
+            # Get all requests for count calculations (reuse query builder)
+            count_query = build_base_query(include_user=False, include_status_filter=False, include_media_filter=True)
+            all_requests_for_counts = session.exec(count_query).all()
+            
+            # Return only the fragment
+            return create_template_response(
+                template_name,
+                {
+                    "request": request, 
+                    "requests": requests_with_users, 
+                    "all_requests_for_counts": all_requests_for_counts,
+                    "current_user": current_user,
+                    "user_lookup": user_lookup,
+                    "user_is_admin": user_is_admin,
+                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
+                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests'],
+                    "current_status_filter": status or 'all',
+                    "current_media_type_filter": media_type or 'all',
+                    "current_page": page,
+                    "total_pages": total_pages,
+                    "has_next": has_next,
+                    "has_prev": has_prev,
+                    "total_requests": total_requests
+                }
+            )
+        else:
+            # Return full page
+            return create_template_response(
+                "requests.html",
+                {
+                    "request": request, 
+                    "requests": requests_with_users, 
+                    "current_user": current_user,
+                    "user_lookup": user_lookup,
+                    "user_is_admin": user_is_admin,
+                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
+                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests'],
+                    "current_status_filter": status or 'all',
+                    "current_media_type_filter": media_type or 'all',
+                    "current_page": page,
+                    "total_pages": total_pages,
+                    "has_next": has_next,
+                    "has_prev": has_prev,
+                    "total_requests": total_requests
+                }
+            )
         
     except Exception as e:
         print(f"Error in unified_requests: {e}")
@@ -384,7 +449,16 @@ async def approve_request(
         hx_target = request.headers.get("HX-Target", "")
         print(f"🔍 APPROVE: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")
         print(f"🔍 APPROVE: Target comparison: '{hx_target}' == 'request-section' ? {hx_target == 'request-section'}")
-        if hx_target == "request-section":
+        
+        if hx_target in ["requests-content", "main-content"]:
+            # From requests list page - return updated content with current filters
+            status_filter = request.query_params.get('status', 'all')
+            media_type_filter = request.query_params.get('media_type', 'all')
+            
+            # Call unified_requests to get the updated content
+            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
+            
+        elif hx_target == "request-section":
             # From media detail page - return updated request section
             
             # Check if user has admin permissions using unified function
@@ -494,7 +568,16 @@ async def reject_request(
         hx_target = request.headers.get("HX-Target", "")
         print(f"🔍 REJECT: HTMX Target received: '{hx_target}' (length: {len(hx_target)})")
         print(f"🔍 REJECT: Target comparison: '{hx_target}' == 'request-section' ? {hx_target == 'request-section'}")
-        if hx_target == "request-section":
+        
+        if hx_target in ["requests-content", "main-content"]:
+            # From requests list page - return updated content with current filters
+            status_filter = request.query_params.get('status', 'all')
+            media_type_filter = request.query_params.get('media_type', 'all')
+            
+            # Call unified_requests to get the updated content
+            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
+            
+        elif hx_target == "request-section":
             # From media detail page - return updated request section
             
             # Check if user has admin permissions using unified function
@@ -569,6 +652,7 @@ async def reject_request(
 @router.post("/{request_id}/mark-available")
 async def mark_as_available(
     request_id: int,
+    request: Request,
     current_user: User = Depends(get_current_admin_user_flexible),
     session: Session = Depends(get_session)
 ):
@@ -586,12 +670,25 @@ async def mark_as_available(
     session.add(media_request)
     session.commit()
     
+    # Content negotiation - check if this is an HTMX request
+    if request.headers.get("HX-Request"):
+        hx_target = request.headers.get("HX-Target", "")
+        
+        if hx_target in ["requests-content", "main-content"]:
+            # From requests list page - return updated content with current filters
+            status_filter = request.query_params.get('status', 'all')
+            media_type_filter = request.query_params.get('media_type', 'all')
+            
+            # Call unified_requests to get the updated content
+            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
+    
     return {"message": "Request marked as available"}
 
 
 @router.delete("/{request_id}/delete")
 async def delete_request(
     request_id: int,
+    request: Request,
     current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
 ):
@@ -610,6 +707,18 @@ async def delete_request(
     # Delete the request
     session.delete(media_request)
     session.commit()
+    
+    # Content negotiation - check if this is an HTMX request
+    if request.headers.get("HX-Request"):
+        hx_target = request.headers.get("HX-Target", "")
+        
+        if hx_target in ["requests-content", "main-content"]:
+            # From requests list page - return updated content with current filters
+            status_filter = request.query_params.get('status', 'all')
+            media_type_filter = request.query_params.get('media_type', 'all')
+            
+            # Call unified_requests to get the updated content
+            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
     
     return {"message": "Request deleted successfully"}
 

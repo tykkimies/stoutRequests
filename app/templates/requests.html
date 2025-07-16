@@ -32,49 +32,83 @@
         <!-- Primary Tab Navigation (Media Type) -->
         <div class="border-b border-gray-200 mb-6">
             <nav class="-mb-px flex space-x-8" aria-label="Media Type Tabs">
-                <button onclick="showMediaType('all')" id="media-tab-all" class="media-tab-button border-orange-500 text-orange-600 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button 
+                    hx-get="{{ base_url }}/requests?media_type=all&status=all"
+                    hx-target="#main-content"
+                    id="media-tab-all" 
+                    class="media-tab-button {% if current_media_type_filter == 'all' %}border-orange-500 text-orange-600{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %} whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     📋 All
-                    <span id="media-count-all" class="ml-2 bg-gray-100 text-gray-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                    <span id="media-count-all" class="ml-2 bg-gray-100 text-gray-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium">{{ requests|length }}</span>
                 </button>
-                <button onclick="showMediaType('movie')" id="media-tab-movie" class="media-tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button 
+                    hx-get="{{ base_url }}/requests?media_type=movie&status=all"
+                    hx-target="#main-content"
+                    id="media-tab-movie" 
+                    class="media-tab-button {% if current_media_type_filter == 'movie' %}border-orange-500 text-orange-600{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %} whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     🎬 Movies
-                    <span id="media-count-movie" class="ml-2 bg-blue-100 text-blue-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                    <span id="media-count-movie" class="ml-2 bg-blue-100 text-blue-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium">{{ requests|selectattr('media_type.value', 'equalto', 'movie')|list|length }}</span>
                 </button>
-                <button onclick="showMediaType('tv')" id="media-tab-tv" class="media-tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button 
+                    hx-get="{{ base_url }}/requests?media_type=tv&status=all"
+                    hx-target="#main-content"
+                    id="media-tab-tv" 
+                    class="media-tab-button {% if current_media_type_filter == 'tv' %}border-orange-500 text-orange-600{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %} whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     📺 TV Shows
-                    <span id="media-count-tv" class="ml-2 bg-green-100 text-green-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium"></span>
+                    <span id="media-count-tv" class="ml-2 bg-green-100 text-green-900 hidden sm:inline-block py-0.5 px-2.5 rounded-full text-xs font-medium">{{ requests|selectattr('media_type.value', 'equalto', 'tv')|list|length }}</span>
                 </button>
             </nav>
         </div>
 
+        <div id="main-content">
         <!-- Secondary Tab Navigation (Status) -->
         <div class="border-b border-gray-100 mb-6 bg-gray-50 rounded-lg p-1">
             <nav class="flex space-x-1" aria-label="Status Tabs">
-                <button onclick="showStatus('all')" id="status-tab-all" class="status-tab-button bg-white text-gray-900 shadow-sm flex-1 py-2 px-3 text-center rounded-md text-sm font-medium">
+                <button 
+                    hx-get="{{ base_url }}/requests?status=all&media_type={{ current_media_type_filter }}"
+                    hx-target="#main-content"
+                    id="status-tab-all" 
+                    class="status-tab-button {% if current_status_filter == 'all' %}bg-white text-gray-900 shadow-sm{% else %}text-gray-600 hover:text-gray-900 hover:bg-white{% endif %} flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
                     All Requests
-                    <span id="status-count-all" class="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full"></span>
+                    <span id="status-count-all" class="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{{ requests|length }}</span>
                 </button>
-                <button onclick="showStatus('PENDING')" id="status-tab-PENDING" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                <button 
+                    hx-get="{{ base_url }}/requests?status=PENDING&media_type={{ current_media_type_filter }}"
+                    hx-target="#main-content"
+                    id="status-tab-PENDING" 
+                    class="status-tab-button {% if current_status_filter == 'PENDING' %}bg-white text-gray-900 shadow-sm{% else %}text-gray-600 hover:text-gray-900 hover:bg-white{% endif %} flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
                     ⏳ Pending
-                    <span id="status-count-PENDING" class="ml-2 text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full"></span>
+                    <span id="status-count-PENDING" class="ml-2 text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full">{{ requests|selectattr('status.value', 'equalto', 'PENDING')|list|length }}</span>
                 </button>
-                <button onclick="showStatus('APPROVED')" id="status-tab-APPROVED" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                <button 
+                    hx-get="{{ base_url }}/requests?status=APPROVED&media_type={{ current_media_type_filter }}"
+                    hx-target="#main-content"
+                    id="status-tab-APPROVED" 
+                    class="status-tab-button {% if current_status_filter == 'APPROVED' %}bg-white text-gray-900 shadow-sm{% else %}text-gray-600 hover:text-gray-900 hover:bg-white{% endif %} flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
                     ✓ Approved
-                    <span id="status-count-APPROVED" class="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full"></span>
+                    <span id="status-count-APPROVED" class="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{{ requests|selectattr('status.value', 'equalto', 'APPROVED')|list|length }}</span>
                 </button>
-                <button onclick="showStatus('AVAILABLE')" id="status-tab-AVAILABLE" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                <button 
+                    hx-get="{{ base_url }}/requests?status=AVAILABLE&media_type={{ current_media_type_filter }}"
+                    hx-target="#main-content"
+                    id="status-tab-AVAILABLE" 
+                    class="status-tab-button {% if current_status_filter == 'AVAILABLE' %}bg-white text-gray-900 shadow-sm{% else %}text-gray-600 hover:text-gray-900 hover:bg-white{% endif %} flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
                     ✅ In Plex
-                    <span id="status-count-AVAILABLE" class="ml-2 text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full"></span>
+                    <span id="status-count-AVAILABLE" class="ml-2 text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">{{ requests|selectattr('status.value', 'equalto', 'AVAILABLE')|list|length }}</span>
                 </button>
                 {% if user_is_admin %}
-                <button onclick="showStatus('REJECTED')" id="status-tab-REJECTED" class="status-tab-button text-gray-600 hover:text-gray-900 hover:bg-white flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
+                <button 
+                    hx-get="{{ base_url }}/requests?status=REJECTED&media_type={{ current_media_type_filter }}"
+                    hx-target="#main-content"
+                    id="status-tab-REJECTED" 
+                    class="status-tab-button {% if current_status_filter == 'REJECTED' %}bg-white text-gray-900 shadow-sm{% else %}text-gray-600 hover:text-gray-900 hover:bg-white{% endif %} flex-1 py-2 px-3 text-center rounded-md text-sm font-medium transition-colors">
                     ✗ Rejected
-                    <span id="status-count-REJECTED" class="ml-2 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full"></span>
+                    <span id="status-count-REJECTED" class="ml-2 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">{{ requests|selectattr('status.value', 'equalto', 'REJECTED')|list|length }}</span>
                 </button>
                 {% endif %}
             </nav>
         </div>
 
+        <div id="requests-content">
         {% if requests %}
         <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {% for request in requests %}
@@ -162,14 +196,20 @@
                             {% if user_is_admin %}
                                 {% if request.status.value == 'PENDING' %}
                                 <button 
-                                    onclick="approveRequest({{ request.id }}); event.stopPropagation();"
+                                    hx-post="{{ base_url }}/requests/{{ request.id }}/approve"
+                                    hx-target="#requests-content"
+                                    hx-confirm="Approve this request?"
+                                    onclick="event.stopPropagation();"
                                     class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
                                     title="Approve Request"
                                 >
                                     ✓ Approve
                                 </button>
                                 <button 
-                                    onclick="rejectRequest({{ request.id }}); event.stopPropagation();"
+                                    hx-post="{{ base_url }}/requests/{{ request.id }}/reject"
+                                    hx-target="#requests-content"
+                                    hx-confirm="Reject this request?"
+                                    onclick="event.stopPropagation();"
                                     class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
                                     title="Reject Request"
                                 >
@@ -177,7 +217,10 @@
                                 </button>
                                 {% elif request.status.value == 'APPROVED' %}
                                 <button 
-                                    onclick="markAsAvailable({{ request.id }}); event.stopPropagation();"
+                                    hx-post="{{ base_url }}/requests/{{ request.id }}/mark-available"
+                                    hx-target="#requests-content"
+                                    hx-confirm="Mark this request as available in Plex?"
+                                    onclick="event.stopPropagation();"
                                     class="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
                                     title="Mark as Available in Plex"
                                 >
@@ -198,7 +241,10 @@
                             <!-- Delete button (visible to admins or request owner) -->
                             {% if user_is_admin or (user_lookup.get(request.id) and user_lookup[request.id].id == current_user.id) %}
                             <button 
-                                onclick="deleteRequest({{ request.id }}); event.stopPropagation();"
+                                hx-delete="{{ base_url }}/requests/{{ request.id }}/delete"
+                                hx-target="#requests-content"
+                                hx-confirm="Are you sure you want to delete this request? This action cannot be undone."
+                                onclick="event.stopPropagation();"
                                 class="bg-gray-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
                                 title="Delete Request"
                             >
@@ -229,251 +275,16 @@
             </a>
         </div>
         {% endif %}
+        </div>
+        </div>
     </div>
 </div>
 
 <script>
-// Nested tab functionality for request filtering
-let currentMediaType = 'all';
-let currentStatus = 'all';
-
-function showMediaType(mediaType) {
-    console.log('Switching to media type:', mediaType);
-    currentMediaType = mediaType;
-    
-    // Update media type tab styling
-    document.querySelectorAll('.media-tab-button').forEach(button => {
-        button.classList.remove('border-orange-500', 'text-orange-600');
-        button.classList.add('border-transparent', 'text-gray-500');
-    });
-    
-    const activeTab = document.getElementById(`media-tab-${mediaType}`);
-    if (activeTab) {
-        activeTab.classList.remove('border-transparent', 'text-gray-500');
-        activeTab.classList.add('border-orange-500', 'text-orange-600');
-    }
-    
-    // Apply combined filter
-    filterRequests();
-    updateCounts();
-}
-
-function showStatus(status) {
-    console.log('Switching to status:', status);
-    currentStatus = status;
-    
-    // Update status tab styling
-    document.querySelectorAll('.status-tab-button').forEach(button => {
-        button.classList.remove('bg-white', 'text-gray-900', 'shadow-sm');
-        button.classList.add('text-gray-600');
-    });
-    
-    const activeTab = document.getElementById(`status-tab-${status}`);
-    if (activeTab) {
-        activeTab.classList.remove('text-gray-600');
-        activeTab.classList.add('bg-white', 'text-gray-900', 'shadow-sm');
-    }
-    
-    // Apply combined filter
-    filterRequests();
-    updateCounts();
-}
-
-function filterRequests() {
-    const requestItems = document.querySelectorAll('.request-item');
-    
-    requestItems.forEach(item => {
-        const mediaType = item.getAttribute('data-media-type');
-        const status = item.getAttribute('data-status');
-        
-        let shouldShow = true;
-        
-        // Apply media type filter
-        if (currentMediaType !== 'all') {
-            shouldShow = shouldShow && (mediaType === currentMediaType);
-        }
-        
-        // Apply status filter
-        if (currentStatus !== 'all') {
-            shouldShow = shouldShow && (status === currentStatus);
-        }
-        
-        item.style.display = shouldShow ? 'block' : 'none';
-    });
-}
-
-function updateCounts() {
-    const allItems = document.querySelectorAll('.request-item');
-    const movieItems = document.querySelectorAll('.request-item[data-media-type="movie"]');
-    const tvItems = document.querySelectorAll('.request-item[data-media-type="tv"]');
-    
-    // Status counts
-    const pendingItems = document.querySelectorAll('.request-item[data-status="PENDING"]');
-    const approvedItems = document.querySelectorAll('.request-item[data-status="APPROVED"]');
-    const availableItems = document.querySelectorAll('.request-item[data-status="AVAILABLE"]');
-    const rejectedItems = document.querySelectorAll('.request-item[data-status="REJECTED"]');
-    
-    // Update media type count badges
-    const mediaCountAll = document.getElementById('media-count-all');
-    const mediaCountMovie = document.getElementById('media-count-movie');
-    const mediaCountTv = document.getElementById('media-count-tv');
-    
-    if (mediaCountAll) mediaCountAll.textContent = allItems.length;
-    if (mediaCountMovie) mediaCountMovie.textContent = movieItems.length;
-    if (mediaCountTv) mediaCountTv.textContent = tvItems.length;
-    
-    // Update status count badges
-    const statusCountAll = document.getElementById('status-count-all');
-    const statusCountPending = document.getElementById('status-count-PENDING');
-    const statusCountApproved = document.getElementById('status-count-APPROVED');
-    const statusCountAvailable = document.getElementById('status-count-AVAILABLE');
-    const statusCountRejected = document.getElementById('status-count-REJECTED');
-    
-    if (statusCountAll) statusCountAll.textContent = allItems.length;
-    if (statusCountPending) statusCountPending.textContent = pendingItems.length;
-    if (statusCountApproved) statusCountApproved.textContent = approvedItems.length;
-    if (statusCountAvailable) statusCountAvailable.textContent = availableItems.length;
-    if (statusCountRejected) statusCountRejected.textContent = rejectedItems.length;
-    
-    // Apply current filter to counts for context
-    updateFilteredCounts();
-}
-
-function updateFilteredCounts() {
-    // Get currently visible items based on filters
-    const visibleItems = document.querySelectorAll('.request-item[style="display: block;"], .request-item:not([style])');
-    const filteredCount = Array.from(visibleItems).filter(item => 
-        item.style.display !== 'none'
-    ).length;
-    
-    // Update the active status tab to show filtered count
-    const activeStatusTab = document.querySelector('.status-tab-button.bg-white .status-count-all, .status-tab-button.bg-white span[id^="status-count-"]');
-    if (activeStatusTab && currentMediaType !== 'all') {
-        // Show filtered count when media type filter is active
-        const originalCount = activeStatusTab.textContent;
-        if (!originalCount.includes('/')) {
-            activeStatusTab.textContent = `${filteredCount}/${originalCount}`;
-        }
-    }
-}
-
-// Admin actions
-async function approveRequest(requestId) {
-    try {
-        const response = await fetch(`{{ base_url }}/requests/${requestId}/approve`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (response.ok) {
-            location.reload(); // Refresh to show updated status
-        } else {
-            alert('Failed to approve request');
-        }
-    } catch (error) {
-        console.error('Error approving request:', error);
-        alert('Error approving request');
-    }
-}
-
-async function rejectRequest(requestId) {
-    if (confirm('Are you sure you want to reject this request?')) {
-        try {
-            const response = await fetch(`{{ base_url }}/requests/${requestId}/reject`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (response.ok) {
-                location.reload(); // Refresh to show updated status
-            } else {
-                alert('Failed to reject request');
-            }
-        } catch (error) {
-            console.error('Error rejecting request:', error);
-            alert('Error rejecting request');
-        }
-    }
-}
-
-async function markAsAvailable(requestId) {
-    if (confirm('Mark this request as available in Plex?')) {
-        try {
-            const response = await fetch(`{{ base_url }}/requests/${requestId}/mark-available`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (response.ok) {
-                location.reload(); // Refresh to show updated status
-            } else {
-                alert('Failed to mark as available');
-            }
-        } catch (error) {
-            console.error('Error marking as available:', error);
-            alert('Error marking as available');
-        }
-    }
-}
-
-// Full card clickability
+// Only JavaScript we need - card clickability
 function openMediaInfo(mediaType, tmdbId) {
     window.location.href = `{{ base_url }}/media/${mediaType}/${tmdbId}`;
 }
-
-// Delete request functionality
-async function deleteRequest(requestId) {
-    if (confirm('Are you sure you want to delete this request? This action cannot be undone.')) {
-        try {
-            const response = await fetch(`{{ base_url }}/requests/${requestId}/delete`, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (response.ok) {
-                // Remove the request item from the DOM
-                const requestElement = document.querySelector(`[onclick*="${requestId}"]`);
-                if (requestElement) {
-                    requestElement.style.opacity = '0';
-                    requestElement.style.transform = 'scale(0.95)';
-                    setTimeout(() => {
-                        requestElement.remove();
-                        updateCounts();
-                        
-                        // Check if no requests are left and show empty state
-                        const remainingRequests = document.querySelectorAll('.request-item');
-                        if (remainingRequests.length === 0) {
-                            location.reload();
-                        }
-                    }, 200);
-                }
-            } else {
-                const errorData = await response.json();
-                alert(`Failed to delete request: ${errorData.detail || 'Unknown error'}`);
-            }
-        } catch (error) {
-            console.error('Error deleting request:', error);
-            alert('Error deleting request. Please try again.');
-        }
-    }
-}
-
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Initializing nested request tabs');
-    updateCounts();
-    // Start with all media types and all statuses visible
-    showMediaType('all');
-    showStatus('all');
-});
 </script>
 
 <style>
