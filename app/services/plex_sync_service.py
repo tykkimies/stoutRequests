@@ -76,12 +76,25 @@ class PlexSyncService:
             
             # Get sync preferences
             settings = SettingsService.get_settings(self.session)
+            selected_libraries = settings.get_sync_library_preferences()
+            
+            self.safe_print(f"🎯 Library sync preferences: {selected_libraries}")
+            if not selected_libraries:
+                self.safe_print("📋 No specific library preferences set - will sync all libraries")
+            else:
+                self.safe_print(f"📋 Will only sync selected libraries: {', '.join(selected_libraries)}")
             
             # Process all library sections
+            available_sections = [f"{s.title} ({s.type})" for s in plex.library.sections() if s.type in ['movie', 'show']]
+            self.safe_print(f"🔍 Available Plex sections: {', '.join(available_sections)}")
+            
             for section in plex.library.sections():
                 if section.type in ['movie', 'show']:
                     # Check if this library should be synced
-                    if not settings.should_sync_library(section.title):
+                    should_sync = settings.should_sync_library(section.title)
+                    self.safe_print(f"🔍 Checking {section.title} ({section.type}): should_sync = {should_sync}")
+                    
+                    if not should_sync:
                         self.safe_print(f"⏭️  Skipping {section.title} ({section.type}) library (not in sync preferences)")
                         continue
                     

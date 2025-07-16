@@ -122,6 +122,15 @@ For non-HTMX requests, return consistent JSON:
 **Cause**: Missing HTMX triggers for content updates
 **Solution**: Include hidden refresh triggers in success responses
 
+## 🔬 Development Guidelines and Best Practices
+
+### Configuration Management
+- **IMPORTANT Configuration Guideline**: 
+  * Make sure we are using base_url settings from general settings everywhere a redirect or internal url is used
+  * This is a setting many admins will use for reverse proxy
+  * It can be left blank by default which will go to root
+  * If a user fills it in, it will append the base_url and use that for any other pages or calls on the site
+
 ## 📱 Mobile Strategy
 
 ### Current Status

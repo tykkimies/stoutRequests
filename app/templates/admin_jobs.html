@@ -1,0 +1,620 @@
+<!-- Scheduled Jobs Content -->
+<div class="space-y-6">
+    <!-- Library Sync Status Banner -->
+    {% if sync_stats %}
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Library Sync Status</h3>
+            
+            {% if sync_stats.get('error') %}
+            <div class="bg-red-50 border border-red-200 rounded-md p-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800">Library Sync Error</h3>
+                        <p class="text-sm text-red-700 mt-1">{{ sync_stats.error }}</p>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="bg-blue-50 p-4 rounded-lg">
+                    <div class="text-2xl font-bold text-blue-900">{{ sync_stats.get('total_items', 0) }}</div>
+                    <div class="text-sm text-blue-700">Total Items</div>
+                </div>
+                <div class="bg-green-50 p-4 rounded-lg">
+                    <div class="text-2xl font-bold text-green-900">{{ sync_stats.get('movies', 0) }}</div>
+                    <div class="text-sm text-green-700">Movies</div>
+                </div>
+                <div class="bg-purple-50 p-4 rounded-lg">
+                    <div class="text-2xl font-bold text-purple-900">{{ sync_stats.get('tv_shows', 0) }}</div>
+                    <div class="text-sm text-purple-700">TV Shows</div>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="text-2xl font-bold text-gray-900">
+                        {% if sync_stats.get('sync_age_hours') %}
+                            {% if sync_stats.sync_age_hours < 1 %}
+                                < 1h
+                            {% elif sync_stats.sync_age_hours < 24 %}
+                                {{ "%.0f"|format(sync_stats.sync_age_hours) }}h
+                            {% else %}
+                                {{ "%.0f"|format(sync_stats.sync_age_hours / 24) }}d
+                            {% endif %}
+                        {% else %}
+                            Never
+                        {% endif %}
+                    </div>
+                    <div class="text-sm text-gray-700">Last Sync</div>
+                </div>
+            </div>
+            
+            {% if sync_stats.get('last_sync') %}
+            <p class="text-sm text-gray-600 mt-4">
+                Last synchronized: {{ sync_stats.last_sync }}
+            </p>
+            {% else %}
+            <div class="bg-yellow-50 border border-yellow-200 rounded-md p-4 mt-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-yellow-800">No Sync Data</h3>
+                        <p class="text-sm text-yellow-700 mt-1">Library hasn't been synchronized yet. Use the "Sync Now" button below to perform initial sync.</p>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Jobs Overview -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Scheduled Jobs</h3>
+            <p class="text-sm text-gray-600 mb-6">
+                Background jobs handle time-consuming tasks like library synchronization and download monitoring.
+                Jobs run automatically at set intervals or can be triggered manually.
+            </p>
+
+            <!-- Jobs List -->
+            <div class="space-y-4">
+                {% for job_key, job in jobs.items() %}
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center space-x-3">
+                            <div class="flex-shrink-0">
+                                {% if job_key == 'library_sync' %}
+                                    <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                        </svg>
+                                    </div>
+                                {% elif job_key == 'download_status_check' %}
+                                    <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                        </svg>
+                                    </div>
+                                {% else %}
+                                    <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+                                        <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                {% endif %}
+                            </div>
+                            
+                            <div>
+                                <h4 class="text-lg font-medium text-gray-900">{{ job.name }}</h4>
+                                <p class="text-sm text-gray-500">{{ job.description }}</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center space-x-3">
+                            <!-- Status Badge -->
+                            <span id="job-status-{{ job_key }}" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if job.running %}bg-yellow-100 text-yellow-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {% if job.running %}
+                                    <svg class="w-3 h-3 mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
+                                    Running
+                                {% else %}
+                                    Idle
+                                {% endif %}
+                            </span>
+                            
+                            <!-- Trigger Button -->
+                            {% if job_key == 'library_sync' %}
+                                <button 
+                                    id="job-button-{{ job_key }}"
+                                    type="button"
+                                    class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    {% if job.running %}disabled{% endif %}
+                                    onclick="triggerLibrarySync()"
+                                >
+                                    {% if job.running %}
+                                        <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                                            <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        Running...
+                                    {% else %}
+                                        🔄 Sync Now
+                                    {% endif %}
+                                </button>
+                            {% elif job_key == 'download_status_check' %}
+                                <button 
+                                    type="button"
+                                    class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    id="job-button-{{ job_key }}"
+                                    {% if job.running %}disabled{% endif %}
+                                    onclick="triggerDownloadStatusCheck()"
+                                >
+                                    {% if job.running %}
+                                        <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                                            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                        Running...
+                                    {% else %}
+                                        📥 Check Now
+                                    {% endif %}
+                                </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <!-- Job Details -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                            <span class="font-medium text-gray-500">Interval:</span>
+                            <span class="ml-1 text-gray-900">{{ job.interval }}</span>
+                        </div>
+                        <div>
+                            <span class="font-medium text-gray-500">Last Run:</span>
+                            <span class="ml-1 text-gray-900">{{ job.last_run }}</span>
+                        </div>
+                        <div>
+                            <span class="font-medium text-gray-500">Next Run:</span>
+                            <span class="ml-1 text-gray-900">{{ job.next_run }}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Job Stats (if available) -->
+                    {% if job.stats %}
+                        <div class="mt-3 pt-3 border-t border-gray-200">
+                            <span class="text-sm font-medium text-gray-500">Last Run Statistics:</span>
+                            <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                {% if job_key == 'library_sync' %}
+                                    {% if job.stats.movies_processed is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">Movies:</span>
+                                            <span class="ml-1 text-gray-900">{{ job.stats.movies_processed or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                    {% if job.stats.shows_processed is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">TV Shows:</span>
+                                            <span class="ml-1 text-gray-900">{{ job.stats.shows_processed or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                    {% if job.stats.items_added is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">Added:</span>
+                                            <span class="ml-1 text-green-600">{{ job.stats.items_added or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                    {% if job.stats.items_updated is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">Updated:</span>
+                                            <span class="ml-1 text-blue-600">{{ job.stats.items_updated or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                {% elif job_key == 'download_status_check' %}
+                                    {% if job.stats.checked is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">Checked:</span>
+                                            <span class="ml-1 text-gray-900">{{ job.stats.checked or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                    {% if job.stats.updated_to_downloading is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">Downloading:</span>
+                                            <span class="ml-1 text-blue-600">{{ job.stats.updated_to_downloading or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                    {% if job.stats.updated_to_downloaded is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">Downloaded:</span>
+                                            <span class="ml-1 text-green-600">{{ job.stats.updated_to_downloaded or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                    {% if job.stats.errors is defined %}
+                                        <div>
+                                            <span class="font-medium text-gray-500">Errors:</span>
+                                            <span class="ml-1 text-red-600">{{ job.stats.errors or 0 }}</span>
+                                        </div>
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Job Trigger Result Area -->
+    <div id="job-trigger-result"></div>
+
+    <!-- How It Works -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Background Jobs Information</h3>
+            <div class="prose prose-sm text-gray-600">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h4 class="font-medium text-gray-900 mb-2">📚 Library Sync</h4>
+                        <ul class="space-y-1 text-sm">
+                            <li>• Syncs your Plex library to the local database</li>
+                            <li>• Runs automatically or can be triggered manually</li>
+                            <li>• Enables instant "On Plex" status checks</li>
+                            <li>• Updates request statuses when content becomes available</li>
+                            <li>• Respects library sync preferences from Media Servers tab</li>
+                        </ul>
+                    </div>
+                    
+                    <div>
+                        <h4 class="font-medium text-gray-900 mb-2">📥 Download Status Check</h4>
+                        <ul class="space-y-1 text-sm">
+                            <li>• Monitors Radarr/Sonarr for download progress</li>
+                            <li>• Updates request statuses automatically</li>
+                            <li>• Tracks downloading → downloaded transitions</li>
+                            <li>• Runs every 2 minutes when configured</li>
+                            <li>• Provides real-time download status updates</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+                    <h4 class="font-medium text-blue-900 mb-2">💡 Performance Notes</h4>
+                    <ul class="text-sm text-blue-800 space-y-1">
+                        <li>• Jobs run in the background and won't block the web interface</li>
+                        <li>• Large libraries may take several minutes to sync completely</li>
+                        <li>• Multiple manual triggers of the same job are prevented to avoid conflicts</li>
+                        <li>• Job status updates automatically when tasks complete</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Auto-refresh job status every 10 seconds when on jobs tab (faster for better feedback)
+let jobStatusInterval;
+
+function startJobStatusAutoRefresh() {
+    // Clear any existing interval
+    if (jobStatusInterval) {
+        clearInterval(jobStatusInterval);
+    }
+    
+    // Set up new interval - more frequent updates when jobs are running
+    jobStatusInterval = setInterval(() => {
+        // Only refresh if we're still on the jobs tab
+        if (currentAdminTab === 'jobs') {
+            console.log('🔄 Auto-refreshing job status...');
+            htmx.ajax('GET', '{{ base_url }}/admin/jobs/content', '#jobs-frame');
+        } else {
+            // Clear interval if no longer on jobs tab
+            clearInterval(jobStatusInterval);
+        }
+    }, 10000); // 10 seconds for better feedback
+}
+
+function stopJobStatusAutoRefresh() {
+    if (jobStatusInterval) {
+        clearInterval(jobStatusInterval);
+        jobStatusInterval = null;
+    }
+}
+
+// Start auto-refresh when jobs content loads
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof currentAdminTab !== 'undefined' && currentAdminTab === 'jobs') {
+        startJobStatusAutoRefresh();
+    }
+});
+
+// Also start when switching to jobs tab (this will be called by the tab switch handler)
+if (typeof handleTabSwitch !== 'undefined') {
+    const originalHandleTabSwitch = handleTabSwitch;
+    handleTabSwitch = function(tabName) {
+        originalHandleTabSwitch(tabName);
+        
+        if (tabName === 'jobs') {
+            startJobStatusAutoRefresh();
+        } else {
+            stopJobStatusAutoRefresh();
+        }
+    };
+}
+
+// Function to update job status UI
+function updateJobStatus(jobKey, isRunning) {
+    const statusBadge = document.getElementById(`job-status-${jobKey}`);
+    const button = document.getElementById(`job-button-${jobKey}`);
+    
+    if (statusBadge) {
+        if (isRunning) {
+            statusBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800';
+            statusBadge.innerHTML = `
+                <svg class="w-3 h-3 mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Running
+            `;
+        } else {
+            statusBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800';
+            statusBadge.innerHTML = 'Idle';
+        }
+    }
+    
+    if (button) {
+        if (isRunning) {
+            button.disabled = true;
+            button.innerHTML = `
+                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Running...
+            `;
+        } else {
+            button.disabled = false;
+            button.innerHTML = '🔄 Sync Now';
+        }
+    }
+}
+
+// Function to trigger library sync with immediate UI feedback
+async function triggerLibrarySync() {
+    const button = document.getElementById('job-button-library_sync');
+    const resultDiv = document.getElementById('job-trigger-result');
+    
+    try {
+        console.log('🔄 Triggering library sync...');
+        
+        // Disable button but don't change status yet - wait for confirmation
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = `
+                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Starting...
+            `;
+        }
+        
+        // Show "starting" message
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-blue-400 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                            <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-blue-700">Starting library sync...</p>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Make the actual request (no HX-Request header so we get JSON)
+        const response = await fetch('{{ base_url }}/admin/jobs/trigger-library-sync', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Backend response:', result);
+            
+            if (result.success) {
+                // Only update status to running AFTER we get confirmation from backend
+                console.log('✅ Library sync request successful - updating UI to running state');
+                updateJobStatus('library_sync', true);
+                
+                // Show success message
+                if (resultDiv) {
+                    const stats = result.stats || {};
+                    const movies = stats.movies_processed || 0;
+                    const shows = stats.shows_processed || 0;
+                    const added = stats.items_added || 0;
+                    const updated = stats.items_updated || 0;
+                    
+                    resultDiv.innerHTML = `
+                        <div class="p-4 bg-green-50 border border-green-200 rounded-md">
+                            <div class="flex">
+                                <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                <div class="ml-3 text-sm text-green-700">
+                                    <p><strong>Library sync started successfully!</strong></p>
+                                    <p>Sync is now running in the background. Status will update automatically.</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Auto-clear message after 5 seconds
+                    setTimeout(() => {
+                        resultDiv.innerHTML = '';
+                    }, 5000);
+                }
+            } else {
+                throw new Error(result.message || 'Unknown error');
+            }
+            
+        } else {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error triggering library sync:', error);
+        
+        // Reset UI on error
+        updateJobStatus('library_sync', false);
+        
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-red-700">Error starting library sync: ${error.message}</p>
+                    </div>
+                </div>
+            `;
+        }
+    }
+}
+
+// Function to trigger download status check with immediate UI feedback
+async function triggerDownloadStatusCheck() {
+    const button = document.getElementById('job-button-download_status_check');
+    const resultDiv = document.getElementById('job-trigger-result');
+    
+    try {
+        console.log('🔄 Triggering download status check...');
+        
+        // Disable button but don't change status yet - wait for confirmation
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = `
+                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Starting...
+            `;
+        }
+        
+        // Show "starting" message
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-blue-400 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                            <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-blue-700">Starting download status check...</p>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Make the actual request (no HX-Request header so we get JSON)
+        const response = await fetch('{{ base_url }}/admin/jobs/trigger-download-status', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Backend response:', result);
+            
+            if (result.success) {
+                // Only update status to running AFTER we get confirmation from backend
+                console.log('✅ Download status check request successful - updating UI to running state');
+                updateJobStatus('download_status_check', true);
+                
+                // Show success message
+                if (resultDiv) {
+                    const stats = result.stats || {};
+                    const checked = stats.checked || 0;
+                    const downloading = stats.updated_to_downloading || 0;
+                    const downloaded = stats.updated_to_downloaded || 0;
+                    const errors = stats.errors || 0;
+                    
+                    const hasErrors = errors > 0;
+                    const bgColor = hasErrors ? 'bg-yellow-50' : 'bg-green-50';
+                    const borderColor = hasErrors ? 'border-yellow-200' : 'border-green-200';
+                    const iconColor = hasErrors ? 'text-yellow-400' : 'text-green-400';
+                    const textColor = hasErrors ? 'text-yellow-700' : 'text-green-700';
+                    const statusText = hasErrors ? 'completed with errors' : 'completed successfully';
+                    
+                    const errorInfo = hasErrors ? ` ${errors} errors occurred.` : '';
+                    
+                    resultDiv.innerHTML = `
+                        <div class="p-4 ${bgColor} border ${borderColor} rounded-md">
+                            <div class="flex">
+                                <svg class="w-5 h-5 ${iconColor}" fill="currentColor" viewBox="0 0 20 20">
+                                    ${hasErrors ? 
+                                        '<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>' :
+                                        '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>'
+                                    }
+                                </svg>
+                                <div class="ml-3 text-sm ${textColor}">
+                                    <p><strong>Download status check ${statusText}!</strong></p>
+                                    <p>Checked ${checked} requests. Updated ${downloading} to downloading, ${downloaded} to downloaded.${errorInfo}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Auto-clear message after 5 seconds
+                    setTimeout(() => {
+                        resultDiv.innerHTML = '';
+                    }, 5000);
+                }
+            } else {
+                throw new Error(result.message || 'Unknown error');
+            }
+            
+        } else {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error triggering download status check:', error);
+        
+        // Reset UI on error
+        updateJobStatus('download_status_check', false);
+        
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-red-700">Error starting download status check: ${error.message}</p>
+                    </div>
+                </div>
+            `;
+        }
+    }
+}
+</script>

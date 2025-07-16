@@ -253,7 +253,8 @@ async def unified_requests(
         user_lookup = {}  # Dictionary to store user info by request ID
         
         from ..core.permissions import is_user_admin
-        if is_user_admin(current_user, session):
+        user_is_admin = is_user_admin(current_user, session)
+        if user_is_admin:
             # Admins always see all requests
             statement = select(MediaRequest, User).join(
                 User, MediaRequest.user_id == User.id
@@ -300,8 +301,9 @@ async def unified_requests(
                 "requests": requests_with_users, 
                 "current_user": current_user,
                 "user_lookup": user_lookup,
-                "show_request_user": is_user_admin(current_user, session) or visibility_config['can_view_request_user'],
-                "can_view_all_requests": is_user_admin(current_user, session) or visibility_config['can_view_all_requests']
+                "user_is_admin": user_is_admin,
+                "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
+                "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests']
             }
         )
         
@@ -323,6 +325,7 @@ async def unified_requests(
                 "requests": requests, 
                 "current_user": current_user,
                 "user_lookup": user_lookup,
+                "user_is_admin": False,  # In error case, default to False for safety
                 "show_request_user": False,
                 "can_view_all_requests": False
             }

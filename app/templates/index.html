@@ -1208,7 +1208,7 @@ document.addEventListener('DOMContentLoaded', function() {
         window.history.pushState(
             { view: 'category', categoryId: 'filtered-results' }, 
             'Filtered Results - Stout Requests', 
-            currentUrl.toString()
+            buildAppUrlWithParams('/', { view: 'filtered-results' })
         );
         
         // Hide reorder button in filtered view
@@ -1358,12 +1358,10 @@ document.addEventListener('DOMContentLoaded', function() {
         clearCategoryContext();
         
         // Update browser history to clear all parameters
-        const currentUrl = new URL(window.location);
-        // Keep only essential path, remove all query parameters
         window.history.pushState(
             { view: 'categories' }, 
             'Stout Requests', 
-            currentUrl.pathname
+            buildAppUrl('/')
         );
         
         const searchInput = document.getElementById('search-input');
@@ -1505,12 +1503,10 @@ function showFilteredResultsAsCategory(categoryId, mediaType, selectedContentSou
     const config = categoryConfigs[categoryId] || {};
     
     // Push state to browser history for proper back button behavior (using same pattern as category expansion)
-    const currentUrl = new URL(window.location);
-    currentUrl.searchParams.set('view', categoryId);
     window.history.pushState(
         { view: 'category', categoryId: categoryId }, 
         `${config.displayName || getCategoryDisplayName(categoryId)} - Stout Requests`, 
-        currentUrl
+        buildAppUrlWithParams('/', { view: categoryId })
     );
     
     // Hide reorder button in expanded view
@@ -1644,12 +1640,10 @@ function doExpandCategoryLegacy(categoryId) {
     showFilterContext(categoryId);
     
     // Push state to browser history for proper back button behavior
-    const currentUrl = new URL(window.location);
-    currentUrl.searchParams.set('view', categoryId);
     window.history.pushState(
         { view: 'category', categoryId: categoryId }, 
         `${getCategoryDisplayName(categoryId)} - Stout Requests`, 
-        currentUrl
+        buildAppUrlWithParams('/', { view: categoryId })
     );
     
     // Add expanding animation to current category
@@ -1699,32 +1693,140 @@ function collapseCategory(categoryId) {
     const reorderButton = document.getElementById('reorder-toggle');
     
     // Update browser history to remove the view parameter
-    const currentUrl = new URL(window.location);
-    currentUrl.searchParams.delete('view');
     window.history.pushState(
         { view: 'categories' }, 
         'Stout Requests', 
-        currentUrl
+        buildAppUrl('/')
     );
     
     // Check if this is a virtual category (created by unified approach) or legacy category
     const expandedVirtualSection = document.querySelector(`.category-section.expanded[data-category="${categoryId}"]`);
     const allOriginalCategories = document.querySelectorAll('.category-section:not(.expanded)');
     
+    console.log(`🔍 Virtual section found: ${!!expandedVirtualSection}`);
+    console.log(`🔍 All original categories count: ${allOriginalCategories.length}`);
+    
     if (expandedVirtualSection) {
-        // This is a virtual category created by unified approach or filtered results
-        console.log(`🔧 Removing virtual category ${categoryId}`);
+        // Check if this is a true virtual category or an original category that was expanded
+        const isOriginalCategory = expandedVirtualSection.querySelector(`#${categoryId}-content`);
         
-        // Remove the virtual category
-        expandedVirtualSection.remove();
+        if (isOriginalCategory) {
+            // This is an original category that was expanded in place - don't remove it!
+            console.log(`🔧 Restoring original expanded category ${categoryId}`);
+            
+            // Just remove the expanded class and restore it
+            expandedVirtualSection.classList.remove('expanded');
+            expandedVirtualSection.style.display = 'block';
+            
+            // Reset button text
+            const expandButton = expandedVirtualSection.querySelector('button[onclick*="expandCategory"]');
+            if (expandButton) {
+                expandButton.innerHTML = 'View All →';
+            }
+            
+            // Reload content for the original category since it was expanded to grid view
+            const originalContentDiv = expandedVirtualSection.querySelector(`#${categoryId}-content`);
+            if (originalContentDiv) {
+                console.log(`🔄 Restoring horizontal scroll for category ${categoryId}...`);
+                
+                // IMPORTANT: Reset the content div to horizontal scroll mode
+                originalContentDiv.className = 'horizontal-scroll';
+                
+                // Clear any grid view classes/structure and restore HTMX attributes
+                const htmxEndpoint = originalContentDiv.getAttribute('hx-get');
+                if (!htmxEndpoint) {
+                    // If hx-get was lost, try to restore it from category config
+                    const endpoint = getEndpointForCategory(categoryId);
+                    if (endpoint) {
+                        originalContentDiv.setAttribute('hx-get', `{{ base_url }}${endpoint}`);
+                        originalContentDiv.setAttribute('hx-trigger', 'load');
+                        originalContentDiv.setAttribute('hx-target', 'this');
+                    }
+                }
+                
+                console.log(`🔄 HTMX endpoint: ${originalContentDiv.getAttribute('hx-get')}`);
+                
+                // Show loading state for horizontal scroll
+                originalContentDiv.innerHTML = `
+                    <div class="text-center py-8">
+                        <div class="animate-spin w-5 h-5 border-2 border-gray-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                        <p class="text-gray-500 text-sm">Loading horizontal scroll...</p>
+                    </div>
+                `;
+                
+                // Fetch horizontal scroll content (with limit=20 for horizontal)
+                const fetchEndpoint = originalContentDiv.getAttribute('hx-get');
+                if (fetchEndpoint) {
+                    fetch(fetchEndpoint)
+                        .then(response => response.text())
+                        .then(html => {
+                            console.log(`✅ Restored horizontal scroll for ${categoryId}`);
+                            originalContentDiv.innerHTML = html;
+                        })
+                        .catch(error => {
+                            console.error(`❌ Error restoring horizontal scroll for ${categoryId}:`, error);
+                            originalContentDiv.innerHTML = `
+                                <div class="text-center py-8 text-red-600">
+                                    <p>Error loading horizontal scroll</p>
+                                </div>
+                            `;
+                        });
+                }
+            }
+        } else {
+            // This is a true virtual category created by unified approach
+            console.log(`🔧 Removing virtual category ${categoryId}`);
+            
+            // Remove the virtual category
+            expandedVirtualSection.remove();
+        }
         
-        // Show all original categories again
-        setTimeout(() => {
-            document.querySelectorAll('.category-section').forEach(section => {
-                section.style.display = 'block';
-                section.classList.remove('hidden-for-expansion');
-            });
-        }, 100);
+        // Show all original categories again (immediately, no delay)
+        document.querySelectorAll('.category-section').forEach(section => {
+            section.style.display = 'block';
+            section.classList.remove('hidden-for-expansion');
+        });
+        
+        // IMPORTANT: Need to reload content for the original category
+        console.log(`🔄 Need to reload content for original category: ${categoryId}`);
+        const originalContentDiv = document.querySelector(`#${categoryId}-content`);
+        if (originalContentDiv) {
+            console.log(`🔄 Found content div, manually reloading content...`);
+            
+            // Get the original HTMX endpoint from the hx-get attribute
+            const htmxEndpoint = originalContentDiv.getAttribute('hx-get');
+            console.log(`🔄 HTMX endpoint: ${htmxEndpoint}`);
+            
+            if (htmxEndpoint) {
+                // Show loading state
+                originalContentDiv.innerHTML = `
+                    <div class="text-center py-8">
+                        <div class="animate-spin w-5 h-5 border-2 border-gray-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                        <p class="text-gray-500 text-sm">Reloading...</p>
+                    </div>
+                `;
+                
+                // Manually fetch and reload content
+                fetch(htmxEndpoint)
+                    .then(response => response.text())
+                    .then(html => {
+                        console.log(`✅ Reloaded content for ${categoryId}`);
+                        originalContentDiv.innerHTML = html;
+                    })
+                    .catch(error => {
+                        console.error(`❌ Error reloading content for ${categoryId}:`, error);
+                        originalContentDiv.innerHTML = `
+                            <div class="text-center py-8 text-red-600">
+                                <p>Error reloading content</p>
+                            </div>
+                        `;
+                    });
+            } else {
+                console.log(`❌ No hx-get attribute found on content div`);
+            }
+        } else {
+            console.log(`❌ Content div #${categoryId}-content not found`);
+        }
         
     } else {
         // This is a legacy category that was expanded in place
@@ -1748,18 +1850,16 @@ function collapseCategory(categoryId) {
             categorySection.classList.remove('expanded');
         }
         
-        // Show all categories again with smooth animation
-        setTimeout(() => {
-            allCategories.forEach(section => {
-                section.style.display = 'block';
-                section.classList.remove('hidden-for-expansion');
-            });
-            
-            // Clean up animation classes
-            if (categorySection) {
-                categorySection.classList.remove('collapsing');
-            }
-        }, 100);
+        // Show all categories again immediately (no delay to prevent race conditions)
+        allCategories.forEach(section => {
+            section.style.display = 'block';
+            section.classList.remove('hidden-for-expansion');
+        });
+        
+        // Clean up animation classes
+        if (categorySection) {
+            categorySection.classList.remove('collapsing');
+        }
         
         // Update button text
         if (expandButton) {
@@ -1769,6 +1869,7 @@ function collapseCategory(categoryId) {
         // Reload horizontal scroll data for legacy categories
         if (contentDiv) {
             const categoryParams = getCategoryParams(categoryId);
+            console.log(`🔧 Category params for ${categoryId}: ${categoryParams}`);
             
             // Show loading state
             contentDiv.innerHTML = `
@@ -1779,9 +1880,19 @@ function collapseCategory(categoryId) {
             `;
             
             // Fetch horizontal scroll data
-            fetch(`{{ base_url }}/discover/category?${categoryParams}&limit=20`)
-                .then(response => response.text())
+            const fetchUrl = `{{ base_url }}/discover/category?${categoryParams}&limit=20`;
+            console.log(`🔄 Reloading horizontal scroll for ${categoryId}, URL: ${fetchUrl}`);
+            
+            fetch(fetchUrl)
+                .then(response => {
+                    console.log(`📥 Response status: ${response.status}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    return response.text();
+                })
                 .then(html => {
+                    console.log(`✅ Received HTML content (${html.length} chars)`);
                     contentDiv.innerHTML = html;
                     // Add fade-in animation to loaded content
                     contentDiv.classList.add('category-content-loaded');
@@ -1790,9 +1901,11 @@ function collapseCategory(categoryId) {
                     }, 500);
                 })
                 .catch(error => {
+                    console.error(`❌ Error reloading horizontal scroll for ${categoryId}:`, error);
                     contentDiv.innerHTML = `
                         <div class="text-center py-8 text-red-600">
-                            <p>Error loading content</p>
+                            <p>Error loading content: ${error.message}</p>
+                            <p class="text-xs mt-2">URL: ${fetchUrl}</p>
                         </div>
                     `;
                 });
@@ -3500,6 +3613,40 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         }, 3000);
+    }
+    
+    // Helper function to build URLs that respect base_url setting
+    function buildAppUrl(path) {
+        const baseUrl = '{{ base_url }}';
+        if (!path) {
+            return baseUrl || '/';
+        }
+        
+        // Ensure path starts with /
+        if (!path.startsWith('/')) {
+            path = '/' + path;
+        }
+        
+        // Combine base URL and path
+        if (baseUrl) {
+            return baseUrl.replace(/\/$/, '') + path;
+        } else {
+            return path;
+        }
+    }
+    
+    // Helper function to build URLs with query parameters that respect base_url
+    function buildAppUrlWithParams(path, params = {}) {
+        const url = new URL(buildAppUrl(path), window.location.origin);
+        
+        // Add query parameters
+        Object.keys(params).forEach(key => {
+            if (params[key] !== null && params[key] !== undefined) {
+                url.searchParams.set(key, params[key]);
+            }
+        });
+        
+        return url.pathname + url.search;
     }
 });
 </script>

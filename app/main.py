@@ -34,6 +34,61 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Stout Requests", version="1.0.0", lifespan=lifespan)
 
+# Add middleware to handle base_url routing
+@app.middleware("http") 
+async def base_url_routing_middleware(request: Request, call_next):
+    """Handle dynamic base_url routing for reverse proxy support"""
+    from .services.settings_service import SettingsService
+    
+    try:
+        # Get the configured base_url (only if settings exist)
+        base_url = None
+        try:
+            with Session(engine) as session:
+                if SettingsService.is_configured(session):
+                    base_url = SettingsService.get_base_url(session)
+        except:
+            # Database might not be initialized yet, continue without base_url
+            pass
+        
+        if base_url:
+            # Remove leading/trailing slashes for consistency
+            base_url = base_url.strip('/')
+            request_path = request.url.path
+            
+            # Handle requests under the base_url path
+            if request_path.startswith(f'/{base_url}/'):
+                # Strip base_url from path for internal routing
+                new_path = request_path[len(base_url) + 1:]
+                if not new_path.startswith('/'):
+                    new_path = '/' + new_path
+                
+                # Update request scope for internal routing
+                request.scope["path"] = new_path
+                request.scope["root_path"] = f"/{base_url}"
+                
+            elif request_path == f'/{base_url}':
+                # Handle exact base_url match (redirect to base_url/)
+                from fastapi.responses import RedirectResponse
+                return RedirectResponse(url=f"/{base_url}/")
+                
+            elif request_path == f'/{base_url}/':
+                # Handle base_url/ -> root
+                request.scope["path"] = "/"
+                request.scope["root_path"] = f"/{base_url}"
+                
+            elif not request_path.startswith('/static') and request_path != '/' and not request_path.startswith('/setup'):
+                # For other requests not under base_url (except static, root, and setup), redirect to base_url
+                from fastapi.responses import RedirectResponse
+                return RedirectResponse(url=f"/{base_url}{request_path}")
+    
+    except Exception as e:
+        # If there's any error, continue without base_url handling
+        pass
+    
+    response = await call_next(request)
+    return response
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

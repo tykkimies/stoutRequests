@@ -270,7 +270,7 @@ async def create_test_user(
         existing_user = session.exec(select(User).where(User.username == username)).first()
         if existing_user:
             return RedirectResponse(
-                url=f"/admin?error=Username '{username}' already exists",
+                url=build_app_url(f"/admin?error=Username '{username}' already exists"),
                 status_code=303
             )
         
@@ -297,13 +297,13 @@ async def create_test_user(
         session.refresh(test_user)
         
         return RedirectResponse(
-            url=f"/admin?success=Test user '{username}' created successfully",
+            url=build_app_url(f"/admin?success=Test user '{username}' created successfully"),
             status_code=303
         )
         
     except Exception as e:
         return RedirectResponse(
-            url=f"/admin?error=Failed to create test user: {str(e)}",
+            url=build_app_url(f"/admin?error=Failed to create test user: {str(e)}"),
             status_code=303
         )
 
@@ -320,7 +320,7 @@ async def test_login(
         test_user = session.get(User, user_id)
         if not test_user:
             return RedirectResponse(
-                url="/admin?error=Test user not found",
+                url=build_app_url("/admin?error=Test user not found"),
                 status_code=303
             )
         
@@ -329,7 +329,7 @@ async def test_login(
         access_token = create_access_token(data={"sub": test_user.username})
         
         # Create response with redirect to logout first, then login as test user
-        response = RedirectResponse(url=f"/test-user-redirect?token={access_token}&username={test_user.username}", status_code=303)
+        response = RedirectResponse(url=build_app_url(f"/test-user-redirect?token={access_token}&username={test_user.username}"), status_code=303)
         
         # Clear all possible existing auth cookies
         response.delete_cookie("access_token", path="/")
@@ -349,7 +349,7 @@ async def test_login(
         
     except Exception as e:
         return RedirectResponse(
-            url=f"/admin?error=Failed to switch to test user: {str(e)}",
+            url=build_app_url(f"/admin?error=Failed to switch to test user: {str(e)}"),
             status_code=303
         )
 
@@ -775,152 +775,8 @@ async def users_list(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/sync/status")
-async def get_sync_status(
-    current_user: User = Depends(get_current_admin_user_flexible),
-    session: Session = Depends(get_session)
-):
-    """Get Plex library sync status"""
-    sync_service = PlexSyncService(session)
-    stats = sync_service.get_sync_stats()
-    return stats
 
 
-@router.post("/sync/trigger")
-async def trigger_sync(
-    request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
-    session: Session = Depends(get_session)
-):
-    """Manually trigger Plex library sync"""
-    try:
-        sync_service = PlexSyncService(session)
-        result = await sync_service.sync_library()
-        
-        # Content negotiation
-        if request.headers.get("HX-Request"):
-            # HTMX web client - return HTML
-            current_base_url = SettingsService.get_base_url(session)
-            from fastapi.responses import HTMLResponse
-            if result.get('error'):
-                return HTMLResponse(f"""
-                    <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
-                         hx-get="{current_base_url}/admin/clear-feedback" 
-                     hx-trigger="load delay:5s" 
-                     hx-swap="outerHTML">
-                    <div class="flex">
-                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
-                        </svg>
-                        <p class="ml-3 text-sm text-red-700">Sync failed: {result.get('error')}</p>
-                    </div>
-                </div>
-            """)
-            else:
-                # HTMX success case
-                stats = result
-                movies = stats.get('movies_processed', 0)
-                shows = stats.get('shows_processed', 0) 
-                added = stats.get('items_added', 0)
-                updated = stats.get('items_updated', 0)
-                
-                return HTMLResponse(f"""
-                    <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
-                         hx-get="{current_base_url}/admin/clear-feedback" 
-                         hx-trigger="load delay:5s" 
-                         hx-swap="outerHTML">
-                        <div class="flex">
-                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                            </svg>
-                            <div class="ml-3 text-sm text-green-700">
-                                <p><strong>Library sync completed!</strong></p>
-                                <p>Processed {movies} movies and {shows} TV shows. Added {added}, updated {updated} items.</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div hx-get="{current_base_url}/admin/library/content" hx-target="#libraries-frame" hx-trigger="load delay:1s" style="display: none;"></div>
-                """)
-        else:
-            # API client - return JSON
-            if result.get('error'):
-                return {"success": False, "error": result.get('error')}
-            else:
-                return {"success": True, "data": result}
-    except Exception as e:
-        if request.headers.get("HX-Request"):
-            # HTMX web client - return HTML
-            current_base_url = SettingsService.get_base_url(session)
-            from fastapi.responses import HTMLResponse
-            return HTMLResponse(f"""
-                <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
-                     hx-get="{current_base_url}/admin/clear-feedback" 
-                     hx-trigger="load delay:5s" 
-                     hx-swap="outerHTML">
-                    <div class="flex">
-                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
-                        </svg>
-                        <p class="ml-3 text-sm text-red-700">Sync failed: {str(e)}</p>
-                    </div>
-                </div>
-            """)
-        else:
-            # API client - return JSON error
-            return {"success": False, "error": f"Sync failed: {str(e)}"}
-
-
-@router.get("/library", response_class=HTMLResponse)
-async def library_management(
-    request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
-    session: Session = Depends(get_session)
-):
-    """Library management page with sync controls (full page)"""
-    return await _get_library_content(request, current_user, session, full_page=True)
-
-
-@router.get("/library/content", response_class=HTMLResponse)
-async def library_management_content(
-    request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
-    session: Session = Depends(get_session)
-):
-    """Library management content for HTMX tab loading (content only)"""
-    return await _get_library_content(request, current_user, session, full_page=False)
-
-
-async def _get_library_content(
-    request: Request,
-    current_user: User,
-    session: Session,
-    full_page: bool = True
-):
-    """Library management page with sync controls"""
-    try:
-        sync_service = PlexSyncService(session)
-        sync_stats = sync_service.get_sync_stats()
-        
-        template_name = "admin_library.html" if full_page else "admin_library_content.html"
-        return create_template_response(
-            template_name,
-            {
-                "request": request,
-                "current_user": current_user,
-                "sync_stats": sync_stats
-            }
-        )
-    except Exception as e:
-        print(f"Error in library management: {e}")
-        template_name = "admin_library.html" if full_page else "admin_library_content.html"
-        return create_template_response(
-            template_name,
-            {
-                "request": request,
-                "current_user": current_user,
-                "sync_stats": {"error": str(e)}
-            }
-        )
 
 
 @router.post("/users/create-local")
@@ -1032,6 +888,71 @@ async def get_library_preferences(
             status_code=500,
             detail=f"Failed to get library preferences: {str(e)}"
         )
+
+
+@router.post("/library/preferences")
+async def update_library_preferences(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Update library sync preferences"""
+    try:
+        # Get JSON data from request
+        data = await request.json()
+        selected_libraries = data.get('selected_libraries', [])
+        
+        # Get current settings
+        settings = SettingsService.get_settings(session)
+        
+        # Update sync preferences
+        settings.set_sync_library_preferences(selected_libraries)
+        settings.updated_at = datetime.utcnow()
+        
+        session.add(settings)
+        session.commit()
+        
+        # Format message
+        if selected_libraries:
+            message = f"Library sync preferences updated. Will sync {len(selected_libraries)} selected libraries."
+        else:
+            message = "Library sync preferences cleared. Will sync all libraries."
+        
+        return {
+            "message": message,
+            "selected_libraries": selected_libraries
+        }
+        
+    except Exception as e:
+        print(f"Error updating library preferences: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update library preferences"
+        )
+
+
+@router.get("/debug/sync-preferences")
+async def debug_sync_preferences(
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Debug endpoint to check current sync preferences"""
+    try:
+        settings = SettingsService.get_settings(session)
+        selected_libraries = settings.get_sync_library_preferences()
+        
+        # Also get available libraries for comparison
+        plex_service = PlexService(session)
+        available_libraries = plex_service.get_available_libraries()
+        
+        return {
+            "selected_libraries": selected_libraries,
+            "available_libraries": [{"title": lib["title"], "type": lib["type"]} for lib in available_libraries],
+            "raw_sync_library_preferences": settings.sync_library_preferences,
+            "should_sync_results": {lib["title"]: settings.should_sync_library(lib["title"]) for lib in available_libraries}
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @router.get("/clear-feedback")
@@ -1157,45 +1078,6 @@ async def get_service_status(
 
 
 
-@router.post("/library/preferences")
-async def update_library_preferences(
-    request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
-    session: Session = Depends(get_session)
-):
-    """Update library sync preferences"""
-    try:
-        # Get JSON data from request
-        data = await request.json()
-        selected_libraries = data.get('selected_libraries', [])
-        
-        # Get current settings
-        settings = SettingsService.get_settings(session)
-        
-        # Update sync preferences
-        settings.set_sync_library_preferences(selected_libraries)
-        settings.updated_at = datetime.utcnow()
-        
-        session.add(settings)
-        session.commit()
-        
-        # Format message
-        if selected_libraries:
-            message = f"Library sync preferences updated. Will sync {len(selected_libraries)} selected libraries."
-        else:
-            message = "Library sync preferences cleared. Will sync all libraries."
-        
-        return {
-            "message": message,
-            "selected_libraries": selected_libraries
-        }
-        
-    except Exception as e:
-        print(f"Error updating library preferences: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to update library preferences"
-        )
 
 
 # ===== USER PERMISSIONS MANAGEMENT =====
@@ -1631,33 +1513,127 @@ async def admin_jobs_content(
     try:
         from ..services.background_jobs import background_jobs
         
-        # Get job status information
-        jobs_info = {
-            "download_status_check": {
-                "name": "Download Status Check",
-                "description": "Checks Radarr/Sonarr for download status updates",
-                "interval": "2 minutes",
-                "running": background_jobs.running,
-                "last_run": background_jobs.last_download_check.strftime("%Y-%m-%d %H:%M:%S UTC") if background_jobs.last_download_check else "Never",
-                "next_run": None  # Will be calculated
-            }
-        }
+        # Get all job statuses from the background job manager
+        all_jobs = background_jobs.get_all_jobs_status()
         
-        # Calculate next run time
-        if background_jobs.last_download_check:
-            from datetime import timedelta
-            next_run = background_jobs.last_download_check + timedelta(seconds=background_jobs.download_status_interval)
-            jobs_info["download_status_check"]["next_run"] = next_run.strftime("%Y-%m-%d %H:%M:%S UTC")
+        # Get library sync stats for display
+        sync_stats = {}
+        try:
+            sync_service = PlexSyncService(session)
+            sync_stats = sync_service.get_sync_stats()
+        except Exception as e:
+            print(f"Error getting sync stats: {e}")
+            sync_stats = {"error": str(e)}
+        
+        # Format the jobs for display
+        jobs_info = {}
+        for job_name, job_data in all_jobs.items():
+            jobs_info[job_name] = {
+                "name": job_data.get('name', job_name.replace('_', ' ').title()),
+                "description": job_data.get('description', ''),
+                "interval": f"{job_data.get('interval_seconds', 0) // 60} minutes" if job_data.get('interval_seconds') else "Manual",
+                "running": job_data.get('running', False),
+                "last_run": job_data.get('last_run').strftime("%Y-%m-%d %H:%M:%S UTC") if job_data.get('last_run') else "Never",
+                "next_run": job_data.get('next_run').strftime("%Y-%m-%d %H:%M:%S UTC") if job_data.get('next_run') else "Manual",
+                "stats": job_data.get('stats', {})
+            }
         
         return create_template_response("admin_jobs.html", {
             "request": request,
             "current_user": current_user,
-            "jobs": jobs_info
+            "jobs": jobs_info,
+            "sync_stats": sync_stats
         })
         
     except Exception as e:
         print(f"Error loading jobs content: {e}")
         return HTMLResponse(f'<div class="text-red-600">Error loading jobs: {str(e)}</div>')
+
+
+@router.post("/jobs/trigger-library-sync")
+async def trigger_library_sync_job(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Manually trigger library sync job"""
+    try:
+        from ..services.background_jobs import trigger_library_sync
+        
+        result = await trigger_library_sync()
+        
+        # Content negotiation
+        if request.headers.get("HX-Request"):
+            # HTMX web client - return HTML
+            base_url = SettingsService.get_base_url(session)
+            
+            if result.get('success'):
+                stats = result.get('stats', {})
+                movies = stats.get('movies_processed', 0)
+                shows = stats.get('shows_processed', 0) 
+                added = stats.get('items_added', 0)
+                updated = stats.get('items_updated', 0)
+                
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
+                         hx-get="{base_url}/admin/clear-feedback"
+                         hx-trigger="load delay:5s">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div class="ml-3 text-sm text-green-700">
+                                <p><strong>Library sync completed!</strong></p>
+                                <p>Processed {movies} movies and {shows} TV shows. Added {added}, updated {updated} items.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div hx-get="{base_url}/admin/jobs/content" hx-target="#jobs-frame" hx-trigger="load delay:3s" style="display: none;"></div>
+                """)
+            else:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
+                         hx-get="{base_url}/admin/clear-feedback"
+                         hx-trigger="load delay:5s">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div class="ml-3 text-sm text-red-700">
+                                <p><strong>Library sync failed!</strong></p>
+                                <p>{result.get('message', 'Unknown error')}</p>
+                            </div>
+                        </div>
+                    </div>
+                """)
+        else:
+            # API client - return JSON
+            return result
+            
+    except Exception as e:
+        print(f"Error triggering library sync: {e}")
+        if request.headers.get("HX-Request"):
+            base_url = SettingsService.get_base_url(session)
+            return HTMLResponse(f"""
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md" 
+                     hx-get="{base_url}/admin/clear-feedback"
+                     hx-trigger="load delay:5s">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div class="ml-3 text-sm text-red-700">
+                            <p><strong>Error triggering library sync!</strong></p>
+                            <p>{str(e)}</p>
+                        </div>
+                    </div>
+                </div>
+            """)
+        else:
+            return {
+                "success": False,
+                "message": f"Error triggering library sync: {str(e)}"
+            }
 
 
 @router.post("/jobs/trigger-download-status")
