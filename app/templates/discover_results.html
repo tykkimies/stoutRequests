@@ -73,6 +73,25 @@
     </div>
         {% endfor %}
     </div>
+    
+    <!-- Infinite Scroll Elements (included in results for filter views) -->
+    <div id="discover-sentinel" class="h-20 flex items-center justify-center">
+        <!-- This element triggers infinite scroll when it comes into view -->
+    </div>
+    
+    <!-- Loading indicator for infinite scroll (included in results for filter views) -->
+    <div id="discover-loading" class="htmx-indicator text-center py-4 hidden">
+        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+        <p class="text-sm text-gray-500">Loading more results...</p>
+    </div>
+    
+    <!-- End of results indicator (included in results for filter views) -->
+    <div id="discover-end" class="text-center py-4 text-gray-500 text-sm hidden">
+        <svg class="w-6 h-6 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+        </svg>
+        You've reached the end of the results
+    </div>
 
     <!-- Pagination Controls -->
     {% if total_pages and total_pages > 1 %}
@@ -180,55 +199,28 @@
 function initializeDiscoverInfiniteScroll() {
     console.log('🔧 Discover infinite scroll script starting...');
     
-    // Wait a bit for DOM to settle and check multiple times
-    let attempts = 0;
-    const maxAttempts = 10;
-    
-    function tryInitialize() {
-        attempts++;
-        
+    // Wait a moment for DOM to settle
+    setTimeout(() => {
         const resultsGrid = document.getElementById('results-grid');
         const loadingIndicator = document.getElementById('discover-loading');
         const endIndicator = document.getElementById('discover-end');
         const sentinel = document.getElementById('discover-sentinel');
         
-        console.log(`🔧 Attempt ${attempts}: Elements found:`, {
+        console.log('🔧 Elements found:', {
             resultsGrid: !!resultsGrid,
             loadingIndicator: !!loadingIndicator,
             endIndicator: !!endIndicator,
             sentinel: !!sentinel
         });
         
-        // If we have the basic requirements (results grid exists, and at least loading/sentinel exist or can be found in parent document)
-        if (resultsGrid && (loadingIndicator || document.getElementById('discover-loading')) && (sentinel || document.getElementById('discover-sentinel'))) {
-            // Use the elements from the document if they exist
-            const actualLoadingIndicator = loadingIndicator || document.getElementById('discover-loading');
-            const actualEndIndicator = endIndicator || document.getElementById('discover-end');
-            const actualSentinel = sentinel || document.getElementById('discover-sentinel');
-            
-            if (!actualLoadingIndicator || !actualSentinel) {
-                console.log('🔧 Required elements still not found, will retry...');
-                if (attempts < maxAttempts) {
-                    setTimeout(tryInitialize, 100);
-                    return;
-                }
-                console.error('❌ Missing required elements for infinite scroll after all attempts');
-                return;
-            }
-            
-            console.log('✅ All required elements found, initializing infinite scroll');
-            setupInfiniteScroll(resultsGrid, actualLoadingIndicator, actualEndIndicator, actualSentinel);
-        } else {
-            console.log('🔧 Required elements not found, will retry...');
-            if (attempts < maxAttempts) {
-                setTimeout(tryInitialize, 100);
-                return;
-            }
-            console.error('❌ Missing required elements for infinite scroll after all attempts');
+        if (!resultsGrid || !loadingIndicator || !sentinel) {
+            console.error('❌ Missing required elements for infinite scroll');
+            return;
         }
-    }
-    
-    tryInitialize();
+        
+        console.log('✅ All required elements found, initializing infinite scroll');
+        setupInfiniteScroll(resultsGrid, loadingIndicator, endIndicator, sentinel);
+    }, 100);
 }
 
 function setupInfiniteScroll(resultsGrid, loadingIndicator, endIndicator, sentinel) {

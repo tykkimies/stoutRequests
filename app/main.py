@@ -642,7 +642,24 @@ async def discover_page(
                         "total_results": results.get('total_results', 0)
                     }
                 )
-            elif hx_target == "#categories-container":
+            elif hx_target == "results-grid":
+                # Return only the media cards for infinite scroll
+                return create_template_response(
+                    "components/movie_cards_only.html",
+                    {
+                        "request": request, 
+                        "results": results.get('results', []),
+                        "current_user": current_user,
+                        "media_type": media_type,
+                        "page": page,
+                        "total_pages": results.get('total_pages', 1),
+                        "current_media_type": media_type,
+                        "current_content_sources": content_sources,
+                        "current_genres": genres,
+                        "current_rating_min": rating_min
+                    }
+                )
+            elif hx_target == "categories-container":
                 # Return expanded category view (filtered) for categories container
                 print(f"🔍 DISCOVER DEBUG - Returning expanded category view for categories-container")
                 return create_template_response(

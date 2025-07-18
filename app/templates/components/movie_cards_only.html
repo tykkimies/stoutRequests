@@ -75,7 +75,7 @@
 <!-- Next loading trigger for continuous infinite scroll -->
 {% if total_pages and page < total_pages %}
 <div id="load-more-trigger"
-    hx-get="{{ base_url }}/discover/category?type={{ media_type }}&sort={{ sort_by }}&view=more&page={{ page + 1 }}&limit=40"
+    hx-get="{{ base_url }}/discover?media_type={{ current_media_type or media_type }}&page={{ page + 1 }}{% for source in current_content_sources or [] %}&content_sources={{ source }}{% endfor %}{% for genre in current_genres or [] %}&genres={{ genre }}{% endfor %}{% if current_rating_min %}&rating_min={{ current_rating_min }}&rating_source=tmdb{% endif %}"
     hx-target="#results-grid"
     hx-swap="beforeend"
     hx-trigger="revealed"
