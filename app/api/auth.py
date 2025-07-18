@@ -351,18 +351,40 @@ async def plex_verify(request: Request, pin_id: str = Form(...), session: Sessio
     # Get user info from Plex
     user_info = plex_service.get_user_info(auth_token)
     
-    # Check if user exists
+    # Check if user exists by plex_id first
+    print(f"🔍 Looking for user with plex_id: {user_info['id']}")
     statement = select(User).where(User.plex_id == user_info['id'])
     existing_user = session.exec(statement).first()
     
+    # If not found by plex_id, try by username (in case plex_id changed)
+    if not existing_user:
+        print(f"🔍 Plex_id not found, trying username: {user_info['username']}")
+        username_statement = select(User).where(User.username == user_info['username'])
+        existing_user = session.exec(username_statement).first()
+        
+        if existing_user:
+            print(f"✅ Found user by username, updating plex_id: {existing_user.username}")
+            # Update the plex_id to the current one from Plex
+            existing_user.plex_id = user_info['id']
+            session.add(existing_user)
+            session.commit()
+    
     if existing_user:
+        print(f"✅ Found existing user: {existing_user.username} (admin: {existing_user.is_admin})")
         if not existing_user.is_active:
             raise HTTPException(status_code=403, detail="Account is disabled")
         user = existing_user
     else:
+        print(f"❌ No user found with plex_id: {user_info['id']} or username: {user_info['username']}")
+        print(f"🔍 User info from Plex: {user_info}")
+        
         # Check if this is the very first user (admin setup)
         admin_statement = select(User).where(User.is_admin == True)
         admin_exists = session.exec(admin_statement).first()
+        print(f"🔍 Admin exists: {admin_exists is not None}")
+        
+        if admin_exists:
+            print(f"🔍 Existing admin: {admin_exists.username} (plex_id: {admin_exists.plex_id})")
         
         if not admin_exists:
             # First user becomes admin automatically
@@ -391,12 +413,13 @@ async def plex_verify(request: Request, pin_id: str = Form(...), session: Sessio
             # 3. Store the access request in a database table for admin review
             
             # Create a special response that the frontend can handle
+            from ..services.settings_service import build_app_url
             return JSONResponse(
                 content={
                     "status": "unauthorized",
                     "message": "Access request pending",
                     "username": user_info['username'],
-                    "redirect_url": f"{base_url}/unauthorized?username={user_info['username']}"
+                    "redirect_url": build_app_url(f"/unauthorized?username={user_info['username']}")
                 },
                 status_code=403
             )

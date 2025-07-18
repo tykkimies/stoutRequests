@@ -32,7 +32,9 @@ class PlexService:
             print("🔧 PlexService initialized in normal mode")
             config = SettingsService.get_plex_config(self.session)
             self.plex_url = config["url"]
-            self.plex_token = config["token"]
+            # Clean token immediately when loading from config to handle encoding issues
+            raw_token = config["token"]
+            self.plex_token = str(raw_token).encode('ascii', errors='ignore').decode('ascii').strip() if raw_token else None
             self.client_id = config.get("client_id", "stout-requests-dev")
 
         self.product = "plexstoutrequests"
@@ -192,63 +194,118 @@ class PlexService:
             raise ValueError(f"Invalid servers response from Plex.tv: {e}")
 
     def get_server_friends(self) -> List[Dict]:
-        """Get list of Plex friends using server token"""
+        """Get list of Plex users using the same connection pattern as libraries"""
         try:
-            account = MyPlexAccount(token=self.plex_token)
+            # Use the same connection pattern as successful library operations
+            clean_url = str(self.plex_url).encode('ascii', errors='ignore').decode('ascii').strip()
+            clean_token = str(self.plex_token).encode('ascii', errors='ignore').decode('ascii').strip()
+            plex = PlexServer(clean_url, clean_token)
+            
+            print(f"🔗 Connected to Plex server: {plex.friendlyName}")
+            
+            # Debug: Check what methods are available on the PlexServer object
+            available_methods = [method for method in dir(plex) if not method.startswith('_') and 'user' in method.lower() or 'account' in method.lower() or 'friend' in method.lower()]
+            print(f"🔍 Available user/account/friend methods on PlexServer: {available_methods}")
+            
+            # Debug: Check all methods that might be relevant
+            all_methods = [method for method in dir(plex) if not method.startswith('_') and callable(getattr(plex, method))]
+            print(f"🔍 All available methods on PlexServer: {all_methods}")
+            
             friends = []
-
-            # Try different ways to access friends depending on PlexAPI version
+            
+            # Try to get users/accounts from the PlexServer object
             try:
-                # Method 1: Try friends() as a method
-                if hasattr(account, 'friends') and callable(account.friends):
-                    friends_list = account.friends()
-                # Method 2: Try friends as a property
-                elif hasattr(account, 'friends'):
-                    friends_list = account.friends
-                # Method 3: Try the myPlexAccount API directly
-                else:
-                    # Use the raw API endpoint
-                    import requests
-                    headers = {
-                        "X-Plex-Token": self.plex_token,
-                        "Accept": "application/json",
-                    }
-                    response = requests.get("https://plex.tv/api/v2/friends", headers=headers, timeout=10)
-                    response.raise_for_status()
-                    data = response.json()
+                # Method 1: Check if plex server has an accounts method
+                if hasattr(plex, 'accounts'):
+                    print("🔍 Found accounts method on PlexServer")
+                    accounts = plex.accounts()
+                    for account in accounts:
+                        friends.append({
+                            "id": getattr(account, 'id', None),
+                            "username": getattr(account, 'name', getattr(account, 'username', '')),
+                            "email": getattr(account, 'email', ''),
+                            "title": getattr(account, 'title', getattr(account, 'name', getattr(account, 'username', ''))),
+                            "thumb": getattr(account, 'thumb', ''),
+                        })
+                    print(f"✅ Retrieved {len(friends)} accounts from PlexServer.accounts()")
+                    return friends
                     
-                    friends_list = []
-                    for friend_data in data:
-                        # Create a simple object to match the expected structure
-                        class FriendObj:
-                            def __init__(self, data):
-                                self.id = data.get('id')
-                                self.username = data.get('username')
-                                self.email = data.get('email')
-                                self.title = data.get('title', data.get('username'))
-                                self.thumb = data.get('thumb')
-                        
-                        friends_list.append(FriendObj(friend_data))
-
-                # Process the friends list
-                for friend in friends_list:
-                    friends.append(
-                        {
-                            "id": getattr(friend, 'id', None),
-                            "username": getattr(friend, 'username', ''),
-                            "email": getattr(friend, 'email', ''),
-                            "title": getattr(friend, 'title', getattr(friend, 'username', '')),
-                            "thumb": getattr(friend, 'thumb', ''),
-                        }
-                    )
-
-                print(f"✅ Successfully retrieved {len(friends)} Plex friends")
-                return friends
+            except Exception as e:
+                print(f"❌ PlexServer.accounts() failed: {e}")
+            
+            # Method 2: Try users method
+            try:
+                if hasattr(plex, 'users'):
+                    print("🔍 Found users method on PlexServer")
+                    users = plex.users()
+                    for user in users:
+                        friends.append({
+                            "id": getattr(user, 'id', None),
+                            "username": getattr(user, 'name', getattr(user, 'username', '')),
+                            "email": getattr(user, 'email', ''),
+                            "title": getattr(user, 'title', getattr(user, 'name', getattr(user, 'username', ''))),
+                            "thumb": getattr(user, 'thumb', ''),
+                        })
+                    print(f"✅ Retrieved {len(friends)} users from PlexServer.users()")
+                    return friends
+                    
+            except Exception as e:
+                print(f"❌ PlexServer.users() failed: {e}")
+            
+            # Method 3: Use PlexServer's query method to call server endpoints directly
+            try:
+                print("🔍 Trying direct server endpoint queries...")
                 
-            except AttributeError as ae:
-                print(f"❌ Plex friends attribute error: {ae}")
-                print(f"Available account attributes: {[attr for attr in dir(account) if not attr.startswith('_')]}")
-                raise Exception(f"Plex friends API has changed. Available methods: {[attr for attr in dir(account) if 'friend' in attr.lower()]}")
+                # Try various server endpoints that might have user/friend data
+                endpoints_to_try = [
+                    "/accounts",
+                    "/myplex/account",
+                    "/system/accounts",
+                    "/users"
+                ]
+                
+                for endpoint in endpoints_to_try:
+                    try:
+                        print(f"🔍 Trying endpoint: {endpoint}")
+                        # Use PlexServer's query method which handles authentication properly
+                        response = plex.query(endpoint)
+                        
+                        # PlexAPI query returns an Element object directly, not a response
+                        print(f"🔍 Response type: {type(response)}")
+                        print(f"🔍 Response tag: {response.tag if hasattr(response, 'tag') else 'No tag'}")
+                        
+                        # Look for account/user elements in the XML Element
+                        print(f"🔍 Searching for users in XML response...")
+                        for elem in response.iter():
+                            print(f"   Found element: {elem.tag} with attributes: {elem.attrib}")
+                            if elem.tag.lower() in ['account', 'user', 'friend', 'sharedserver']:
+                                user_data = {
+                                    "id": elem.get('id'),
+                                    "username": elem.get('name', elem.get('username', elem.get('title', ''))),
+                                    "email": elem.get('email', ''),
+                                    "title": elem.get('title', elem.get('name', elem.get('username', ''))),
+                                    "thumb": elem.get('thumb', ''),
+                                }
+                                print(f"   📋 Found user: {user_data}")
+                                friends.append(user_data)
+                        
+                        if friends:
+                            print(f"✅ Retrieved {len(friends)} users from {endpoint}")
+                            return friends
+                        else:
+                            print(f"   No user elements found in {endpoint}")
+                            
+                            
+                    except Exception as e:
+                        print(f"❌ Endpoint {endpoint} failed: {e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"❌ Direct endpoint queries failed: {e}")
+            
+            # If we get here, no users/friends were found
+            print("ℹ️  No friends/users found on this Plex server. This server may not have shared users configured.")
+            return []
                 
         except Exception as e:
             print(f"❌ Error getting friends: {e}")

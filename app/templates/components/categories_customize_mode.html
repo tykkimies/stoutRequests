@@ -1,0 +1,385 @@
+<!-- Categories Customize Mode -->
+<div class="space-y-6">
+    <!-- Visible Categories Section -->
+    <div>
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-900">📋 Your Categories</h3>
+            <div class="text-sm text-gray-600">
+                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">Drag to reorder</span>
+            </div>
+        </div>
+        
+        <div id="visible-categories" class="space-y-3">
+            {% for category in visible_categories %}
+            <div class="customize-category-item bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors"
+                 data-category-id="{{ category.id }}"
+                 draggable="true">
+                <div class="flex items-center justify-between">
+                    <!-- Left side: Drag handle, color dot, title -->
+                    <div class="flex items-center space-x-3">
+                        <div class="drag-handle cursor-move text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                            </svg>
+                        </div>
+                        <div class="w-4 h-4 bg-{{ category.color }}-500 rounded-full"></div>
+                        <div>
+                            <h4 class="font-medium text-gray-900">{{ category.title }}</h4>
+                            <p class="text-sm text-gray-500">{{ category.type|title }} • {{ category.sort|title }}</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Right side: Controls -->
+                    <div class="flex items-center space-x-3">
+                        <!-- Delete Button -->
+                        <button type="button" 
+                                onclick="hideCategoryInCustomizeMode('{{ category.id }}', this)"
+                                class="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50 transition-colors flex items-center space-x-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                            <span class="text-sm">Remove</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Hidden Categories Section -->
+    {% if hidden_categories %}
+    <div>
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">➕ Add Categories</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {% for category in hidden_categories %}
+            <button type="button" 
+                    onclick="addCategoryInCustomizeMode('{{ category.id }}', this)"
+                    class="flex items-center justify-between p-3 bg-{{ category.color }}-50 border-2 border-{{ category.color }}-200 rounded-lg hover:bg-{{ category.color }}-100 transition-colors group">
+                <div class="flex items-center space-x-2">
+                    <div class="w-3 h-3 bg-{{ category.color }}-500 rounded-full"></div>
+                    <span class="text-sm font-medium text-gray-700">{{ category.title }}</span>
+                </div>
+                <svg class="w-4 h-4 text-{{ category.color }}-600 group-hover:text-{{ category.color }}-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Action Buttons -->
+    <div class="flex items-center justify-center pt-6 border-t border-gray-200">
+        <button type="button" 
+                onclick="cancelCustomizeMode()"
+                class="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors">
+            Cancel
+        </button>
+    </div>
+</div>
+
+<script>
+// Drag and drop functionality for reordering
+let draggedElement = null;
+
+// Simple initialization - just run once when the template loads
+initializeDragAndDrop();
+
+function initializeDragAndDrop() {
+    const sortableList = document.getElementById('visible-categories');
+    if (!sortableList) {
+        console.error('visible-categories container not found');
+        return;
+    }
+    
+    console.log('🎯 Initializing simple drag and drop...');
+    
+    // Initialize drag functionality for all existing items
+    const items = sortableList.querySelectorAll('.customize-category-item');
+    items.forEach((item, index) => {
+        console.log(`🔧 Setting up drag for item ${index}: ${item.dataset.categoryId}`);
+        
+        // Ensure draggable attribute is set
+        item.setAttribute('draggable', 'true');
+        
+        // Add simple drag functionality
+        item.addEventListener('dragstart', function(e) {
+            console.log('🚀 Drag started:', item.dataset.categoryId);
+            draggedElement = item;
+            item.style.opacity = '0.5';
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', item.dataset.categoryId);
+        });
+        
+        item.addEventListener('dragend', function(e) {
+            console.log('🏁 Drag ended:', item.dataset.categoryId);
+            item.style.opacity = '1';
+            draggedElement = null;
+        });
+        
+        // Add dragover and drop to each item
+        item.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        });
+        
+        item.addEventListener('drop', function(e) {
+            e.preventDefault();
+            console.log('📥 Drop on:', item.dataset.categoryId);
+            
+            if (draggedElement && draggedElement !== item) {
+                console.log('🔄 Swapping elements');
+                const parent = item.parentNode;
+                const draggedIndex = Array.from(parent.children).indexOf(draggedElement);
+                const targetIndex = Array.from(parent.children).indexOf(item);
+                
+                if (draggedIndex < targetIndex) {
+                    parent.insertBefore(draggedElement, item.nextSibling);
+                } else {
+                    parent.insertBefore(draggedElement, item);
+                }
+                
+                console.log('✅ Swap completed');
+            }
+        });
+    });
+    
+    console.log('✅ Simple drag and drop initialized for', items.length, 'items');
+}
+
+function autoScrollDuringDrag(e) {
+    const scrollContainer = document.querySelector('.overflow-y-auto');
+    if (!scrollContainer) return;
+    
+    const scrollTop = scrollContainer.scrollTop;
+    const scrollHeight = scrollContainer.scrollHeight;
+    const clientHeight = scrollContainer.clientHeight;
+    const mouseY = e.clientY;
+    const containerTop = scrollContainer.getBoundingClientRect().top;
+    const containerBottom = containerTop + clientHeight;
+    
+    const scrollThreshold = 50;
+    const scrollSpeed = 10;
+    
+    // Scroll up if near top
+    if (mouseY < containerTop + scrollThreshold && scrollTop > 0) {
+        scrollContainer.scrollTop = Math.max(0, scrollTop - scrollSpeed);
+    }
+    
+    // Scroll down if near bottom
+    if (mouseY > containerBottom - scrollThreshold && scrollTop < scrollHeight - clientHeight) {
+        scrollContainer.scrollTop = Math.min(scrollHeight - clientHeight, scrollTop + scrollSpeed);
+    }
+}
+
+function getNewOrder() {
+    const sortableList = document.getElementById('visible-categories');
+    const items = sortableList.querySelectorAll('.customize-category-item');
+    return Array.from(items).map(item => item.dataset.categoryId);
+}
+
+function addDragFunctionality(item) {
+    // Ensure draggable attribute is set
+    item.setAttribute('draggable', 'true');
+    
+    // Add simple drag functionality
+    item.addEventListener('dragstart', function(e) {
+        console.log('🚀 Drag started:', item.dataset.categoryId);
+        draggedElement = item;
+        item.style.opacity = '0.5';
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.dataset.categoryId);
+    });
+    
+    item.addEventListener('dragend', function(e) {
+        console.log('🏁 Drag ended:', item.dataset.categoryId);
+        item.style.opacity = '1';
+        draggedElement = null;
+    });
+    
+    // Add dragover and drop to each item
+    item.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    });
+    
+    item.addEventListener('drop', function(e) {
+        e.preventDefault();
+        console.log('📥 Drop on:', item.dataset.categoryId);
+        
+        if (draggedElement && draggedElement !== item) {
+            console.log('🔄 Swapping elements');
+            const parent = item.parentNode;
+            const draggedIndex = Array.from(parent.children).indexOf(draggedElement);
+            const targetIndex = Array.from(parent.children).indexOf(item);
+            
+            if (draggedIndex < targetIndex) {
+                parent.insertBefore(draggedElement, item.nextSibling);
+            } else {
+                parent.insertBefore(draggedElement, item);
+            }
+            
+            console.log('✅ Swap completed');
+        }
+    });
+    
+    return item;
+}
+
+function hideCategoryInCustomizeMode(categoryId, button) {
+    // Find the category item and remove it
+    const categoryItem = button.closest('.customize-category-item');
+    if (categoryItem) {
+        // Get category info before removing
+        const categoryTitle = categoryItem.querySelector('h4').textContent;
+        const colorClass = categoryItem.querySelector('.rounded-full').className.match(/bg-(\w+)-500/)[1];
+        
+        // Add a fade-out animation
+        categoryItem.style.transition = 'opacity 0.3s ease';
+        categoryItem.style.opacity = '0';
+        
+        setTimeout(() => {
+            categoryItem.remove();
+            
+            // Add to hidden categories section
+            addToHiddenCategoriesSection(categoryId, categoryTitle, colorClass);
+        }, 300);
+    }
+}
+
+function addToHiddenCategoriesSection(categoryId, categoryTitle, colorClass) {
+    // Find existing hidden categories section by looking for the grid
+    let gridContainer = document.getElementById('hidden-categories-grid');
+    let hiddenSection;
+    
+    if (!gridContainer) {
+        // Look for existing section by text content
+        const headings = document.querySelectorAll('h3');
+        for (const heading of headings) {
+            if (heading.textContent.includes('Add Categories')) {
+                hiddenSection = heading.parentElement;
+                gridContainer = hiddenSection.querySelector('.grid');
+                break;
+            }
+        }
+    }
+    
+    if (!gridContainer) {
+        // Create the hidden section if it doesn't exist
+        const mainContainer = document.querySelector('.space-y-6');
+        hiddenSection = document.createElement('div');
+        hiddenSection.innerHTML = `
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">➕ Add Categories</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="hidden-categories-grid">
+            </div>
+        `;
+        mainContainer.appendChild(hiddenSection);
+        gridContainer = document.getElementById('hidden-categories-grid');
+    }
+    
+    // Create the add button for this category
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.onclick = () => addCategoryInCustomizeMode(categoryId, addButton);
+    addButton.className = `flex items-center justify-between p-3 bg-${colorClass}-50 border-2 border-${colorClass}-200 rounded-lg hover:bg-${colorClass}-100 transition-colors group`;
+    addButton.innerHTML = `
+        <div class="flex items-center space-x-2">
+            <div class="w-3 h-3 bg-${colorClass}-500 rounded-full"></div>
+            <span class="text-sm font-medium text-gray-700">${categoryTitle}</span>
+        </div>
+        <svg class="w-4 h-4 text-${colorClass}-600 group-hover:text-${colorClass}-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+        </svg>
+    `;
+    
+    // Add with animation
+    addButton.style.opacity = '0';
+    gridContainer.appendChild(addButton);
+    
+    // Fade in animation
+    setTimeout(() => {
+        addButton.style.transition = 'opacity 0.3s ease';
+        addButton.style.opacity = '1';
+    }, 100);
+}
+
+function addCategoryInCustomizeMode(categoryId, button) {
+    // Get category info from the button
+    const categoryTitle = button.querySelector('span').textContent;
+    const colorClass = button.className.match(/bg-(\w+)-50/)[1];
+    
+    // Create new category item
+    const newItem = document.createElement('div');
+    newItem.className = 'customize-category-item bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors';
+    newItem.setAttribute('data-category-id', categoryId);
+    newItem.setAttribute('draggable', 'true');
+    
+    newItem.innerHTML = `
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="drag-handle cursor-move text-gray-400 hover:text-gray-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                    </svg>
+                </div>
+                <div class="w-4 h-4 bg-${colorClass}-500 rounded-full"></div>
+                <div>
+                    <h4 class="font-medium text-gray-900">${categoryTitle}</h4>
+                    <p class="text-sm text-gray-500">Added category</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-3">
+                <button type="button" 
+                        onclick="hideCategoryInCustomizeMode('${categoryId}', this)"
+                        class="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50 transition-colors flex items-center space-x-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                    <span class="text-sm">Remove</span>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // Add to visible categories
+    const visibleCategories = document.getElementById('visible-categories');
+    visibleCategories.appendChild(newItem);
+    
+    // Remove from hidden categories
+    button.style.transition = 'opacity 0.3s ease';
+    button.style.opacity = '0';
+    setTimeout(() => {
+        button.remove();
+    }, 300);
+    
+    // Add drag functionality to the new item
+    newItem.setAttribute('draggable', 'true');
+    addDragFunctionality(newItem);
+    
+    console.log('✅ Added drag functionality to new item:', categoryId);
+}
+</script>
+
+<style>
+.drag-placeholder {
+    transition: all 0.2s ease;
+}
+
+.dragging {
+    cursor: grabbing !important;
+}
+
+.dragging * {
+    cursor: grabbing !important;
+}
+
+.customize-category-item {
+    transition: all 0.2s ease;
+}
+
+.customize-category-item:hover {
+    border-color: #9ca3af;
+}
+</style>

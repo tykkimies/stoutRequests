@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
 from fastapi import FastAPI, Request, Depends, status, Query
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -16,7 +17,7 @@ from .api.admin import router as admin_router
 from .api.setup import router as setup_router
 from .api.services import router as services_router
 from app.api import setup
-from .models import User
+from .models import User, UserCategoryPreferences
 from .services.plex_sync_service import PlexSyncService
 from .services.permissions_service import PermissionsService
 
@@ -56,6 +57,11 @@ async def base_url_routing_middleware(request: Request, call_next):
             base_url = base_url.strip('/')
             request_path = request.url.path
             
+            # Debug logging for reverse proxy issues
+            print(f"🔍 Base URL middleware: base_url='{base_url}', request_path='{request_path}'")
+            print(f"🔍 Full URL: {request.url}")
+            print(f"🔍 Headers: {dict(request.headers)}")
+            
             # Handle requests under the base_url path
             if request_path.startswith(f'/{base_url}/'):
                 # Strip base_url from path for internal routing
@@ -66,6 +72,7 @@ async def base_url_routing_middleware(request: Request, call_next):
                 # Update request scope for internal routing
                 request.scope["path"] = new_path
                 request.scope["root_path"] = f"/{base_url}"
+                print(f"🔧 Stripped base_url: new_path='{new_path}', root_path='{request.scope['root_path']}'")
                 
             elif request_path == f'/{base_url}':
                 # Handle exact base_url match (redirect to base_url/)
@@ -76,11 +83,21 @@ async def base_url_routing_middleware(request: Request, call_next):
                 # Handle base_url/ -> root
                 request.scope["path"] = "/"
                 request.scope["root_path"] = f"/{base_url}"
+                print(f"🔧 Base URL root: new_path='/', root_path='{request.scope['root_path']}'")
                 
             elif not request_path.startswith('/static') and request_path != '/' and not request_path.startswith('/setup'):
-                # For other requests not under base_url (except static, root, and setup), redirect to base_url
-                from fastapi.responses import RedirectResponse
-                return RedirectResponse(url=f"/{base_url}{request_path}")
+                # Check if this might be a reverse proxy stripping the base_url
+                # If the Host header shows our domain but path doesn't include base_url,
+                # assume reverse proxy stripped it and set root_path accordingly
+                host = request.headers.get('host', '')
+                if 'duckdns.org' in host or 'plexmanager' in host:
+                    print(f"🔧 Reverse proxy detected: Setting root_path for stripped path")
+                    request.scope["root_path"] = f"/{base_url}"
+                else:
+                    # For other requests not under base_url (except static, root, and setup), redirect to base_url
+                    print(f"🔧 Redirecting to base_url: /{base_url}{request_path}")
+                    from fastapi.responses import RedirectResponse
+                    return RedirectResponse(url=f"/{base_url}{request_path}")
     
     except Exception as e:
         # If there's any error, continue without base_url handling
@@ -172,8 +189,11 @@ async def index(
     if not current_user:
         return RedirectResponse(url=build_app_url("/login"), status_code=302)
     
+    # Extract query parameters for initial filter state
+    query_params = dict(request.query_params)
+    
     return create_template_response(
-        "index.html", 
+        "index_categories.html", 
         {
             "request": request, 
             "current_user": current_user
@@ -602,18 +622,115 @@ async def discover_page(
                 item['in_plex'] = plex_service.check_media_in_library(item['id'], item_media_type)
                 item['status'] = 'in_plex' if item['in_plex'] else 'available'
         
-        return create_template_response(
-            "discover_results.html",
-            {
-                "request": request, 
-                "results": results.get('results', []),
-                "current_user": current_user,
-                "media_type": media_type,
-                "content_sources": content_sources,
-                "genres": genres,
-                "page": page
-            }
-        )
+        # Content negotiation - check if this is an HTMX request for fragments
+        hx_target = request.headers.get("HX-Target", "")
+        print(f"🔍 DISCOVER DEBUG - HX-Request: {request.headers.get('HX-Request')}, HX-Target: '{hx_target}'")
+        if request.headers.get("HX-Request"):
+            if hx_target in ["discover-results", "content-results", "search-results-content", "filtered-results-content"]:
+                # Return only the discover results fragment
+                return create_template_response(
+                    "discover_results.html",
+                    {
+                        "request": request, 
+                        "results": results.get('results', []),
+                        "current_user": current_user,
+                        "media_type": media_type,
+                        "content_sources": content_sources,
+                        "genres": genres,
+                        "page": page,
+                        "total_pages": results.get('total_pages', 1),
+                        "total_results": results.get('total_results', 0)
+                    }
+                )
+            elif hx_target == "#categories-container":
+                # Return expanded category view (filtered) for categories container
+                print(f"🔍 DISCOVER DEBUG - Returning expanded category view for categories-container")
+                return create_template_response(
+                    "components/expanded_results.html",
+                    {
+                        "request": request, 
+                        "results": results.get('results', []),
+                        "current_user": current_user,
+                        "category_type": media_type,
+                        "category_sort": content_sources[0] if content_sources else 'popular',
+                        "category_title": f"Filtered {media_type.title()}s",
+                        "page": page,
+                        "total_pages": results.get('total_pages', 1),
+                        "total_results": results.get('total_results', 0),
+                        "current_rating_min": rating_min,
+                        "current_media_type": media_type,
+                        "current_content_sources": content_sources,
+                        "current_genres": genres
+                    }
+                )
+            elif hx_target == "#main-content-area":
+                # Return full filtered results view for main content area replacement
+                print(f"🔍 DISCOVER DEBUG - Returning discover_filtered_view.html for main-content-area")
+                return create_template_response(
+                    "discover_filtered_view.html",
+                    {
+                        "request": request, 
+                        "results": results.get('results', []),
+                        "current_user": current_user,
+                        "media_type": media_type,
+                        "content_sources": content_sources,
+                        "genres": genres,
+                        "page": page,
+                        "total_pages": results.get('total_pages', 1),
+                        "total_results": results.get('total_results', 0),
+                        "current_rating_min": rating_min,
+                        "current_media_type": media_type,
+                        "current_content_sources": content_sources,
+                        "current_genres": genres
+                    }
+                )
+        else:
+            # For full page requests or API clients, return full context or JSON
+            if request.headers.get("Accept") == "application/json":
+                # API response
+                return {
+                    "success": True,
+                    "data": {
+                        "results": results.get('results', []),
+                        "page": page,
+                        "total_pages": results.get('total_pages', 1),
+                        "total_results": results.get('total_results', 0),
+                        "media_type": media_type,
+                        "content_sources": content_sources,
+                        "genres": genres
+                    }
+                }
+            else:
+                # Full page response - redirect to index with filter params
+                from fastapi.responses import RedirectResponse
+                import urllib.parse
+                
+                # Build query parameters for the filters
+                params = []
+                if media_type != "movie":
+                    params.append(f"media_type={media_type}")
+                if content_sources:
+                    for source in content_sources:
+                        params.append(f"content_sources={urllib.parse.quote(source)}")
+                if genres:
+                    for genre in genres:
+                        params.append(f"genres={urllib.parse.quote(genre)}")
+                if rating_source:
+                    params.append(f"rating_source={urllib.parse.quote(rating_source)}")
+                if rating_min:
+                    params.append(f"rating_min={urllib.parse.quote(rating_min)}")
+                if studios:
+                    for studio in studios:
+                        params.append(f"studios={urllib.parse.quote(studio)}")
+                if streaming:
+                    for provider in streaming:
+                        params.append(f"streaming={urllib.parse.quote(provider)}")
+                if page > 1:
+                    params.append(f"page={page}")
+                
+                query_string = "&".join(params)
+                redirect_url = build_app_url("/") + ("?" + query_string if query_string else "")
+                return RedirectResponse(url=redirect_url, status_code=302)
         
     except Exception as e:
         print(f"Error in discover: {e}")
@@ -768,7 +885,14 @@ async def discover_category(
                 return HTMLResponse(f'<div class="text-center py-8 text-red-600">Error loading recent items: {str(db_error)}</div>')
             
             # Choose template based on view type
-            template_name = "discover_results.html" if view == "grid" else "category_horizontal.html"
+            if view == "grid":
+                template_name = "discover_results.html"
+            elif view == "more":
+                template_name = "components/movie_cards_only.html"
+            elif view == "expanded":
+                template_name = "components/expanded_results.html"
+            else:
+                template_name = "category_horizontal.html"
             
             return create_template_response(
                 template_name,
@@ -786,166 +910,186 @@ async def discover_category(
         
         # Handle Recent Requests from database
         elif type == "requests" and sort == "recent":
-            print(f"🔍 Fetching recent requests for user: {current_user.username}")
-            
             try:
-                # Get recent requests from database
-                try:
-                    from app.models.media_request import MediaRequest
-                    print(f"✅ Successfully imported MediaRequest")
-                except ImportError as import_error:
-                    print(f"❌ Failed to import MediaRequest: {import_error}")
-                    return HTMLResponse('<div class="text-center py-8 text-red-600">Error importing MediaRequest model</div>')
-                
-                # Import User model and Settings service
+                from app.models.media_request import MediaRequest
                 from app.models.user import User
                 from app.services.settings_service import SettingsService
-                
-                # Get visibility settings to determine what requests to show
-                visibility_config = SettingsService.get_request_visibility_config(session)
-                
                 from .core.permissions import is_user_admin
+                
+                # Get visibility settings and user admin status
+                visibility_config = SettingsService.get_request_visibility_config(session)
                 user_is_admin = is_user_admin(current_user, session)
                 
-                # Debug logging
-                print(f"🔍 DEBUG Recent Requests: User '{current_user.username}' (ID: {current_user.id}, admin: {user_is_admin})")
-                print(f"🔍 DEBUG Visibility config: {visibility_config}")
+                # Import the status enum to filter properly
+                from app.models.media_request import RequestStatus
                 
-                # Apply visibility logic similar to unified requests page
+                # Build optimized query with joins - exclude fulfilled requests
+                # Limit: 20 for horizontal scroll, 40 max for expanded view
+                max_limit = min(limit, 40)  # Cap at 40 for expanded view, 20 for horizontal
+                
                 if user_is_admin or visibility_config['can_view_all_requests']:
-                    # Show all recent requests
-                    print(f"🔍 DEBUG: Showing ALL requests (admin: {user_is_admin}, can_view_all: {visibility_config['can_view_all_requests']})")
-                    recent_statement = select(MediaRequest).order_by(
-                        MediaRequest.created_at.desc()
-                    ).offset(offset).limit(limit)
+                    # Show all recent requests (excluding fulfilled ones) with user join
+                    recent_statement = select(MediaRequest, User).outerjoin(
+                        User, MediaRequest.user_id == User.id
+                    ).where(
+                        MediaRequest.status != RequestStatus.AVAILABLE  # Exclude items already in Plex
+                    ).order_by(MediaRequest.created_at.desc()).limit(max_limit)
                 else:
-                    # Show only user's own requests
-                    print(f"🔍 DEBUG: Showing only user's own requests (user_id: {current_user.id})")
-                    recent_statement = select(MediaRequest).where(
-                        MediaRequest.user_id == current_user.id
-                    ).order_by(MediaRequest.created_at.desc()).offset(offset).limit(limit)
+                    # Show only user's own requests (excluding fulfilled ones)
+                    recent_statement = select(MediaRequest, User).outerjoin(
+                        User, MediaRequest.user_id == User.id
+                    ).where(
+                        MediaRequest.user_id == current_user.id,
+                        MediaRequest.status != RequestStatus.AVAILABLE  # Exclude items already in Plex
+                    ).order_by(MediaRequest.created_at.desc()).limit(max_limit)
                 
-                recent_requests = session.exec(recent_statement).all()
-                print(f"🔍 Found {len(recent_requests)} recent requests in database")
+                recent_results = session.exec(recent_statement).all()
                 
-                recent_items = []
-                for request_item in recent_requests:
+                # Prepare batch TMDB requests for better performance
+                movie_ids = []
+                tv_ids = []
+                request_mapping = {}
+                
+                # First pass: collect TMDB IDs and build mapping
+                for result in recent_results:
+                    request_item = result[0]  # MediaRequest
+                    user = result[1] if len(result) > 1 else None  # User from join
+                    
                     if request_item.tmdb_id:
-                        # Fetch the user for this request only if allowed by visibility settings
-                        user = None
+                        media_type_str = request_item.media_type.value if hasattr(request_item.media_type, 'value') else str(request_item.media_type)
+                        
+                        if media_type_str == 'movie':
+                            movie_ids.append(request_item.tmdb_id)
+                        else:
+                            tv_ids.append(request_item.tmdb_id)
+                            
+                        request_mapping[request_item.tmdb_id] = {
+                            'request': request_item,
+                            'user': user,
+                            'media_type': media_type_str
+                        }
+                
+                # Batch fetch TMDB data (if possible) or fall back to individual calls
+                recent_items = []
+                for tmdb_id, data in request_mapping.items():
+                    request_item = data['request']
+                    user = data['user']
+                    media_type_str = data['media_type']
+                    
+                    try:
+                        # Get TMDB data
+                        if media_type_str == 'movie':
+                            tmdb_data = tmdb_service.get_movie_details(tmdb_id)
+                        else:
+                            tmdb_data = tmdb_service.get_tv_details(tmdb_id)
+                        
+                        # Handle status mapping
+                        raw_status = request_item.status.value.lower() if hasattr(request_item.status, 'value') else str(request_item.status).lower()
+                        request_status = 'in_plex' if raw_status == 'available' else f'requested_{raw_status}'
+                        
+                        # Determine user visibility
+                        visible_user = None
                         if user_is_admin or visibility_config['can_view_request_user']:
-                            user = session.get(User, request_item.user_id) if request_item.user_id else None
+                            visible_user = user
                         elif request_item.user_id == current_user.id:
-                            # Always show current user's own info
-                            user = current_user
-                        # Get full TMDB data for poster/details
-                        try:
-                            # Handle enum values safely
-                            media_type_str = request_item.media_type.value if hasattr(request_item.media_type, 'value') else str(request_item.media_type)
-                            raw_status = request_item.status.value.lower() if hasattr(request_item.status, 'value') else str(request_item.status).lower()
-                            # Map database status to template status
-                            if raw_status == 'available':
-                                # AVAILABLE means it's now in Plex
-                                request_status = 'in_plex'
-                            else:
-                                # PENDING, APPROVED, REJECTED get the requested_ prefix
-                                request_status = f'requested_{raw_status}'
-                            
-                            if media_type_str == 'movie':
-                                tmdb_data = tmdb_service.get_movie_details(request_item.tmdb_id)
-                            else:
-                                tmdb_data = tmdb_service.get_tv_details(request_item.tmdb_id)
-                            
-                            # Format like TMDB results for template compatibility
-                            item = {
-                                'id': request_item.tmdb_id,
-                                'title': tmdb_data.get('title') if media_type_str == 'movie' else None,
-                                'name': tmdb_data.get('name') if media_type_str == 'tv' else None,
-                                'overview': tmdb_data.get('overview', ''),
-                                'poster_path': tmdb_data.get('poster_path'),
-                                'poster_url': f"{tmdb_service.image_base_url}{tmdb_data['poster_path']}" if tmdb_data.get('poster_path') else None,
-                                'backdrop_path': tmdb_data.get('backdrop_path'),
-                                'backdrop_url': f"{tmdb_service.image_base_url}{tmdb_data['backdrop_path']}" if tmdb_data.get('backdrop_path') else None,
-                                'release_date': tmdb_data.get('release_date'),
-                                'first_air_date': tmdb_data.get('first_air_date'),
-                                'vote_average': tmdb_data.get('vote_average', 0),
-                                'media_type': media_type_str,
-                                'in_plex': request_status == 'in_plex',
-                                'status': request_status,
-                                'user': user,  # Include user who made the request
-                                'created_at': request_item.created_at,  # Include request date
-                                'request_id': request_item.id,  # Include request DB ID for admin actions
-                                "base_url": base_url,
-                            }
-                            recent_items.append(item)
-                            
-                        except Exception as tmdb_error:
-                            print(f"⚠️ TMDB lookup failed for {request_item.title}: {tmdb_error}")
-                            # Use basic info from request item
-                            # Handle enum values safely
-                            media_type_str = request_item.media_type.value if hasattr(request_item.media_type, 'value') else str(request_item.media_type)
-                            raw_status = request_item.status.value.lower() if hasattr(request_item.status, 'value') else str(request_item.status).lower()
-                            # Map database status to template status
-                            if raw_status == 'available':
-                                # AVAILABLE means it's now in Plex
-                                request_status = 'in_plex'
-                            else:
-                                # PENDING, APPROVED, REJECTED get the requested_ prefix
-                                request_status = f'requested_{raw_status}'
-                            
-                            item = {
-                                'id': request_item.tmdb_id,
-                                'title': request_item.title if media_type_str == 'movie' else None,
-                                'name': request_item.title if media_type_str == 'tv' else None,
-                                'overview': request_item.overview or 'Recently requested',
-                                'poster_path': request_item.poster_path,
-                                'poster_url': None,
-                                'backdrop_path': None,
-                                'backdrop_url': None,
-                                'release_date': request_item.release_date or '',
-                                'first_air_date': request_item.release_date or '',
-                                'vote_average': 0,
-                                'media_type': media_type_str,
-                                'in_plex': request_status == 'in_plex',
-                                'status': request_status,
-                                'user': user,  # Include user who made the request
-                                'created_at': request_item.created_at,  # Include request date
-                                'request_id': request_item.id,  # Include request DB ID for admin actions
-                                "base_url": base_url,
-                            }
-                            recent_items.append(item)
+                            visible_user = current_user
+                        
+                        # Format item for template
+                        item = {
+                            'id': tmdb_id,
+                            'title': tmdb_data.get('title') if media_type_str == 'movie' else None,
+                            'name': tmdb_data.get('name') if media_type_str == 'tv' else None,
+                            'overview': tmdb_data.get('overview', ''),
+                            'poster_path': tmdb_data.get('poster_path'),
+                            'poster_url': f"{tmdb_service.image_base_url}{tmdb_data['poster_path']}" if tmdb_data.get('poster_path') else None,
+                            'backdrop_path': tmdb_data.get('backdrop_path'),
+                            'backdrop_url': f"{tmdb_service.image_base_url}{tmdb_data['backdrop_path']}" if tmdb_data.get('backdrop_path') else None,
+                            'release_date': tmdb_data.get('release_date'),
+                            'first_air_date': tmdb_data.get('first_air_date'),
+                            'vote_average': tmdb_data.get('vote_average', 0),
+                            'media_type': media_type_str,
+                            'in_plex': request_status == 'in_plex',
+                            'status': request_status,
+                            'user': visible_user,
+                            'created_at': request_item.created_at,
+                            'request_id': request_item.id,
+                            "base_url": base_url,
+                        }
+                        recent_items.append(item)
+                        
+                    except Exception as tmdb_error:
+                        # Use basic info from request item if TMDB fails
+                        raw_status = request_item.status.value.lower() if hasattr(request_item.status, 'value') else str(request_item.status).lower()
+                        request_status = 'in_plex' if raw_status == 'available' else f'requested_{raw_status}'
+                        
+                        # Determine user visibility  
+                        visible_user = None
+                        if user_is_admin or visibility_config['can_view_request_user']:
+                            visible_user = user
+                        elif request_item.user_id == current_user.id:
+                            visible_user = current_user
+                        
+                        item = {
+                            'id': tmdb_id,
+                            'title': request_item.title if media_type_str == 'movie' else None,
+                            'name': request_item.title if media_type_str == 'tv' else None,
+                            'overview': request_item.overview or 'Recently requested',
+                            'poster_path': request_item.poster_path,
+                            'poster_url': None,
+                            'backdrop_path': None,
+                            'backdrop_url': None,
+                            'release_date': request_item.release_date or '',
+                            'first_air_date': request_item.release_date or '',
+                            'vote_average': 0,
+                            'media_type': media_type_str,
+                            'in_plex': request_status == 'in_plex',
+                            'status': request_status,
+                            'user': visible_user,
+                            'created_at': request_item.created_at,
+                            'request_id': request_item.id,
+                            "base_url": base_url,
+                        }
+                        recent_items.append(item)
                 
                 if not recent_items:
-                    debug_info = f"""
+                    return HTMLResponse("""
                     <div class="text-center py-8">
-                        <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-                            <h3 class="text-purple-800 font-medium mb-2">🔍 Recent Requests</h3>
-                            <div class="text-left text-sm text-purple-700">
-                                <p><strong>Database Requests:</strong> {len(recent_requests)}</p>
-                                <p><strong>Items with TMDB ID:</strong> {len(recent_items)}</p>
-                            </div>
-                        </div>
-                        <p class="text-gray-500">No recent requests found.</p>
-                        <p class="text-sm text-gray-400 mt-2">Make your first request to see it here!</p>
+                        <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                        </svg>
+                        <h3 class="text-lg font-medium text-gray-900 mb-2">No recent requests</h3>
+                        <p class="text-gray-500">No requests have been made recently.</p>
                     </div>
-                    """
-                    return HTMLResponse(content=debug_info)
+                    """)
                 
-                # Check if there are more requests for pagination
-                total_requests_count = len(session.exec(select(MediaRequest)).all())
-                has_more = (offset + len(recent_items)) < total_requests_count
-                
-                print(f"✅ Returning {len(recent_items)} recent request items from database (offset: {offset}, has_more: {has_more})")
+                # Recent requests show all items at once (max 20) - no pagination needed
+                has_more = False
                 
             except Exception as db_error:
-                print(f"❌ Database lookup failed for recent requests: {db_error}")
-                import traceback
-                traceback.print_exc()
                 return HTMLResponse(f'<div class="text-center py-8 text-red-600">Error loading recent requests: {str(db_error)}</div>')
             
+            # Check if this is a nested request for expanded content
+            hx_target = request.headers.get('HX-Target', '')
+            
             # Choose template based on view type - use special template for recent requests
-            if view == "grid":
-                template_name = "discover_results.html"
+            if view == "expanded" and "expanded-category-content" not in hx_target:
+                # For expanded view (initial load), wrap in the expanded category template
+                return create_template_response(
+                    "components/expanded_category_view.html",
+                    {
+                        "request": request,
+                        "current_user": current_user,
+                        "category_title": "📋 Recent Requests",
+                        "category_type": "requests",
+                        "category_sort": "recent"
+                    }
+                )
+            elif view == "expanded":
+                # For expanded content (infinite scroll), use grid template
+                template_name = "recent_requests_expanded.html"
+            elif view == "grid":
+                # For grid view of requests, also use the expanded template
+                template_name = "recent_requests_expanded.html"
             else:
                 template_name = "recent_requests_horizontal.html"  # Use Jellyseerr-style cards for recent requests
             
@@ -960,9 +1104,9 @@ async def discover_category(
                     "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests'],
                     "media_type": "mixed",  # Mixed content type
                     "sort_by": sort,
-                    "has_more": has_more,
-                    "next_offset": offset + limit,
-                    "current_offset": offset
+                    "has_more": has_more,  # Always False - show all items at once (max 20)
+                    "next_offset": 0,
+                    "current_offset": 0
                 }
             )
         
@@ -1076,7 +1220,14 @@ async def discover_category(
                         item['poster_url'] = f"{tmdb_service.image_base_url}{item['poster_path']}"
                 
                 # Choose template based on view type
-                template_name = "discover_results.html" if view == "grid" else "category_horizontal.html"
+                if view == "grid":
+                    template_name = "discover_results.html"
+                elif view == "more":
+                    template_name = "components/movie_cards_only.html"
+                elif view == "expanded":
+                    template_name = "components/expanded_results.html"
+                else:
+                    template_name = "category_horizontal.html"
                 
                 return create_template_response(
                     template_name,
@@ -1187,7 +1338,14 @@ async def discover_category(
                 item['status'] = 'in_plex' if item['in_plex'] else 'available'
         
         # Choose template based on view type
-        template_name = "discover_results.html" if view == "grid" else "category_horizontal.html"
+        if view == "grid":
+            template_name = "discover_results.html"
+        elif view == "more":
+            template_name = "components/movie_cards_only.html"
+        elif view == "expanded":
+            template_name = "components/expanded_results.html"
+        else:
+            template_name = "category_horizontal.html"
         
         return create_template_response(
             template_name,
@@ -1197,6 +1355,8 @@ async def discover_category(
                 "current_user": current_user,
                 "media_type": type,
                 "sort_by": sort,
+                "page": page,
+                "total_pages": total_pages,
                 "has_more": has_more,
                 "next_offset": offset + limit,
                 "current_offset": offset
@@ -1206,6 +1366,716 @@ async def discover_category(
     except Exception as e:
         print(f"Error in discover category: {e}")
         return HTMLResponse(f'<div class="text-center py-8 text-red-600">Error loading content: {str(e)}</div>')
+
+
+def get_default_categories():
+    """Get the default categories available for all users"""
+    return [
+        {
+            'id': 'recently-added',
+            'title': '📁 Recently Added to Plex',
+            'type': 'plex',
+            'sort': 'recently_added',
+            'color': 'green',
+            'order': 1
+        },
+        {
+            'id': 'recent-requests', 
+            'title': '📋 Recent Requests',
+            'type': 'requests',
+            'sort': 'recent',
+            'color': 'purple',
+            'order': 2
+        },
+        {
+            'id': 'trending-movies',
+            'title': '🔥 Trending Movies', 
+            'type': 'movie',
+            'sort': 'trending',
+            'color': 'red',
+            'order': 3
+        },
+        {
+            'id': 'popular-movies',
+            'title': '⭐ Popular Movies',
+            'type': 'movie', 
+            'sort': 'popular',
+            'color': 'yellow',
+            'order': 4
+        },
+        {
+            'id': 'trending-tv',
+            'title': '🔥 Trending TV Shows',
+            'type': 'tv',
+            'sort': 'trending', 
+            'color': 'purple',
+            'order': 5
+        },
+        {
+            'id': 'popular-tv',
+            'title': '⭐ Popular TV Shows',
+            'type': 'tv',
+            'sort': 'popular',
+            'color': 'indigo', 
+            'order': 6
+        },
+        # Additional categories that users can enable
+        {
+            'id': 'top-rated-movies',
+            'title': '🏆 Top Rated Movies',
+            'type': 'movie',
+            'sort': 'top_rated',
+            'color': 'orange',
+            'order': 7
+        },
+        {
+            'id': 'upcoming-movies',
+            'title': '🗓️ Upcoming Movies',
+            'type': 'movie',
+            'sort': 'upcoming',
+            'color': 'blue',
+            'order': 8
+        },
+        {
+            'id': 'top-rated-tv',
+            'title': '🏆 Top Rated TV Shows',
+            'type': 'tv',
+            'sort': 'top_rated',
+            'color': 'emerald',
+            'order': 9
+        }
+    ]
+
+
+def get_user_categories(user_id: int, session: Session):
+    """Get user's customized categories with their preferences applied"""
+    default_categories = get_default_categories()
+    
+    # Get user's category preferences
+    stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == user_id)
+    user_prefs = session.exec(stmt).all()
+    
+    # Create a lookup for user preferences
+    prefs_dict = {pref.category_id: pref for pref in user_prefs}
+    
+    # Apply user customizations to default categories
+    customized_categories = []
+    for category in default_categories:
+        cat_id = category['id']
+        user_pref = prefs_dict.get(cat_id)
+        
+        # If user has a preference for this category
+        if user_pref:
+            # Skip if user has hidden this category
+            if not user_pref.is_visible:
+                continue
+            # Use user's custom order
+            category['order'] = user_pref.display_order
+        else:
+            # For default categories (first 6), show by default
+            # For additional categories (7+), hide by default unless user explicitly enabled
+            if category['order'] > 6:
+                continue
+        
+        customized_categories.append(category)
+    
+    # Sort by display order
+    customized_categories.sort(key=lambda x: x['order'])
+    
+    return customized_categories
+
+
+@app.get("/discover/categories", response_class=HTMLResponse)
+async def discover_categories(
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Get categories list for discover page with user customizations"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view categories.</div>')
+    
+    # Get user's customized categories
+    categories = get_user_categories(current_user.id, session)
+    
+    return create_template_response(
+        "components/categories_list.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "categories": categories
+        }
+    )
+
+
+@app.post("/discover/categories/customize", response_class=HTMLResponse)
+async def customize_user_categories(
+    request: Request,
+    current_user: User | None = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Update user's category preferences"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Please log in to customize categories.</div>')
+    
+    # Get form data
+    form = await request.form()
+    
+    # Parse the category preferences from form data
+    # Expected format: category_id_visible, category_id_order
+    category_updates = {}
+    
+    for key, value in form.items():
+        if key.endswith('_visible'):
+            cat_id = key.replace('_visible', '')
+            if cat_id not in category_updates:
+                category_updates[cat_id] = {'visible': False, 'order': 0}
+            category_updates[cat_id]['visible'] = value == 'on'
+        elif key.endswith('_order'):
+            cat_id = key.replace('_order', '')
+            if cat_id not in category_updates:
+                category_updates[cat_id] = {'visible': False, 'order': 0}
+            try:
+                category_updates[cat_id]['order'] = int(value)
+            except (ValueError, TypeError):
+                category_updates[cat_id]['order'] = 0
+    
+    # Update database with new preferences
+    for cat_id, prefs in category_updates.items():
+        # Check if preference exists
+        stmt = select(UserCategoryPreferences).where(
+            UserCategoryPreferences.user_id == current_user.id,
+            UserCategoryPreferences.category_id == cat_id
+        )
+        existing_pref = session.exec(stmt).first()
+        
+        if existing_pref:
+            # Update existing preference
+            existing_pref.is_visible = prefs['visible']
+            existing_pref.display_order = prefs['order']
+            existing_pref.updated_at = datetime.utcnow()
+        else:
+            # Create new preference
+            new_pref = UserCategoryPreferences(
+                user_id=current_user.id,
+                category_id=cat_id,
+                is_visible=prefs['visible'],
+                display_order=prefs['order']
+            )
+            session.add(new_pref)
+    
+    session.commit()
+    
+    # Return success message
+    return HTMLResponse('<div class="text-center py-4 text-green-600">Categories updated successfully!</div>')
+
+
+@app.get("/discover/categories/settings", response_class=HTMLResponse)
+async def category_settings_page(
+    request: Request,
+    current_user: User | None = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Show category customization settings page"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to customize categories.</div>')
+    
+    # Get all available categories
+    all_categories = get_default_categories()
+    
+    # Get user's current preferences
+    stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
+    user_prefs = session.exec(stmt).all()
+    prefs_dict = {pref.category_id: pref for pref in user_prefs}
+    
+    # Apply user preferences to categories
+    for category in all_categories:
+        cat_id = category['id']
+        user_pref = prefs_dict.get(cat_id)
+        
+        if user_pref:
+            category['user_visible'] = user_pref.is_visible
+            category['user_order'] = user_pref.display_order
+        else:
+            # Default visibility (first 6 categories visible, rest hidden)
+            category['user_visible'] = category['order'] <= 6
+            category['user_order'] = category['order']
+    
+    return create_template_response(
+        "category_settings.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "categories": all_categories
+        }
+    )
+
+
+@app.get("/discover/categories/quick-add", response_class=HTMLResponse)
+async def quick_add_categories(
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Show quick add interface for additional categories"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Please log in to add categories.</div>')
+    
+    # Get all available categories
+    all_categories = get_default_categories()
+    
+    # Get user's current preferences
+    stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
+    user_prefs = session.exec(stmt).all()
+    prefs_dict = {pref.category_id: pref for pref in user_prefs}
+    
+    # Find hidden/available categories that user can enable
+    available_categories = []
+    for category in all_categories:
+        cat_id = category['id']
+        user_pref = prefs_dict.get(cat_id)
+        
+        # If user has preference and it's hidden, or no preference and it's an additional category
+        is_hidden = (user_pref and not user_pref.is_visible) or (not user_pref and category['order'] > 6)
+        
+        if is_hidden:
+            available_categories.append(category)
+    
+    return create_template_response(
+        "components/quick_add_categories.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "available_categories": available_categories
+        }
+    )
+
+
+@app.post("/discover/categories/quick-enable", response_class=HTMLResponse)
+async def quick_enable_category(
+    request: Request,
+    current_user: User | None = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Quick enable a category and refresh the categories list"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Please log in to enable categories.</div>')
+    
+    # Get form data
+    form = await request.form()
+    category_id = form.get("category_id")
+    
+    if not category_id:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Invalid category.</div>')
+    
+    # Find the highest current order
+    stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
+    user_prefs = session.exec(stmt).all()
+    max_order = max([pref.display_order for pref in user_prefs] + [6])  # Default categories go up to 6
+    
+    # Check if preference exists
+    stmt = select(UserCategoryPreferences).where(
+        UserCategoryPreferences.user_id == current_user.id,
+        UserCategoryPreferences.category_id == category_id
+    )
+    existing_pref = session.exec(stmt).first()
+    
+    if existing_pref:
+        # Enable existing preference
+        existing_pref.is_visible = True
+        existing_pref.display_order = max_order + 1
+        existing_pref.updated_at = datetime.utcnow()
+    else:
+        # Create new preference
+        new_pref = UserCategoryPreferences(
+            user_id=current_user.id,
+            category_id=category_id,
+            is_visible=True,
+            display_order=max_order + 1
+        )
+        session.add(new_pref)
+    
+    session.commit()
+    
+    # Return updated categories list
+    categories = get_user_categories(current_user.id, session)
+    
+    return create_template_response(
+        "components/categories_list.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "categories": categories
+        }
+    )
+
+
+@app.get("/discover/categories/customize-mode", response_class=HTMLResponse)
+async def categories_customize_mode(
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Show customize mode interface for categories"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to customize categories.</div>')
+    
+    # Get all available categories
+    all_categories = get_default_categories()
+    
+    # Get user's current preferences
+    stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
+    user_prefs = session.exec(stmt).all()
+    prefs_dict = {pref.category_id: pref for pref in user_prefs}
+    
+    # Separate visible and hidden categories
+    visible_categories = []
+    hidden_categories = []
+    
+    for category in all_categories:
+        cat_id = category['id']
+        user_pref = prefs_dict.get(cat_id)
+        
+        if user_pref:
+            category['user_visible'] = user_pref.is_visible
+            category['user_order'] = user_pref.display_order
+        else:
+            # Default visibility (first 6 categories visible, rest hidden)
+            category['user_visible'] = category['order'] <= 6
+            category['user_order'] = category['order']
+        
+        if category['user_visible']:
+            visible_categories.append(category)
+        else:
+            hidden_categories.append(category)
+    
+    # Sort visible categories by user order
+    visible_categories.sort(key=lambda x: x['user_order'])
+    
+    return create_template_response(
+        "components/categories_customize_mode.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "visible_categories": visible_categories,
+            "hidden_categories": hidden_categories
+        }
+    )
+
+
+@app.post("/discover/categories/save-customizations", response_class=HTMLResponse)
+async def save_category_customizations(
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Save category customizations and return normal view"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to save customizations.</div>')
+    
+    # Get form data
+    form = await request.form()
+    
+    print(f"🔍 Save customizations called for user {current_user.id}")
+    print(f"📝 Form data received: {dict(form)}")
+    
+    # Parse the category preferences from form data
+    category_updates = {}
+    
+    for key, value in form.items():
+        if key.endswith('_visible'):
+            cat_id = key.replace('_visible', '')
+            if cat_id not in category_updates:
+                category_updates[cat_id] = {'visible': False, 'order': 0}
+            category_updates[cat_id]['visible'] = value == 'on'
+        elif key.endswith('_order'):
+            cat_id = key.replace('_order', '')
+            if cat_id not in category_updates:
+                category_updates[cat_id] = {'visible': False, 'order': 0}
+            try:
+                category_updates[cat_id]['order'] = int(value)
+            except (ValueError, TypeError):
+                category_updates[cat_id]['order'] = 0
+    
+    print(f"📊 Parsed category updates: {category_updates}")
+    
+    # Update database with new preferences
+    for cat_id, prefs in category_updates.items():
+        # Check if preference exists
+        stmt = select(UserCategoryPreferences).where(
+            UserCategoryPreferences.user_id == current_user.id,
+            UserCategoryPreferences.category_id == cat_id
+        )
+        existing_pref = session.exec(stmt).first()
+        
+        if existing_pref:
+            # Update existing preference
+            print(f"📝 Updating existing preference for {cat_id}: visible={prefs['visible']}, order={prefs['order']}")
+            existing_pref.is_visible = prefs['visible']
+            existing_pref.display_order = prefs['order']
+            existing_pref.updated_at = datetime.utcnow()
+        else:
+            # Create new preference
+            print(f"🆕 Creating new preference for {cat_id}: visible={prefs['visible']}, order={prefs['order']}")
+            new_pref = UserCategoryPreferences(
+                user_id=current_user.id,
+                category_id=cat_id,
+                is_visible=prefs['visible'],
+                display_order=prefs['order']
+            )
+            session.add(new_pref)
+    
+    session.commit()
+    print("✅ Database changes committed")
+    
+    # Return normal categories view
+    categories = get_user_categories(current_user.id, session)
+    print(f"🎯 Returning {len(categories)} categories after save")
+    
+    return create_template_response(
+        "components/categories_list.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "categories": categories
+        }
+    )
+
+
+@app.post("/discover/categories/add-single", response_class=HTMLResponse)
+async def add_single_category(
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Add a single category without reloading existing ones"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Please log in to add categories.</div>')
+    
+    # Get form data
+    form = await request.form()
+    category_id = form.get("category_id")
+    
+    if not category_id:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Invalid category.</div>')
+    
+    # Find the category definition
+    all_categories = get_default_categories()
+    category_def = next((cat for cat in all_categories if cat['id'] == category_id), None)
+    
+    if not category_def:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Category not found.</div>')
+    
+    # Find the highest current order
+    stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
+    user_prefs = session.exec(stmt).all()
+    max_order = max([pref.display_order for pref in user_prefs] + [6])  # Default categories go up to 6
+    
+    # Check if preference exists
+    stmt = select(UserCategoryPreferences).where(
+        UserCategoryPreferences.user_id == current_user.id,
+        UserCategoryPreferences.category_id == category_id
+    )
+    existing_pref = session.exec(stmt).first()
+    
+    if existing_pref:
+        # Enable existing preference
+        existing_pref.is_visible = True
+        existing_pref.display_order = max_order + 1
+        existing_pref.updated_at = datetime.utcnow()
+    else:
+        # Create new preference
+        new_pref = UserCategoryPreferences(
+            user_id=current_user.id,
+            category_id=category_id,
+            is_visible=True,
+            display_order=max_order + 1
+        )
+        session.add(new_pref)
+    
+    session.commit()
+    
+    # Return just the new category HTML (not full list)
+    category_def['order'] = max_order + 1
+    
+    # Check if we're in customize mode by looking at the referer or HX-Target header
+    hx_target = request.headers.get('HX-Target', '')
+    if hx_target == 'visible-categories':
+        # We're in customize mode, return a customize item
+        return HTMLResponse(f'''
+        <div class="customize-category-item bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors" 
+             data-category-id="{category_def['id']}" 
+             draggable="true">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="drag-handle cursor-move text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                        </svg>
+                    </div>
+                    <div class="w-4 h-4 bg-{category_def['color']}-500 rounded-full"></div>
+                    <div>
+                        <h4 class="font-medium text-gray-900">{category_def['title']}</h4>
+                        <p class="text-sm text-gray-500">Recently added</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button type="button" 
+                            onclick="hideCategoryInCustomizeMode('{category_def['id']}', this)"
+                            class="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50 transition-colors flex items-center space-x-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                        <span class="text-sm">Remove</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <script>
+        // Add drag functionality to the newly added item
+        const newItem = document.querySelector('[data-category-id="{category_def['id']}"]');
+        if (newItem && typeof addDragFunctionality === 'function') {{
+            addDragFunctionality(newItem);
+        }}
+        </script>
+        ''')
+    else:
+        # Normal mode, return the regular category template
+        return create_template_response(
+            "components/single_category.html",
+            {
+                "request": request,
+                "current_user": current_user,
+                "category": category_def
+            }
+        )
+
+
+@app.get("/discover/category/expanded", response_class=HTMLResponse)
+async def discover_category_expanded(
+    request: Request,
+    type: str = "movie",
+    sort: str = "trending",
+    content_sources: list[str] = Query(default=[]),
+    genres: list[str] = Query(default=[]),
+    rating_source: str = "",
+    rating_min: str = "",
+    page: int = 1,
+    limit: int = 40,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Get expanded category view with infinite scroll"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
+    
+    # Debug: Print the parameters being received
+    print(f"🔍 CATEGORY EXPANDED DEBUG: type='{type}', sort='{sort}', page={page}")
+    
+    # For expanded content, use grid view to avoid infinite recursion
+    return await discover_category(
+        request, type, sort, limit, 0, page, "grid", current_user, session
+    )
+
+@app.get("/discover/filters", response_class=HTMLResponse)
+async def discover_filters(
+    request: Request,
+    media_type: str = "mixed",
+    content_sources: list[str] = Query(default=[]),
+    genres: list[str] = Query(default=[]),
+    rating_source: str = "",
+    rating_min: str = "",
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Get filter form with current context"""
+    return create_template_response(
+        "components/discover_filters.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "current_media_type": media_type,
+            "current_content_sources": content_sources,
+            "current_genres": genres,
+            "current_rating_source": rating_source,
+            "current_rating_min": rating_min
+        }
+    )
+
+
+@app.get("/discover/expand-category", response_class=HTMLResponse)
+async def discover_expand_category(
+    request: Request,
+    type: str = "movie",
+    sort: str = "trending",
+    title: str = "",
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """HTMX endpoint to expand a category view"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
+    
+    # Debug: Print the parameters being received
+    print(f"🔍 EXPAND CATEGORY DEBUG: type='{type}', sort='{sort}', title='{title}'")
+    
+    # Return the expanded category view that replaces main-content-area
+    return create_template_response(
+        "components/expanded_category_view.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "category_title": title,
+            "category_type": type,
+            "category_sort": sort,
+            "base_url": request.app.state.base_url if hasattr(request.app.state, 'base_url') else ""
+        }
+    )
+
+
+@app.get("/discover/categories-view", response_class=HTMLResponse)
+async def discover_categories_view(
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """HTMX endpoint to return to categories view"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
+    
+    # Return the default categories view that replaces main-content-area
+    return create_template_response(
+        "components/categories_main_view.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "base_url": request.app.state.base_url if hasattr(request.app.state, 'base_url') else ""
+        }
+    )
+
+
+@app.get("/discover/category/more", response_class=HTMLResponse)
+async def discover_category_more(
+    request: Request,
+    type: str = "movie",
+    sort: str = "trending",
+    content_sources: list[str] = Query(default=[]),
+    genres: list[str] = Query(default=[]),
+    rating_source: str = "",
+    rating_min: str = "",
+    page: int = 1,
+    limit: int = 40,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Get more items for infinite scroll - returns only the movie cards"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
+    
+    # Just call the existing discover_category with view="more" to get the cards
+    return await discover_category(
+        request, type, sort, limit, 0, page, "more", current_user, session
+    )
 
 
 @app.get("/search")

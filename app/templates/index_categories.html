@@ -112,7 +112,7 @@
         </div>
 
         <!-- Main Content Area -->
-        <div class="ml-64 flex-1 overflow-hidden main-content-wrapper">
+        <div class="ml-64 flex-1 overflow-hidden">
             <div class="h-full overflow-y-auto">
                 <!-- Search Results Section -->
                 <div id="search-results-section" class="hidden">
@@ -123,66 +123,21 @@
                                 <p class="text-gray-600 text-sm" id="search-description">Results for your search</p>
                             </div>
                             <button 
-                                onclick="clearSearch()"
+                                onclick="clearSearch()" 
                                 class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
                                 ← Back to Categories
                             </button>
                         </div>
                     </div>
                     <div class="p-6">
-                        <!-- Container for search/filter results with infinite scroll support -->
-                        <div id="search-results-container">
-                            <div id="search-results-content">
-                                <!-- Search results loaded here via HTMX -->
-                            </div>
-                            
-                            <!-- Infinite Scroll Elements for Search/Filter Results -->
-                            <div id="discover-sentinel" class="h-20 flex items-center justify-center">
-                                <!-- This element triggers infinite scroll when it comes into view -->
-                            </div>
-                            
-                            <!-- Loading indicator for infinite scroll -->
-                            <div id="discover-loading" class="htmx-indicator text-center py-4 hidden">
-                                <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-                                <p class="text-sm text-gray-500">Loading more results...</p>
-                            </div>
-                            
-                            <!-- End of results indicator -->
-                            <div id="discover-end" class="text-center py-4 text-gray-500 text-sm hidden">
-                                <svg class="w-6 h-6 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                </svg>
-                                You've reached the end of the results
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Filtered Results Section -->
-                <div id="filtered-results-section" class="hidden">
-                    <div class="bg-white border-b border-gray-200 px-6 py-4">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <h2 class="text-2xl font-bold text-gray-900 mb-1">Filtered Results</h2>
-                                <p class="text-gray-600 text-sm" id="filter-description">Results for your filters</p>
-                            </div>
-                            <button 
-                                onclick="clearFilters()"
-                                class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
-                                ← Back to Categories
-                            </button>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <div id="filtered-results-content">
-                            <!-- Filtered results loaded here via HTMX -->
+                        <div id="search-results-content">
+                            <!-- Search results loaded here via HTMX -->
                         </div>
                     </div>
                 </div>
 
-                <!-- Main Content Area that gets swapped -->
-                <div id="main-content-area">
-                    <!-- Categories View (Default) -->
+                <!-- Categories Section -->
+                <div id="categories-section">
                     <div class="bg-white border-b border-gray-200 px-6 py-4">
                         <div class="flex items-center justify-between">
                             <div>
@@ -192,15 +147,14 @@
                             <div class="flex items-center space-x-2">
                                 <button 
                                     id="reorder-toggle"
-                                    onclick="console.log('Button clicked!'); toggleCustomizeMode();"
+                                    onclick="toggleReorderMode()"
                                     class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
                                     📱 Customize
                                 </button>
-                                
                             </div>
                         </div>
                     </div>
-                    <div id="main-content-body" class="p-6">
+                    <div class="p-6">
                         <!-- Category Sections Container -->
                         <div id="categories-container" class="space-y-8">
                             <!-- Categories will be loaded here via HTMX -->
@@ -216,6 +170,28 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Expanded Category Section (Hidden by default) -->
+                <div id="expanded-category-section" class="hidden">
+                    <div class="bg-white border-b border-gray-200 px-6 py-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h2 id="expanded-category-title" class="text-2xl font-bold text-gray-900 mb-1">Category</h2>
+                                <p class="text-gray-600 text-sm" id="expanded-category-description">Browse all items in this category</p>
+                            </div>
+                            <button 
+                                onclick="backToCategories()" 
+                                class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
+                                ← Back to Categories
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <div id="expanded-category-content">
+                            <!-- Expanded category content with infinite scroll -->
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -223,13 +199,23 @@
 </div>
 
 <script>
-// Page-specific JavaScript for index page
+// Minimal JavaScript for UI state management
 let currentView = 'categories'; // categories, search, expanded
+let currentCategoryId = null;
+let currentCategoryConfig = null;
 
 // Search functionality
 function clearSearch() {
     const searchInput = document.getElementById('search-input');
+    const searchSection = document.getElementById('search-results-section');
+    const categoriesSection = document.getElementById('categories-section');
+    
     searchInput.value = '';
+    searchSection.classList.add('hidden');
+    categoriesSection.classList.remove('hidden');
+    
+    // Clear search results
+    document.getElementById('search-results-content').innerHTML = '';
     currentView = 'categories';
 }
 
@@ -238,58 +224,157 @@ document.addEventListener('htmx:afterRequest', function(event) {
     if (event.detail.target.id === 'search-results-content') {
         const searchInput = document.getElementById('search-input');
         const searchSection = document.getElementById('search-results-section');
+        const categoriesSection = document.getElementById('categories-section');
+        const expandedSection = document.getElementById('expanded-category-section');
         
-        // Check if this is a search (has search input value) or filter (triggered by form)
-        const isSearch = searchInput.value.trim();
-        const isFilter = event.detail.elt && event.detail.elt.id === 'discover-filter-form';
-        
-        if (event.detail.xhr.response.trim()) {
+        if (searchInput.value.trim() && event.detail.xhr.response.trim()) {
             searchSection.classList.remove('hidden');
-            
-            if (isSearch) {
-                document.getElementById('search-description').textContent = `Results for "${searchInput.value}"`;
-                currentView = 'search';
-            } else if (isFilter) {
-                // Build filter description
-                const form = document.getElementById('discover-filter-form');
-                const formData = new FormData(form);
-                const filterParts = [];
-                
-                const mediaType = formData.get('media_type');
-                if (mediaType && mediaType !== 'mixed') {
-                    filterParts.push(mediaType === 'movie' ? 'Movies' : 'TV Shows');
-                }
-                
-                const contentSources = formData.getAll('content_sources');
-                contentSources.forEach(source => {
-                    if (source === 'trending') filterParts.push('Trending');
-                    else if (source === 'popular') filterParts.push('Popular');
-                    else if (source === 'top_rated') filterParts.push('Top Rated');
-                    else if (source === 'upcoming') filterParts.push('Upcoming');
-                    else if (source === 'now_playing') filterParts.push('Now Playing');
-                });
-                
-                const ratingMin = formData.get('rating_min');
-                if (ratingMin) filterParts.push(ratingMin + '+⭐');
-                
-                const description = filterParts.length > 0 ? `Filtered: ${filterParts.join(', ')}` : 'Filtered Results';
-                document.getElementById('search-description').textContent = description;
-                currentView = 'filtered';
-            }
+            categoriesSection.classList.add('hidden');
+            expandedSection.classList.add('hidden');
+            document.getElementById('search-description').textContent = `Results for "${searchInput.value}"`;
+            currentView = 'search';
         }
     }
 });
 
-// Clear filters function - same as clear search
-function clearFilters() {
-    clearSearch(); // Use the same logic as search clear
+// Category expansion
+function expandCategory(categoryId, categoryTitle, categoryConfig) {
+    const categoriesSection = document.getElementById('categories-section');
+    const expandedSection = document.getElementById('expanded-category-section');
+    const searchSection = document.getElementById('search-results-section');
     
-    // Also reset form
-    const form = document.getElementById('discover-filter-form');
-    form.reset();
+    // Hide other sections
+    categoriesSection.classList.add('hidden');
+    searchSection.classList.add('hidden');
+    expandedSection.classList.remove('hidden');
+    
+    // Update expanded section
+    document.getElementById('expanded-category-title').textContent = categoryTitle;
+    document.getElementById('expanded-category-description').textContent = `Browse all ${categoryTitle.toLowerCase()}`;
+    
+    currentView = 'expanded';
+    currentCategoryId = categoryId;
+    currentCategoryConfig = categoryConfig;
+    
+    // Update filter bar to match category
+    updateFilterBarForCategory(categoryConfig);
+    
+    // Load expanded content with infinite scroll
+    const contentDiv = document.getElementById('expanded-category-content');
+    contentDiv.innerHTML = `
+        <div class="text-center py-8">
+            <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p class="text-gray-500">Loading content...</p>
+        </div>
+    `;
+    
+    // Trigger HTMX load for expanded view
+    htmx.ajax('GET', `{{ base_url }}/discover/category/expanded?${buildCategoryParams(categoryConfig)}&limit=40&page=1`, {
+        target: '#expanded-category-content',
+        swap: 'innerHTML'
+    });
 }
 
-// Page-specific JavaScript - the global functions are in base.html
+// Back to categories
+function backToCategories() {
+    const categoriesSection = document.getElementById('categories-section');
+    const expandedSection = document.getElementById('expanded-category-section');
+    const searchSection = document.getElementById('search-results-section');
+    
+    categoriesSection.classList.remove('hidden');
+    expandedSection.classList.add('hidden');
+    searchSection.classList.add('hidden');
+    
+    currentView = 'categories';
+    currentCategoryId = null;
+    currentCategoryConfig = null;
+    
+    // Reset filter bar to default state
+    resetFilterBar();
+}
+
+// Filter bar management
+function updateFilterBarForCategory(config) {
+    const filterContainer = document.getElementById('filter-form-container');
+    
+    // Update filter form with category context
+    htmx.ajax('GET', `{{ base_url }}/discover/filters?${buildCategoryParams(config)}`, {
+        target: '#filter-form-container',
+        swap: 'innerHTML'
+    });
+}
+
+function resetFilterBar() {
+    const filterContainer = document.getElementById('filter-form-container');
+    
+    // Reset to default filter form
+    htmx.ajax('GET', `{{ base_url }}/discover/filters`, {
+        target: '#filter-form-container',
+        swap: 'innerHTML'
+    });
+}
+
+function buildCategoryParams(config) {
+    if (!config) return '';
+    
+    const params = new URLSearchParams();
+    if (config.mediaType) params.append('media_type', config.mediaType);
+    if (config.contentSources) {
+        config.contentSources.forEach(source => params.append('content_sources', source));
+    }
+    if (config.genres) {
+        config.genres.forEach(genre => params.append('genres', genre));
+    }
+    if (config.sort) params.append('sort', config.sort);
+    
+    return params.toString();
+}
+
+// Category reordering functionality
+let reorderMode = false;
+
+function toggleReorderMode() {
+    reorderMode = !reorderMode;
+    const button = document.getElementById('reorder-toggle');
+    const dragHandles = document.querySelectorAll('.drag-handle');
+    
+    if (reorderMode) {
+        button.textContent = '💾 Save Order';
+        button.classList.add('bg-orange-100', 'text-orange-700');
+        button.classList.remove('bg-gray-100', 'text-gray-700');
+        
+        // Show drag handles and enable dragging
+        dragHandles.forEach(handle => handle.classList.remove('hidden'));
+        addRemoveButtons();
+        addCategoryAddButton();
+    } else {
+        button.textContent = '📱 Customize';
+        button.classList.remove('bg-orange-100', 'text-orange-700');
+        button.classList.add('bg-gray-100', 'text-gray-700');
+        
+        // Hide drag handles and save order
+        dragHandles.forEach(handle => handle.classList.add('hidden'));
+        removeManagementButtons();
+        saveCategoryOrder();
+    }
+}
+
+// Placeholder functions for category management (to be implemented)
+function addRemoveButtons() {
+    // Add remove buttons to categories
+}
+
+function removeManagementButtons() {
+    // Remove management buttons
+}
+
+function addCategoryAddButton() {
+    // Add button to add new categories
+}
+
+function saveCategoryOrder() {
+    // Save category order to user preferences
+}
 </script>
 
 <style>

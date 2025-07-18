@@ -1,0 +1,39 @@
+<!-- Single Category Component (for seamless addition) -->
+<div class="category-section" 
+     data-category="{{ category.id }}" 
+     data-order="{{ category.order }}"
+     data-title="{{ category.title }}"
+     data-type="{{ category.type }}"
+     data-sort="{{ category.sort }}"
+     data-color="{{ category.color }}">
+    <!-- Title Row -->
+    <div class="mb-4">
+        <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                {{ category.title }}
+                <span class="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">New!</span>
+            </h2>
+            <div class="flex items-center space-x-2">
+                <button 
+                    onclick="expandCategoryView('{{ category.type }}', '{{ category.sort }}', '{{ category.title }}')"
+                    class="bg-{{ category.color }}-100 hover:bg-{{ category.color }}-200 text-{{ category.color }}-700 px-3 py-1 rounded-md text-sm font-medium transition-colors">
+                    View More
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Horizontal Scroll Content -->
+    <div class="flex-1 overflow-hidden">
+        <div id="{{ category.id }}-content" 
+             class="horizontal-scroll"
+             hx-get="{{ base_url }}/discover/category?type={{ category.type }}&sort={{ category.sort }}&limit=20"
+             hx-trigger="load"
+             hx-target="this">
+            <div class="text-center py-8">
+                <div class="animate-spin w-5 h-5 border-2 border-{{ category.color }}-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                <p class="text-gray-500">Loading {{ category.title.lower() }}...</p>
+            </div>
+        </div>
+    </div>
+</div>

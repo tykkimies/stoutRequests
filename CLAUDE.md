@@ -56,6 +56,42 @@ async def endpoint_handler(request: Request, ...):
 ### 🚀 **CRITICAL PERFORMANCE PRINCIPLES** 
 **⚠️ These are fundamental rules that MUST be followed in all future development:**
 
+#### **HTMX-First Architecture (PRIMARY APPROACH)**
+Based on our successful optimization of the `/requests` page, this is now our standard:
+
+**✅ Core Principles:**
+- **Pure HTMX over JavaScript** - Eliminated 240+ lines of JavaScript down to 4 lines
+- **Server-side filtering & pagination** - All logic on backend with query parameters
+- **Component-based templates** - Fragments for partial updates, never full page injection
+- **Content negotiation** - Check `HX-Request` and `HX-Target` headers for proper responses
+- **Optimized database queries** - Reusable query builders, eliminate duplication
+
+**✅ Key Patterns:**
+```python
+# Content negotiation in endpoints
+if request.headers.get("HX-Request") and hx_target == "main-content":
+    return fragment_template  # Return component, not full page
+else:
+    return full_page_template
+```
+
+**✅ Template Structure:**
+- **Main template**: Full page with tab navigation
+- **Component templates**: Fragments for HTMX updates (`components/main_content.html`)
+- **Query parameters**: Server-side state management (`?status=PENDING&media_type=movie`)
+
+**✅ Performance Results:**
+- **Massive JavaScript reduction**: 240+ lines → 4 lines
+- **Fast server-side filtering**: No client-side processing
+- **Proper pagination**: 24 items per page with database optimization
+- **Accurate counts**: Separate query for status counts to avoid filter conflicts
+
+#### **Critical Implementation Fixes We Solved:**
+1. **Full page injection**: Fixed by checking `HX-Target` and returning appropriate fragments
+2. **Tab state persistence**: Fixed by including current filters in all action URLs
+3. **Count accuracy**: Fixed by using separate unfiltered dataset for count calculations
+4. **JSON responses**: Fixed by implementing proper HTMX content negotiation
+
 #### **Background Processing First**
 - **Heavy tasks MUST be background jobs** - Never block the UI with slow operations
 - **API calls to external services** → Use immediate integration with proper error handling (don't fail the request if service is down)
@@ -69,13 +105,6 @@ async def endpoint_handler(request: Request, ...):
 - **FastAPI endpoints** should be `async def` when doing any I/O
 - **Database sessions** should use async patterns where possible
 - **External API calls** must be async
-
-#### **HTMX Over JavaScript**
-- **Live updates** → Use HTMX `hx-trigger`, `hx-swap-oob`, `hx-target` 
-- **Form submissions** → HTMX forms, not JavaScript fetch
-- **Dynamic content** → HTMX partials and components
-- **Only use JavaScript** when HTMX cannot achieve the desired behavior
-- **Speed is the priority** - HTMX + fast endpoints beats JavaScript + slow endpoints
 
 #### **Endpoint Optimization Rules**
 - **Request creation** → Instant database write, background service integration
@@ -162,17 +191,22 @@ When native mobile development begins:
 ## 📝 Development Notes for Future Sessions
 
 ### Key Files
+- `/app/api/requests.py` - **HTMX-first reference implementation** with content negotiation
+- `/app/templates/requests.html` - Main template with tab navigation
+- `/app/templates/components/main_content.html` - Fragment component example
+- `/app/templates/components/requests_content.html` - Card grid component example
 - `/app/api/admin.py` - Admin endpoints with content negotiation
 - `/app/templates/admin_dashboard.html` - Main admin interface
 - `/app/services/plex_sync_service.py` - Library synchronization
 - `/app/templates/base.html` - Global HTMX configuration
 
 ### Remember When Working On:
-1. **New endpoints**: Always implement content negotiation
-2. **HTMX responses**: Return HTML fragments, not JSON
-3. **Database updates**: Set proper timestamps
-4. **Mobile considerations**: Keep JSON APIs functional
-5. **Auto-refresh**: Include HTMX triggers for dynamic updates
+1. **Follow the /requests pattern**: Use it as reference for HTMX-first implementation
+2. **Content negotiation**: Check `HX-Request` and `HX-Target` headers
+3. **Component templates**: Create fragments for partial updates
+4. **Server-side state**: Use query parameters, not JavaScript
+5. **Database optimization**: Reusable query builders, eliminate duplication
+6. **Mobile considerations**: Keep JSON APIs functional through content negotiation
 
 ### Current Tech Stack
 - **Backend**: FastAPI + SQLModel + PostgreSQL

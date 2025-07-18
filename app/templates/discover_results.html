@@ -74,19 +74,86 @@
         {% endfor %}
     </div>
 
-    <!-- Infinite scroll loading indicator -->
-    <div id="discover-loading" class="text-center py-8 hidden">
-        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-        <p class="text-gray-500">Loading more content...</p>
+    <!-- Pagination Controls -->
+    {% if total_pages and total_pages > 1 %}
+    <div class="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6 mt-6">
+        <div class="flex flex-1 justify-between sm:hidden">
+            {% if page > 1 %}
+            <button 
+                hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page - 1 }}"
+                hx-target="#discover-results"
+                class="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Previous
+            </button>
+            {% else %}
+            <span class="relative inline-flex items-center rounded-md border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-400">Previous</span>
+            {% endif %}
+            
+            {% if page < total_pages %}
+            <button 
+                hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page + 1 }}"
+                hx-target="#discover-results"
+                class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Next
+            </button>
+            {% else %}
+            <span class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-400">Next</span>
+            {% endif %}
+        </div>
+        
+        <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+            <div>
+                <p class="text-sm text-gray-700">
+                    Showing
+                    <span class="font-medium">{{ ((page - 1) * 20) + 1 }}</span>
+                    to
+                    <span class="font-medium">{{ [page * 20, total_results or (results|length)]|min }}</span>
+                    of
+                    <span class="font-medium">{{ total_results or (results|length) }}</span>
+                    results
+                </p>
+            </div>
+            <div>
+                <nav class="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                    {% if page > 1 %}
+                    <button 
+                        hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page - 1 }}"
+                        hx-target="#discover-results"
+                        class="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0">
+                        <span class="sr-only">Previous</span>
+                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    {% endif %}
+                    
+                    {% for page_num in range([1, page - 2]|max, [total_pages + 1, page + 3]|min) %}
+                        {% if page_num == page %}
+                        <span class="relative z-10 inline-flex items-center bg-orange-600 px-4 py-2 text-sm font-semibold text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600">{{ page_num }}</span>
+                        {% else %}
+                        <button 
+                            hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page_num }}"
+                            hx-target="#discover-results"
+                            class="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0">{{ page_num }}</button>
+                        {% endif %}
+                    {% endfor %}
+                    
+                    {% if page < total_pages %}
+                    <button 
+                        hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page + 1 }}"
+                        hx-target="#discover-results"
+                        class="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0">
+                        <span class="sr-only">Next</span>
+                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    {% endif %}
+                </nav>
+            </div>
+        </div>
     </div>
-    
-    <!-- Invisible sentinel for infinite scroll -->
-    <div id="discover-sentinel" class="h-1"></div>
-    
-    <!-- End of results indicator -->
-    <div id="discover-end" class="text-center py-8 hidden">
-        <p class="text-gray-500">You've reached the end!</p>
-    </div>
+    {% endif %}
 </div>
 
 {% else %}
@@ -110,26 +177,61 @@
 
 <script>
 // Initialize infinite scroll for discover results
-(function initializeDiscoverInfiniteScroll() {
+function initializeDiscoverInfiniteScroll() {
     console.log('🔧 Discover infinite scroll script starting...');
     
-    const resultsGrid = document.getElementById('results-grid');
-    const loadingIndicator = document.getElementById('discover-loading');
-    const endIndicator = document.getElementById('discover-end');
-    const sentinel = document.getElementById('discover-sentinel');
+    // Wait a bit for DOM to settle and check multiple times
+    let attempts = 0;
+    const maxAttempts = 10;
     
-    console.log('🔧 Elements found:', {
-        resultsGrid: !!resultsGrid,
-        loadingIndicator: !!loadingIndicator,
-        endIndicator: !!endIndicator,
-        sentinel: !!sentinel
-    });
-    
-    if (!resultsGrid || !loadingIndicator || !sentinel) {
-        console.error('❌ Missing required elements for infinite scroll');
-        return;
+    function tryInitialize() {
+        attempts++;
+        
+        const resultsGrid = document.getElementById('results-grid');
+        const loadingIndicator = document.getElementById('discover-loading');
+        const endIndicator = document.getElementById('discover-end');
+        const sentinel = document.getElementById('discover-sentinel');
+        
+        console.log(`🔧 Attempt ${attempts}: Elements found:`, {
+            resultsGrid: !!resultsGrid,
+            loadingIndicator: !!loadingIndicator,
+            endIndicator: !!endIndicator,
+            sentinel: !!sentinel
+        });
+        
+        // If we have the basic requirements (results grid exists, and at least loading/sentinel exist or can be found in parent document)
+        if (resultsGrid && (loadingIndicator || document.getElementById('discover-loading')) && (sentinel || document.getElementById('discover-sentinel'))) {
+            // Use the elements from the document if they exist
+            const actualLoadingIndicator = loadingIndicator || document.getElementById('discover-loading');
+            const actualEndIndicator = endIndicator || document.getElementById('discover-end');
+            const actualSentinel = sentinel || document.getElementById('discover-sentinel');
+            
+            if (!actualLoadingIndicator || !actualSentinel) {
+                console.log('🔧 Required elements still not found, will retry...');
+                if (attempts < maxAttempts) {
+                    setTimeout(tryInitialize, 100);
+                    return;
+                }
+                console.error('❌ Missing required elements for infinite scroll after all attempts');
+                return;
+            }
+            
+            console.log('✅ All required elements found, initializing infinite scroll');
+            setupInfiniteScroll(resultsGrid, actualLoadingIndicator, actualEndIndicator, actualSentinel);
+        } else {
+            console.log('🔧 Required elements not found, will retry...');
+            if (attempts < maxAttempts) {
+                setTimeout(tryInitialize, 100);
+                return;
+            }
+            console.error('❌ Missing required elements for infinite scroll after all attempts');
+        }
     }
     
+    tryInitialize();
+}
+
+function setupInfiniteScroll(resultsGrid, loadingIndicator, endIndicator, sentinel) {
     let currentPage = 1; // Page 1 is already loaded, start loading from page 2
     let isLoading = false;
     let hasMoreResults = true;
@@ -170,7 +272,7 @@
             
             const newResults = newResultsGrid ? Array.from(newResultsGrid.children) : [];
             
-            console.log(`📊 Loaded ${newResults.length} new results for page ${currentPage + 1}`);
+            console.log(`📊 Loaded ${newResults.length} new results for page ${currentPage}`);
             
             if (newResults.length > 0) {
                 // Append new results to the existing grid
@@ -186,14 +288,14 @@
                 if (newResults.length < 20) {
                     hasMoreResults = false;
                     loadingIndicator.classList.add('hidden');
-                    endIndicator.classList.remove('hidden');
+                    if (endIndicator) endIndicator.classList.remove('hidden');
                     console.log('📄 Reached end of results');
                 }
             } else {
                 // No more results
                 hasMoreResults = false;
                 loadingIndicator.classList.add('hidden');
-                endIndicator.classList.remove('hidden');
+                if (endIndicator) endIndicator.classList.remove('hidden');
                 console.log('📄 No more results available');
             }
             
@@ -233,6 +335,9 @@
     
     // Make loadMoreResults available globally for error retry button
     window.loadMoreResults = loadMoreResults;
-})(); // Immediately invoke the function
+}
+
+// Call the initialization function
+initializeDiscoverInfiniteScroll();
 </script>
 

@@ -1,0 +1,211 @@
+{% from 'macros/status_display.html' import media_status_badge %}
+
+<!-- Discover Filter Form -->
+<form 
+    id="discover-filter-form"
+    hx-get="{{ base_url }}/discover"
+    hx-target="#search-results-content"
+    hx-indicator="#discover-loading"
+    hx-trigger="submit"
+    class="space-y-4"
+>
+    <!-- Hidden inputs for expanded category context -->
+    {% if current_media_type in ['movie', 'tv'] and current_content_sources %}
+    <input type="hidden" name="type" value="{{ current_media_type }}">
+    <input type="hidden" name="sort" value="{{ current_content_sources[0] if current_content_sources else 'popular' }}">
+    <input type="hidden" name="view" value="expanded">
+    <input type="hidden" name="limit" value="40">
+    {% endif %}
+    
+    <!-- Media Type Filter -->
+    <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">Content Type</label>
+        <select name="media_type" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white">
+            <option value="mixed" {% if current_media_type == 'mixed' %}selected{% endif %}>🎭 All</option>
+            <option value="movie" {% if current_media_type == 'movie' %}selected{% endif %}>🎬 Movies</option>
+            <option value="tv" {% if current_media_type == 'tv' %}selected{% endif %}>📺 TV Shows</option>
+        </select>
+    </div>
+
+    <!-- Content Sources -->
+    <div>
+        <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-medium text-gray-700">Content Sources</label>
+            <button type="button" 
+                onclick="this.closest('form').querySelectorAll('input[name=content_sources]').forEach(cb => cb.checked = false); htmx.trigger(this.closest('form'), 'change')"
+                class="text-xs text-orange-600 hover:text-orange-700">Clear</button>
+        </div>
+        <div class="space-y-1 max-h-32 overflow-y-auto border border-gray-300 rounded-md p-2">
+            <div class="text-xs text-gray-500 px-1 py-1 italic">
+                Leave all unchecked to search all content with filters below
+            </div>
+            <hr class="my-1 border-gray-200">
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="content_sources" value="trending" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if 'trending' in current_content_sources %}checked{% endif %}>
+                🔥 Trending
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="content_sources" value="popular" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if 'popular' in current_content_sources %}checked{% endif %}>
+                ⭐ Popular
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="content_sources" value="top_rated" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if 'top_rated' in current_content_sources %}checked{% endif %}>
+                🏆 Top Rated
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="content_sources" value="upcoming" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if 'upcoming' in current_content_sources %}checked{% endif %}>
+                🗓️ Upcoming
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="content_sources" value="now_playing" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if 'now_playing' in current_content_sources %}checked{% endif %}>
+                🎭 Now Playing
+            </label>
+        </div>
+    </div>
+
+    <!-- Genres -->
+    <div>
+        <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-medium text-gray-700">Genres</label>
+            <button type="button" 
+                onclick="this.closest('form').querySelectorAll('input[name=genres]').forEach(cb => cb.checked = false); htmx.trigger(this.closest('form'), 'change')"
+                class="text-xs text-orange-600 hover:text-orange-700">Clear</button>
+        </div>
+        <div class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2">
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="28" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '28' in current_genres %}checked{% endif %}>
+                Action
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="12" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '12' in current_genres %}checked{% endif %}>
+                Adventure
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="16" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '16' in current_genres %}checked{% endif %}>
+                Animation
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="35" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '35' in current_genres %}checked{% endif %}>
+                Comedy
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="80" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '80' in current_genres %}checked{% endif %}>
+                Crime
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="99" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '99' in current_genres %}checked{% endif %}>
+                Documentary
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="18" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '18' in current_genres %}checked{% endif %}>
+                Drama
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="10751" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '10751' in current_genres %}checked{% endif %}>
+                Family
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="14" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '14' in current_genres %}checked{% endif %}>
+                Fantasy
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="27" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '27' in current_genres %}checked{% endif %}>
+                Horror
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="9648" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '9648' in current_genres %}checked{% endif %}>
+                Mystery
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="10749" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '10749' in current_genres %}checked{% endif %}>
+                Romance
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="878" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '878' in current_genres %}checked{% endif %}>
+                Science Fiction
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="53" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '53' in current_genres %}checked{% endif %}>
+                Thriller
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="10752" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '10752' in current_genres %}checked{% endif %}>
+                War
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="37" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '37' in current_genres %}checked{% endif %}>
+                Western
+            </label>
+        </div>
+    </div>
+
+    <!-- Rating Filter -->
+    <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">Minimum TMDB Rating</label>
+        <select name="rating_min" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white">
+            <option value="">No Rating Filter</option>
+            <option value="5.0" {% if current_rating_min == '5.0' %}selected{% endif %}>5.0+</option>
+            <option value="6.0" {% if current_rating_min == '6.0' %}selected{% endif %}>6.0+</option>
+            <option value="7.0" {% if current_rating_min == '7.0' %}selected{% endif %}>7.0+</option>
+            <option value="8.0" {% if current_rating_min == '8.0' %}selected{% endif %}>8.0+</option>
+            <option value="9.0" {% if current_rating_min == '9.0' %}selected{% endif %}>9.0+</option>
+        </select>
+        <input type="hidden" name="rating_source" value="tmdb">
+    </div>
+
+    <!-- Hidden field for pagination -->
+    <input type="hidden" name="page" value="{{ current_page or 1 }}">
+
+    <!-- Apply Changes Button -->
+    <div class="pt-3 border-t border-gray-200">
+        <!-- Apply Filters Button - simple form submit like search -->
+        <button 
+            type="submit"
+            class="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors duration-200 flex items-center justify-center space-x-2"
+        >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+            <span>Apply Filters</span>
+        </button>
+        
+        <!-- Clear Filters Button -->
+        <button 
+            type="button"
+            onclick="clearFilters()"
+            class="w-full mt-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-md transition-colors duration-200 flex items-center justify-center space-x-2"
+        >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+            <span>Clear & Back to Categories</span>
+        </button>
+    </div>
+</form>
+
+<!-- Loading indicator -->
+<div id="discover-loading" class="htmx-indicator text-center py-4">
+    <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+    <p class="text-sm text-gray-500">Loading results...</p>
+</div>

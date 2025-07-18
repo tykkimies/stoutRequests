@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Category Settings - Stout Requests{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto py-8 px-4">
+    <div class="bg-white rounded-lg shadow-lg p-6">
+        <div class="mb-6">
+            <h1 class="text-2xl font-bold text-gray-900 mb-2">📱 Customize Your Categories</h1>
+            <p class="text-gray-600">Reorder and show/hide categories on your discover page to match your preferences.</p>
+        </div>
+
+        <form hx-post="{{ base_url }}/discover/categories/customize" 
+              hx-target="#save-feedback" 
+              hx-indicator="#save-loading"
+              class="space-y-6">
+            
+            <!-- Categories List -->
+            <div class="space-y-4">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Available Categories</h2>
+                
+                <div id="categories-list" class="space-y-3">
+                    {% for category in categories %}
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 flex items-center justify-between category-item" 
+                         data-category-id="{{ category.id }}">
+                        
+                        <!-- Drag Handle -->
+                        <div class="flex items-center space-x-4">
+                            <div class="drag-handle cursor-move text-gray-400 hover:text-gray-600">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path>
+                                </svg>
+                            </div>
+                            
+                            <!-- Category Info -->
+                            <div class="flex items-center space-x-3">
+                                <div class="w-4 h-4 bg-{{ category.color }}-500 rounded-full"></div>
+                                <div>
+                                    <h3 class="font-medium text-gray-900">{{ category.title }}</h3>
+                                    <p class="text-sm text-gray-500">{{ category.type|title }} • {{ category.sort|title }}</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Controls -->
+                        <div class="flex items-center space-x-4">
+                            <!-- Order Input -->
+                            <div class="flex items-center space-x-2">
+                                <label class="text-sm text-gray-600">Order:</label>
+                                <input type="number" 
+                                       name="{{ category.id }}_order" 
+                                       value="{{ category.user_order }}" 
+                                       min="1" max="20"
+                                       class="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                            </div>
+                            
+                            <!-- Visibility Toggle -->
+                            <div class="flex items-center space-x-2">
+                                <label class="text-sm text-gray-600">Visible:</label>
+                                <input type="checkbox" 
+                                       name="{{ category.id }}_visible"
+                                       {% if category.user_visible %}checked{% endif %}
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <!-- Save Button -->
+            <div class="flex items-center justify-between pt-6 border-t border-gray-200">
+                <div id="save-feedback" class="text-sm"></div>
+                
+                <div class="flex items-center space-x-4">
+                    <a href="{{ base_url }}/" 
+                       class="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors">
+                        Cancel
+                    </a>
+                    <button type="submit" 
+                            class="px-6 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors">
+                        <div id="save-loading" class="htmx-indicator">
+                            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </div>
+                        Save Preferences
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Instructions -->
+    <div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div class="flex">
+            <div class="ml-3">
+                <h3 class="text-sm font-medium text-blue-800">💡 How to customize:</h3>
+                <div class="mt-2 text-sm text-blue-700">
+                    <ul class="list-disc list-inside space-y-1">
+                        <li><strong>Visibility:</strong> Check the box to show a category on your discover page</li>
+                        <li><strong>Order:</strong> Lower numbers appear first (1 = top, 2 = second, etc.)</li>
+                        <li><strong>Drag & Drop:</strong> Use the drag handle (≡) to reorder categories visually</li>
+                        <li><strong>New Categories:</strong> Enable additional categories like "Top Rated" and "Upcoming"</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Simple drag and drop functionality for reordering
+let draggedElement = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const categoryItems = document.querySelectorAll('.category-item');
+    
+    categoryItems.forEach(item => {
+        const dragHandle = item.querySelector('.drag-handle');
+        
+        dragHandle.addEventListener('mousedown', function(e) {
+            item.draggable = true;
+        });
+        
+        item.addEventListener('dragstart', function(e) {
+            draggedElement = item;
+            item.style.opacity = '0.5';
+        });
+        
+        item.addEventListener('dragend', function(e) {
+            item.style.opacity = '1';
+            item.draggable = false;
+            updateOrderValues();
+        });
+        
+        item.addEventListener('dragover', function(e) {
+            e.preventDefault();
+        });
+        
+        item.addEventListener('drop', function(e) {
+            e.preventDefault();
+            if (draggedElement !== item) {
+                const container = item.parentNode;
+                const allItems = Array.from(container.children);
+                const draggedIndex = allItems.indexOf(draggedElement);
+                const targetIndex = allItems.indexOf(item);
+                
+                if (draggedIndex < targetIndex) {
+                    container.insertBefore(draggedElement, item.nextSibling);
+                } else {
+                    container.insertBefore(draggedElement, item);
+                }
+            }
+        });
+    });
+});
+
+function updateOrderValues() {
+    const categoryItems = document.querySelectorAll('.category-item');
+    categoryItems.forEach((item, index) => {
+        const orderInput = item.querySelector('input[name$="_order"]');
+        if (orderInput) {
+            orderInput.value = index + 1;
+        }
+    });
+}
+</script>
+{% endblock %}

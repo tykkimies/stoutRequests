@@ -1,0 +1,116 @@
+<!-- Categories List Component -->
+<div id="categories-content">
+{% for category in categories %}
+<div class="category-section" 
+     data-category="{{ category.id }}" 
+     data-order="{{ category.order }}"
+     data-title="{{ category.title }}"
+     data-type="{{ category.type }}"
+     data-sort="{{ category.sort }}"
+     data-color="{{ category.color }}">
+    <!-- Title Row -->
+    <div class="mb-4">
+        <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                {{ category.title }}
+            </h2>
+            <div class="flex items-center space-x-2">
+                <button 
+                    onclick="expandCategoryView('{{ category.type }}', '{{ category.sort }}', '{{ category.title }}')"
+                    class="bg-{{ category.color }}-100 hover:bg-{{ category.color }}-200 text-{{ category.color }}-700 px-3 py-1 rounded-md text-sm font-medium transition-colors">
+                    View More
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Horizontal Scroll Content -->
+    <div class="flex-1 overflow-hidden">
+        <div id="{{ category.id }}-content" 
+             class="horizontal-scroll"
+             hx-get="{{ base_url }}/discover/category?type={{ category.type }}&sort={{ category.sort }}&limit=20"
+             hx-trigger="loadCategories"
+             hx-target="this"
+             data-cache-key="{{ category.id }}-{{ category.type }}-{{ category.sort }}">
+            <div class="text-center py-8">
+                <div class="animate-spin w-5 h-5 border-2 border-{{ category.color }}-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                <p class="text-gray-500">Loading {{ category.title.lower() }}...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+<!-- Quick Add Category Section -->
+<div class="mt-8 p-4 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg text-center">
+    <button 
+        hx-get="{{ base_url }}/discover/categories/quick-add"
+        hx-target="this"
+        hx-swap="outerHTML"
+        class="text-gray-600 hover:text-gray-800 transition-colors">
+        <svg class="w-6 h-6 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+        </svg>
+        <span class="text-sm font-medium">Add more categories</span>
+        <p class="text-xs text-gray-500 mt-1">Top Rated, Upcoming, and more</p>
+    </button>
+</div>
+
+<script>
+// Category content caching system
+(function() {
+    console.log('🔧 Initializing category content caching...');
+    
+    // Check for cached content before making HTMX requests
+    document.addEventListener('htmx:configRequest', function(event) {
+        const element = event.target;
+        const cacheKey = element.getAttribute('data-cache-key');
+        
+        if (cacheKey && element.classList.contains('horizontal-scroll')) {
+            const cachedContent = sessionStorage.getItem('category-cache-' + cacheKey);
+            if (cachedContent) {
+                console.log('📋 Using cached content for:', cacheKey);
+                event.preventDefault(); // Stop the HTMX request
+                element.innerHTML = cachedContent;
+                // Process HTMX attributes on cached content
+                if (typeof htmx !== 'undefined') {
+                    htmx.process(element);
+                }
+                return;
+            }
+        }
+    });
+    
+    // Cache successful responses
+    document.addEventListener('htmx:afterRequest', function(event) {
+        const element = event.target;
+        const cacheKey = element.getAttribute('data-cache-key');
+        
+        if (event.detail.successful && cacheKey && element.classList.contains('horizontal-scroll')) {
+            console.log('💾 Caching content for:', cacheKey);
+            sessionStorage.setItem('category-cache-' + cacheKey, element.innerHTML);
+        }
+    });
+    
+    console.log('✅ Category caching system initialized');
+})();
+
+// Parallel category loading for better performance
+(function() {
+    console.log('🚀 Starting parallel category loading...');
+    
+    // Wait a moment for the DOM to settle, then trigger all categories at once
+    setTimeout(() => {
+        const categoryContainers = document.querySelectorAll('[hx-trigger="loadCategories"]');
+        console.log(`🔄 Triggering ${categoryContainers.length} categories to load in parallel`);
+        
+        categoryContainers.forEach((container, index) => {
+            // Add a small stagger (50ms between each) to avoid overwhelming the server
+            setTimeout(() => {
+                htmx.trigger(container, 'loadCategories');
+            }, index * 50);
+        });
+    }, 100);
+})();
+</script>

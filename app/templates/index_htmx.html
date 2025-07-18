@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Discover - Stout Requests{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    {% if not current_user %}
+    <!-- Landing page for non-authenticated users -->
+    <div class="text-center py-16">
+        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to Stout Requests</h1>
+        <p class="text-xl text-gray-600 mb-8">Request movies and TV shows for your Plex server</p>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 max-w-md mx-auto">
+            <div class="flex items-center justify-center mb-4">
+                <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
+                    </svg>
+                </div>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Ready to get started?</h3>
+            <p class="text-gray-600 text-sm mb-4">Click "Login with Plex" in the top right corner to access your media request dashboard.</p>
+            <div class="text-sm text-gray-500">
+                <p>• Browse trending movies & TV shows</p>
+                <p>• Request content for your Plex server</p>
+                <p>• Track your request status</p>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <!-- Main content with sidebar layout -->
+    <div class="flex bg-gray-50 min-h-screen">
+        <!-- Left Sidebar - Fixed Position -->
+        <div class="w-64 bg-white shadow-lg border-r border-gray-200 fixed top-16 left-0 bottom-0 overflow-y-auto z-10">
+            <div class="p-4">
+                <!-- Search Section -->
+                <div class="mb-6">
+                    <div class="flex items-center space-x-2 mb-3">
+                        <div class="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center">
+                            <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-base font-semibold text-gray-900">Search</h3>
+                    </div>
+                    <div class="relative">
+                        <input 
+                            type="text" 
+                            id="search-input" 
+                            name="q"
+                            placeholder="Search movies & TV shows..."
+                            class="w-full px-3 py-2 pl-10 pr-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            hx-get="{{ base_url }}/search"
+                            hx-trigger="keyup changed delay:500ms"
+                            hx-target="#search-results-content"
+                            hx-indicator="#search-loading"
+                        >
+                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2">
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                        </div>
+                        <div id="search-loading" class="absolute right-3 top-1/2 transform -translate-y-1/2 htmx-indicator">
+                            <svg class="animate-spin h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discover Filters Section -->
+                <div class="mb-6">
+                    <div class="flex items-center space-x-2 mb-4">
+                        <div class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center">
+                            <svg class="w-3 h-3 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001 1v-8M7 8h10"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-base font-semibold text-gray-900">Discover</h3>
+                    </div>
+                    
+                    <!-- Discover Filter Form -->
+                    {% include 'components/discover_filters.html' %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="ml-64 flex-1 overflow-hidden">
+            <div class="h-full overflow-y-auto">
+                <!-- Search Results Section -->
+                <div id="search-results-section" class="hidden">
+                    <div class="bg-white border-b border-gray-200 px-6 py-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h2 class="text-2xl font-bold text-gray-900 mb-1">Search Results</h2>
+                                <p class="text-gray-600 text-sm" id="search-description">Results for your search</p>
+                            </div>
+                            <button 
+                                onclick="clearSearch()" 
+                                class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
+                                ← Back to Discover
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <div id="search-results-content">
+                            <!-- Search results loaded here via HTMX -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discover Results Section -->
+                <div id="discover-section">
+                    <div class="bg-white border-b border-gray-200 px-6 py-4">
+                        <h2 class="text-2xl font-bold text-gray-900 mb-1">Discover Content</h2>
+                        <p class="text-gray-600 text-sm">Use the filters on the left to discover movies and TV shows</p>
+                    </div>
+                    <div class="p-6">
+                        <div id="discover-results">
+                            <!-- Initial load or filtered results displayed here -->
+                            <div class="text-center py-12">
+                                <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                                <h3 class="text-lg font-medium text-gray-900 mb-2">Ready to discover?</h3>
+                                <p class="text-gray-500">Select your preferences from the filters on the left to find great content!</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// Minimal JavaScript for search functionality
+function clearSearch() {
+    const searchInput = document.getElementById('search-input');
+    const searchSection = document.getElementById('search-results-section');
+    const discoverSection = document.getElementById('discover-section');
+    
+    searchInput.value = '';
+    searchSection.classList.add('hidden');
+    discoverSection.classList.remove('hidden');
+    
+    // Clear search results
+    document.getElementById('search-results-content').innerHTML = '';
+}
+
+// Show search results when search has content
+document.addEventListener('htmx:afterRequest', function(event) {
+    if (event.detail.target.id === 'search-results-content') {
+        const searchInput = document.getElementById('search-input');
+        const searchSection = document.getElementById('search-results-section');
+        const discoverSection = document.getElementById('discover-section');
+        
+        if (searchInput.value.trim() && event.detail.xhr.response.trim()) {
+            searchSection.classList.remove('hidden');
+            discoverSection.classList.add('hidden');
+            document.getElementById('search-description').textContent = `Results for "${searchInput.value}"`;
+        }
+    }
+});
+</script>
+
+{% endblock %}

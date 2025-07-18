@@ -1,0 +1,113 @@
+<!-- Quick Add Categories Interface -->
+<div class="p-4 bg-white border border-gray-300 rounded-lg">
+    <div class="mb-4">
+        <h3 class="text-sm font-semibold text-gray-900 mb-2">✨ Available Categories</h3>
+        <p class="text-xs text-gray-600">Add these categories to your discover page:</p>
+    </div>
+    
+    {% if available_categories %}
+    <div class="space-y-2">
+        {% for category in available_categories %}
+        <form hx-post="{{ base_url }}/discover/categories/add-single" 
+              hx-target="#visible-categories" 
+              hx-swap="beforeend"
+              class="inline-block">
+            <input type="hidden" name="category_id" value="{{ category.id }}">
+            <button type="submit" 
+                    class="w-full flex items-center justify-between p-2 bg-{{ category.color }}-50 hover:bg-{{ category.color }}-100 border border-{{ category.color }}-200 rounded-md transition-colors group">
+                <div class="flex items-center space-x-2">
+                    <div class="w-3 h-3 bg-{{ category.color }}-500 rounded-full"></div>
+                    <span class="text-sm font-medium text-gray-700">{{ category.title }}</span>
+                </div>
+                <svg class="w-4 h-4 text-{{ category.color }}-600 group-hover:text-{{ category.color }}-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+            </button>
+        </form>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-4">
+        <p class="text-sm text-gray-500">🎉 All available categories are already added!</p>
+        <p class="text-xs text-gray-400 mt-1">You're using all the categories we have.</p>
+    </div>
+    {% endif %}
+    
+    <!-- Cancel/Close Button -->
+    <div class="mt-4 pt-3 border-t border-gray-200">
+        <button 
+            onclick="cancelAddCategories()"
+            class="w-full text-center text-sm text-gray-600 hover:text-gray-800 transition-colors">
+            Cancel
+        </button>
+    </div>
+</div>
+
+<script>
+// Cancel function that restores the proper state
+function cancelAddCategories() {
+    // Check if we're in customize mode by looking for the customize button text
+    const customizeButton = document.getElementById('reorder-toggle');
+    if (customizeButton && customizeButton.textContent.includes('Save')) {
+        // We're in customize mode, so just reload the customize interface
+        htmx.ajax('GET', window.location.origin + '/discover/categories/customize-mode', {
+            target: '#categories-container',
+            swap: 'innerHTML'
+        });
+    } else {
+        // We're in normal mode, reload the normal categories
+        htmx.ajax('GET', window.location.origin + '/discover/categories', {
+            target: '#categories-container', 
+            swap: 'innerHTML'
+        });
+    }
+}
+
+// Handle successful category addition
+document.addEventListener('htmx:afterRequest', function(event) {
+    // Check if this was a successful category addition
+    if (event.detail.pathInfo.requestPath.includes('/discover/categories/add-single') && 
+        event.detail.successful) {
+        
+        // Get the category ID that was added
+        const form = event.target;
+        const categoryId = form.querySelector('input[name="category_id"]').value;
+        
+        // Remove this category from the available list
+        const addButton = form.querySelector('button[type="submit"]');
+        if (addButton) {
+            addButton.style.transition = 'opacity 0.3s ease';
+            addButton.style.opacity = '0';
+            setTimeout(() => {
+                form.remove();
+                
+                // Check if there are no more categories to add
+                const remainingCategories = document.querySelectorAll('form[hx-post*="add-single"]');
+                if (remainingCategories.length === 0) {
+                    // Show "all categories added" message
+                    const parentDiv = document.querySelector('.space-y-2');
+                    if (parentDiv) {
+                        parentDiv.innerHTML = `
+                            <div class="text-center py-4">
+                                <p class="text-sm text-gray-500">🎉 All available categories are now added!</p>
+                                <p class="text-xs text-gray-400 mt-1">You can customize them using the Customize button.</p>
+                            </div>
+                        `;
+                    }
+                }
+            }, 300);
+        }
+        
+        // Automatically remove the "New!" badge after 5 seconds
+        setTimeout(() => {
+            const newBadges = document.querySelectorAll('.category-section .bg-green-100');
+            newBadges.forEach(badge => {
+                badge.style.transition = 'opacity 0.5s ease';
+                badge.style.opacity = '0';
+                setTimeout(() => badge.remove(), 500);
+            });
+        }, 5000);
+    }
+});
+</script>
+</div>

@@ -1,0 +1,38 @@
+<!-- Expanded Category View - Replaces main-content-area -->
+<!-- Update filter form to match category context -->
+<div 
+    hx-get="{{ base_url }}/discover/filters?media_type={{ category_type }}&content_sources={{ category_sort }}"
+    hx-trigger="load"
+    hx-target="#filter-form-container"
+    hx-swap="innerHTML"
+    style="display: none;">
+</div>
+<div class="bg-white border-b border-gray-200 px-6 py-4" data-expanded-category="{{ category_type }}-{{ category_sort }}">
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-2xl font-bold text-gray-900 mb-1">{{ category_title }}</h2>
+            <p class="text-gray-600 text-sm">Browse all {{ category_title.lower() }}</p>
+        </div>
+        <button 
+            hx-get="{{ base_url }}/discover/categories"
+            hx-target="#categories-container"
+            hx-swap="innerHTML"
+            class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-md transition-colors">
+            ← Back to Categories
+        </button>
+    </div>
+</div>
+<div class="p-6">
+    <div id="expanded-category-content">
+        <!-- Load expanded content with infinite scroll -->
+        <div 
+            hx-get="{{ base_url }}/discover/category/expanded?type={{ category_type }}&sort={{ category_sort }}&content_sources={{ category_sort }}&limit=40&page=1"
+            hx-trigger="load"
+            hx-target="this"
+            hx-swap="outerHTML"
+            class="text-center py-8">
+            <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p class="text-gray-500">Loading content...</p>
+        </div>
+    </div>
+</div>

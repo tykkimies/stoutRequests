@@ -379,11 +379,15 @@ async def import_friends(
     
     imported_count = 0
     for friend_data in friends:
-        # Check if user already exists
-        statement = select(User).where(User.plex_id == friend_data['id'])
-        existing_user = session.exec(statement).first()
+        # Check if user already exists by plex_id OR username (due to unique constraints)
+        plex_id_statement = select(User).where(User.plex_id == friend_data['id'])
+        username_statement = select(User).where(User.username == friend_data['username'])
         
-        if not existing_user:
+        existing_by_plex_id = session.exec(plex_id_statement).first()
+        existing_by_username = session.exec(username_statement).first()
+        
+        if not existing_by_plex_id and not existing_by_username:
+            # User doesn't exist, create new one
             user = User(
                 plex_id=friend_data['id'],
                 username=friend_data['username'],
@@ -395,6 +399,13 @@ async def import_friends(
             )
             session.add(user)
             imported_count += 1
+        elif existing_by_username and not existing_by_plex_id:
+            # Username exists but different plex_id - update the plex_id
+            print(f"🔄 Updating plex_id for existing user: {friend_data['username']}")
+            existing_by_username.plex_id = friend_data['id']
+            session.add(existing_by_username)
+        else:
+            print(f"ℹ️  User already exists: {friend_data['username']}")
     
     session.commit()
     

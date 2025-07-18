@@ -246,6 +246,271 @@
                 showToast('Operation completed successfully!', 'success');
             }
         });
+
+        // Global state for category expansion
+        let isExpanded = false;
+        let expandedHistoryState = null;
+
+        // Category expansion function - available globally
+        function expandCategoryView(type, sort, title) {
+            console.log('Expanding category:', type, sort, title);
+            
+            // Set expanded state
+            isExpanded = true;
+            
+            // Create a history entry ONLY when expanding (not when going back)
+            if (!expandedHistoryState) {
+                expandedHistoryState = { expanded: true, type: type, sort: sort, title: title };
+                const baseUrl = '{{ base_url }}';
+                history.pushState(expandedHistoryState, title, baseUrl + '/discover/' + type + '/' + sort);
+            }
+            
+            // Load expanded content
+            const baseUrl = '{{ base_url }}';
+            htmx.ajax('GET', baseUrl + '/discover/category?type=' + type + '&sort=' + sort + '&view=expanded&limit=40&page=1', {
+                target: '#categories-container', 
+                swap: 'innerHTML'
+            });
+            
+            // Update filter bar
+            htmx.ajax('GET', baseUrl + '/discover/filters?media_type=' + type + '&content_sources=' + sort, {
+                target: '#filter-form-container', 
+                swap: 'innerHTML'
+            });
+            
+            // Scroll to top
+            setTimeout(() => {
+                const container = document.getElementById('categories-container');
+                if (container) {
+                    container.scrollIntoView({behavior: 'smooth', block: 'start'});
+                }
+            }, 100);
+        }
+
+        // Back to categories function - available globally
+        function backToCategoriesView() {
+            console.log('Going back to categories');
+            
+            // Clear expanded state
+            isExpanded = false;
+            expandedHistoryState = null;
+            
+            // Update URL to root
+            const baseUrl = '{{ base_url }}';
+            history.pushState(null, '', baseUrl + '/');
+            
+            // Load categories view
+            htmx.ajax('GET', baseUrl + '/discover/categories', {
+                target: '#categories-container', 
+                swap: 'innerHTML'
+            });
+            
+            // Reset filter bar
+            htmx.ajax('GET', baseUrl + '/discover/filters', {
+                target: '#filter-form-container', 
+                swap: 'innerHTML'
+            });
+            
+            // Scroll to top
+            setTimeout(() => {
+                const container = document.getElementById('categories-container');
+                if (container) {
+                    container.scrollIntoView({behavior: 'smooth', block: 'start'});
+                }
+            }, 100);
+        }
+
+        // Browser back button support
+        window.addEventListener('popstate', function(event) {
+            console.log('Popstate event:', event.state, 'isExpanded:', isExpanded, 'URL:', window.location.href);
+            
+            if (isExpanded) {
+                // If we're in expanded view and browser back is pressed, collapse
+                console.log('Browser back pressed while expanded - collapsing');
+                backToCategoriesView();
+            }
+        });
+
+        // Category customization functionality
+        let isCustomizeMode = false;
+
+        // Test that JavaScript is loading
+        console.log('✅ JavaScript loaded successfully in base.html');
+        console.log('HTMX available:', typeof htmx !== 'undefined');
+        
+        // Check for elements on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, checking elements:');
+            console.log('reorder-toggle found:', !!document.getElementById('reorder-toggle'));
+            console.log('categories-container found:', !!document.getElementById('categories-container'));
+            
+            // Check if we're in authenticated section
+            const mainContent = document.querySelector('.flex.bg-gray-50.min-h-screen');
+            console.log('Authenticated layout found:', !!mainContent);
+            
+            // List all buttons on page for debugging
+            const allButtons = document.querySelectorAll('button');
+            console.log('All buttons on page:', allButtons.length);
+            allButtons.forEach((btn, index) => {
+                console.log(`Button ${index}: id="${btn.id}", text="${btn.textContent.trim()}"`);
+            });
+        });
+
+        // Global function for category customization
+        window.toggleCustomizeMode = function() {
+            console.log('toggleCustomizeMode called, isCustomizeMode:', isCustomizeMode);
+            
+            const button = document.getElementById('reorder-toggle');
+            const categoriesContainer = document.getElementById('categories-container');
+            
+            console.log('button found:', !!button, 'container found:', !!categoriesContainer);
+            
+            if (!isCustomizeMode) {
+                // Enter customize mode
+                isCustomizeMode = true;
+                console.log('Entering customize mode');
+                
+                if (button) {
+                    button.textContent = '💾 Save Changes';
+                    button.classList.add('bg-orange-100', 'text-orange-700');
+                    button.classList.remove('bg-gray-100', 'text-gray-700');
+                }
+                
+                const baseUrl = '{{ base_url }}';
+                const url = baseUrl + '/discover/categories/customize-mode';
+                console.log('Making HTMX request to:', url);
+                
+                // Load customize mode interface
+                htmx.ajax('GET', url, {
+                    target: '#categories-container',
+                    swap: 'innerHTML'
+                });
+            } else {
+                // Exit customize mode and save changes
+                isCustomizeMode = false;
+                console.log('Exiting customize mode');
+                
+                if (button) {
+                    button.textContent = '📱 Customize';
+                    button.classList.remove('bg-orange-100', 'text-orange-700');
+                    button.classList.add('bg-gray-100', 'text-gray-700');
+                }
+                
+                // Save the current state and reload normal view
+                saveCategoryCustomizations();
+            }
+        };
+
+        window.saveCategoryCustomizations = function() {
+            console.log('Saving category customizations');
+            // Collect all visible category preferences from the customization interface
+            const categoryItems = document.querySelectorAll('.customize-category-item');
+            
+            // Get all available categories to mark hidden ones
+            const allCategoryIds = ['recently-added', 'recent-requests', 'trending-movies', 'popular-movies', 'trending-tv', 'popular-tv', 'top-rated-movies', 'upcoming-movies', 'top-rated-tv'];
+            const visibleCategoryIds = [];
+            const customizations = {};
+            
+            categoryItems.forEach((item, index) => {
+                const categoryId = item.dataset.categoryId;
+                const displayOrder = index + 1; // Use position in list as order
+                
+                visibleCategoryIds.push(categoryId);
+                customizations[`${categoryId}_visible`] = 'on';
+                customizations[`${categoryId}_order`] = displayOrder.toString();
+            });
+            
+            // Mark categories that are not in the visible list as hidden
+            allCategoryIds.forEach(categoryId => {
+                if (!visibleCategoryIds.includes(categoryId)) {
+                    customizations[`${categoryId}_visible`] = 'off';
+                    customizations[`${categoryId}_order`] = '0';
+                }
+            });
+            
+            console.log('Submitting customizations for', visibleCategoryIds.length, 'visible categories');
+            console.log('Customizations data:', customizations);
+            console.log('Visible categories:', visibleCategoryIds);
+            
+            // Reset customize mode state immediately
+            isCustomizeMode = false;
+            const button = document.getElementById('reorder-toggle');
+            if (button) {
+                button.textContent = '📱 Customize';
+                button.classList.remove('bg-orange-100', 'text-orange-700');
+                button.classList.add('bg-gray-100', 'text-gray-700');
+            }
+            
+            // Submit customizations
+            const baseUrl = '{{ base_url }}';
+            htmx.ajax('POST', baseUrl + '/discover/categories/save-customizations', {
+                target: '#categories-container',
+                swap: 'innerHTML',
+                values: customizations
+            }).then(() => {
+                // Show success message
+                showToast('Categories saved successfully!', 'success');
+                console.log('Categories saved successfully');
+            }).catch((error) => {
+                console.error('Error saving categories:', error);
+                showToast('Error saving categories. Please try again.', 'error');
+                
+                // Reset customize mode on error
+                isCustomizeMode = true;
+                if (button) {
+                    button.textContent = '💾 Save Changes';
+                    button.classList.add('bg-orange-100', 'text-orange-700');
+                    button.classList.remove('bg-gray-100', 'text-gray-700');
+                }
+            });
+        };
+
+        window.cancelCustomizeMode = function() {
+            const button = document.getElementById('reorder-toggle');
+            
+            isCustomizeMode = false;
+            if (button) {
+                button.textContent = '📱 Customize';
+                button.classList.remove('bg-orange-100', 'text-orange-700');
+                button.classList.add('bg-gray-100', 'text-gray-700');
+            }
+            
+            // Reload normal categories view
+            const baseUrl = '{{ base_url }}';
+            htmx.ajax('GET', baseUrl + '/discover/categories', {
+                target: '#categories-container',
+                swap: 'innerHTML'
+            });
+        };
+
+        
+        // Make sure toggleCustomizeMode is available globally immediately
+        console.log('Defining toggleCustomizeMode globally...');
+        
+        // Also add click event listener as backup
+        document.addEventListener('DOMContentLoaded', function() {
+            const customizeBtn = document.getElementById('reorder-toggle');
+            if (customizeBtn) {
+                console.log('Adding event listener to customize button');
+                customizeBtn.addEventListener('click', function() {
+                    console.log('Event listener triggered!');
+                    window.toggleCustomizeMode();
+                });
+            } else {
+                console.error('reorder-toggle button not found!');
+                // Try again after a delay in case it's loaded by HTMX
+                setTimeout(function() {
+                    const delayedBtn = document.getElementById('reorder-toggle');
+                    console.log('Delayed check - reorder-toggle found:', !!delayedBtn);
+                    if (delayedBtn) {
+                        delayedBtn.addEventListener('click', function() {
+                            console.log('Delayed event listener triggered!');
+                            window.toggleCustomizeMode();
+                        });
+                    }
+                }, 1000);
+            }
+        });
     </script>
 </body>
 </html>
