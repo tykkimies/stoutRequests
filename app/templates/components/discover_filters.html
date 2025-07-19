@@ -17,6 +17,12 @@
     <input type="hidden" name="limit" value="40">
     {% endif %}
     
+    <!-- Hidden inputs for database category context -->
+    {% if current_db_category_type and current_db_category_sort %}
+    <input type="hidden" name="db_category_type" value="{{ current_db_category_type }}">
+    <input type="hidden" name="db_category_sort" value="{{ current_db_category_sort }}">
+    {% endif %}
+    
     <!-- Media Type Filter -->
     <div>
         <label class="block text-xs font-medium text-gray-700 mb-1">Content Type</label>

@@ -272,8 +272,17 @@
                 swap: 'innerHTML'
             });
             
-            // Update filter bar
-            htmx.ajax('GET', baseUrl + '/discover/filters?media_type=' + type + '&content_sources=' + sort, {
+            // Update filter bar - check if this is a database category
+            let filterUrl = baseUrl + '/discover/filters?media_type=' + type;
+            
+            // For database categories, add db_category parameters instead of content_sources
+            if (type === 'plex' || type === 'requests' || type === 'recommendations') {
+                filterUrl += '&db_category_type=' + type + '&db_category_sort=' + sort;
+            } else {
+                filterUrl += '&content_sources=' + sort;
+            }
+            
+            htmx.ajax('GET', filterUrl, {
                 target: '#filter-form-container', 
                 swap: 'innerHTML'
             });

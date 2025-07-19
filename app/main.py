@@ -347,6 +347,192 @@ async def unauthorized_page(
     )
 
 
+async def filter_database_category(
+    request: Request,
+    db_category_type: str, 
+    db_category_sort: str,
+    media_type: str,
+    genres: list[str],
+    rating_source: str,
+    rating_min: str,
+    page: int,
+    limit: int,
+    current_user,
+    session,
+    tmdb_service
+):
+    """Filter database categories (recent requests, recently added) by TMDB criteria"""
+    from .services.settings_service import SettingsService
+    
+    print(f"🔍 Filtering database category: {db_category_type}/{db_category_sort}")
+    print(f"🔍 Filters - Media Type: {media_type}, Genres: {genres}, Rating: {rating_min}")
+    
+    # Get database items first
+    database_items = []
+    
+    if db_category_type == "plex" and db_category_sort == "recently_added":
+        # Get recently added from Plex database
+        from app.models.plex_library_item import PlexLibraryItem
+        from datetime import datetime, timedelta
+        
+        one_week_ago = datetime.utcnow() - timedelta(days=7)
+        recent_statement = select(PlexLibraryItem).where(
+            PlexLibraryItem.added_at >= one_week_ago,
+            PlexLibraryItem.added_at.is_not(None)
+        ).order_by(PlexLibraryItem.added_at.desc()).limit(100)  # Get more to filter from
+        
+        recent_plex_items = session.exec(recent_statement).all()
+        
+        for plex_item in recent_plex_items:
+            if plex_item.tmdb_id:
+                database_items.append({
+                    'tmdb_id': plex_item.tmdb_id,
+                    'media_type': plex_item.media_type,
+                    'title': plex_item.title,
+                    'in_plex': True,
+                    'status': 'in_plex'
+                })
+    
+    elif db_category_type == "requests" and db_category_sort == "recent":
+        # Get recent requests from database
+        from app.models.media_request import MediaRequest, RequestStatus
+        from app.models.user import User
+        
+        recent_statement = select(MediaRequest).where(
+            MediaRequest.status != RequestStatus.AVAILABLE
+        ).order_by(MediaRequest.created_at.desc()).limit(100)  # Get more to filter from
+        
+        recent_requests = session.exec(recent_statement).all()
+        
+        for request_item in recent_requests:
+            if request_item.tmdb_id:
+                database_items.append({
+                    'tmdb_id': request_item.tmdb_id,
+                    'media_type': request_item.media_type.value if hasattr(request_item.media_type, 'value') else str(request_item.media_type),
+                    'title': request_item.title,
+                    'in_plex': False,
+                    'status': 'available'
+                })
+    
+    # Fetch TMDB details and apply filters
+    filtered_results = []
+    base_url = SettingsService.get_base_url(session)
+    
+    for db_item in database_items:
+        try:
+            # Skip if media type filter doesn't match
+            if media_type != "mixed" and db_item['media_type'] != media_type:
+                continue
+                
+            # Fetch TMDB details
+            if db_item['media_type'] == 'movie':
+                tmdb_data = tmdb_service.get_movie_details(db_item['tmdb_id'])
+            else:
+                tmdb_data = tmdb_service.get_tv_details(db_item['tmdb_id'])
+            
+            if not tmdb_data:
+                continue
+                
+            # Apply genre filter
+            if genres:
+                genre_ids = [int(g) for g in genres]
+                item_genre_ids = tmdb_data.get('genre_ids', []) or [g.get('id') for g in tmdb_data.get('genres', [])]
+                if not any(genre_id in item_genre_ids for genre_id in genre_ids):
+                    continue
+            
+            # Apply rating filter
+            if rating_source == "tmdb" and rating_min:
+                min_rating = float(rating_min)
+                if tmdb_data.get('vote_average', 0) < min_rating:
+                    continue
+            
+            # Create result item
+            item = {
+                'id': tmdb_data['id'],
+                'title': tmdb_data.get('title'),
+                'name': tmdb_data.get('name'),
+                'overview': tmdb_data.get('overview', ''),
+                'poster_path': tmdb_data.get('poster_path'),
+                'poster_url': f"https://image.tmdb.org/t/p/w500{tmdb_data.get('poster_path')}" if tmdb_data.get('poster_path') else None,
+                'release_date': tmdb_data.get('release_date', ''),
+                'first_air_date': tmdb_data.get('first_air_date', ''),
+                'vote_average': tmdb_data.get('vote_average', 0),
+                'media_type': db_item['media_type'],
+                'in_plex': db_item['in_plex'],
+                'status': db_item['status'],
+                'base_url': base_url
+            }
+            
+            filtered_results.append(item)
+            
+        except Exception as e:
+            print(f"❌ Error filtering database item {db_item['tmdb_id']}: {e}")
+            continue
+    
+    # Apply pagination
+    start_index = (page - 1) * limit
+    end_index = start_index + limit
+    paginated_results = filtered_results[start_index:end_index]
+    
+    total_results = len(filtered_results)
+    total_pages = (total_results + limit - 1) // limit
+    
+    print(f"🔍 Database category filtering: {len(database_items)} items -> {len(filtered_results)} filtered -> {len(paginated_results)} paginated")
+    
+    # Return the same structure as regular discover
+    hx_target = request.headers.get("HX-Target", "")
+    if request.headers.get("HX-Request"):
+        if hx_target == "categories-container":
+            return create_template_response(
+                "components/expanded_results.html",
+                {
+                    "request": request,
+                    "results": paginated_results,
+                    "current_user": current_user,
+                    "category_type": media_type,
+                    "category_sort": f"{db_category_type}_{db_category_sort}_filtered",
+                    "category_title": f"Filtered {db_category_type.title()} {db_category_sort.replace('_', ' ').title()}",
+                    "page": page,
+                    "total_pages": total_pages,
+                    "total_results": total_results,
+                    "current_rating_min": rating_min,
+                    "current_media_type": media_type,
+                    "current_content_sources": [],
+                    "current_genres": genres
+                }
+            )
+        elif hx_target == "results-grid":
+            return create_template_response(
+                "components/movie_cards_only.html",
+                {
+                    "request": request,
+                    "results": paginated_results,
+                    "current_user": current_user,
+                    "media_type": media_type,
+                    "page": page,
+                    "total_pages": total_pages,
+                    "current_media_type": media_type,
+                    "current_content_sources": [],
+                    "current_genres": genres,
+                    "current_rating_min": rating_min
+                }
+            )
+    
+    # Full page response (shouldn't normally happen)
+    return create_template_response(
+        "discover_results.html",
+        {
+            "request": request,
+            "results": paginated_results,
+            "current_user": current_user,
+            "media_type": media_type,
+            "page": page,
+            "total_pages": total_pages,
+            "total_results": total_results
+        }
+    )
+
+
 @app.get("/discover", response_class=HTMLResponse)
 async def discover_page(
     request: Request,
@@ -358,6 +544,10 @@ async def discover_page(
     studios: list[str] = Query(default=[]),
     streaming: list[str] = Query(default=[]),
     page: int = 1,
+    limit: int = 40,  # Match expanded view page size
+    # Parameters for filtering database categories
+    db_category_type: str = Query(default="", description="Type for database categories (plex, requests, recommendations)"),
+    db_category_sort: str = Query(default="", description="Sort for database categories (recently_added, recent, personalized)"),
     current_user: User | None = Depends(get_current_user_optional),
     session: Session = Depends(get_session)
 ):
@@ -373,6 +563,14 @@ async def discover_page(
     plex_service = PlexService(session)
     
     try:
+        # Handle filtering for database categories (recent requests, recently added, etc.)
+        if db_category_type and db_category_sort:
+            print(f"🔍 DISCOVER DEBUG - Filtering database category: {db_category_type}/{db_category_sort}")
+            return await filter_database_category(
+                request, db_category_type, db_category_sort, media_type, 
+                genres, rating_source, rating_min, page, limit,
+                current_user, session, tmdb_service
+            )
         # Convert genres list to comma-separated string for TMDB
         genre_filter = ",".join(genres) if genres else None
         
@@ -445,36 +643,66 @@ async def discover_page(
             print(f"🔍 Using traditional content sources: {content_sources}")
             
             # Helper function to fetch from a specific content source
+            # Use the same methods as /discover/category for consistency
             def fetch_from_source(source, target_media_type):
                 try:
+                    # If any filters are applied (genres, rating, streaming), use discover endpoint for consistency
+                    has_filters = bool(genre_filter or rating_filter or streaming_filter)
+                    
                     if source == "trending":
-                        return tmdb_service.get_trending(target_media_type, page)
+                        if has_filters:
+                            # Use discover endpoint with trending sort when filters are applied
+                            if target_media_type == "movie":
+                                return tmdb_service.discover_movies(
+                                    page=page, sort_by="popularity.desc",  # Closest to trending
+                                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                                    with_watch_providers=streaming_filter
+                                )
+                            else:
+                                return tmdb_service.discover_tv(
+                                    page=page, sort_by="popularity.desc",  # Closest to trending
+                                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                                    with_watch_providers=streaming_filter
+                                )
+                        else:
+                            # No filters, use trending endpoint for consistency with View All
+                            return tmdb_service.get_trending(target_media_type, page)
                     elif source == "popular":
-                        if target_media_type == "movie":
-                            return tmdb_service.discover_movies(
-                                page=page, sort_by="popularity.desc", 
-                                with_genres=genre_filter, vote_average_gte=rating_filter,
-                                with_watch_providers=streaming_filter
-                            )
+                        if has_filters:
+                            # Use discover endpoint with popularity sort when filters are applied
+                            if target_media_type == "movie":
+                                return tmdb_service.discover_movies(
+                                    page=page, sort_by="popularity.desc",
+                                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                                    with_watch_providers=streaming_filter
+                                )
+                            else:
+                                return tmdb_service.discover_tv(
+                                    page=page, sort_by="popularity.desc",
+                                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                                    with_watch_providers=streaming_filter
+                                )
                         else:
-                            return tmdb_service.discover_tv(
-                                page=page, sort_by="popularity.desc",
-                                with_genres=genre_filter, vote_average_gte=rating_filter,
-                                with_watch_providers=streaming_filter
-                            )
+                            # No filters, use popular endpoint for consistency with View All
+                            return tmdb_service.get_popular(target_media_type, page)
                     elif source == "top_rated":
-                        if target_media_type == "movie":
-                            return tmdb_service.discover_movies(
-                                page=page, sort_by="vote_average.desc",
-                                with_genres=genre_filter, vote_average_gte=rating_filter,
-                                with_watch_providers=streaming_filter
-                            )
+                        if has_filters:
+                            # Use discover endpoint with rating sort when filters are applied
+                            if target_media_type == "movie":
+                                return tmdb_service.discover_movies(
+                                    page=page, sort_by="vote_average.desc",
+                                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                                    with_watch_providers=streaming_filter
+                                )
+                            else:
+                                return tmdb_service.discover_tv(
+                                    page=page, sort_by="vote_average.desc",
+                                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                                    with_watch_providers=streaming_filter
+                                )
                         else:
-                            return tmdb_service.discover_tv(
-                                page=page, sort_by="vote_average.desc",
-                                with_genres=genre_filter, vote_average_gte=rating_filter,
-                                with_watch_providers=streaming_filter
-                            )
+                            # No filters, use top_rated endpoint for consistency with View All
+                            return tmdb_service.get_top_rated(target_media_type, page)
                     elif source == "upcoming" and target_media_type == "movie":
                         return tmdb_service.get_upcoming_movies(page)
                     elif source == "now_playing" and target_media_type == "movie":
@@ -2002,6 +2230,9 @@ async def discover_filters(
     genres: list[str] = Query(default=[]),
     rating_source: str = "",
     rating_min: str = "",
+    # Parameters for database categories
+    db_category_type: str = Query(default=""),
+    db_category_sort: str = Query(default=""),
     current_user: User | None = Depends(get_current_user_optional),
     session: Session = Depends(get_session)
 ):
@@ -2015,7 +2246,9 @@ async def discover_filters(
             "current_content_sources": content_sources,
             "current_genres": genres,
             "current_rating_source": rating_source,
-            "current_rating_min": rating_min
+            "current_rating_min": rating_min,
+            "current_db_category_type": db_category_type,
+            "current_db_category_sort": db_category_sort
         }
     )
 
