@@ -537,7 +537,7 @@
                                     </div>
                                     
                                     <!-- Action button -->
-                                    {{ media_status_badge(item, style='button', size='md') }}
+                                    {{ media_status_badge(item, style='button', size='md', base_url=base_url) }}
                                 </div>
                             </div>
                         </div>
@@ -545,7 +545,7 @@
                         <!-- Top badges (always visible) -->
                         <div class="absolute top-2 left-2">
                             {% if item.status or item.in_plex %}
-                            {{ media_status_badge(item, style='overlay', size='sm') }}
+                            {{ media_status_badge(item, style='overlay', size='sm', base_url=base_url) }}
                             {% endif %}
                         </div>
                         
@@ -623,7 +623,7 @@
                                     </div>
                                     
                                     <!-- Action button -->
-                                    {{ media_status_badge(item, style='button', size='md') }}
+                                    {{ media_status_badge(item, style='button', size='md', base_url=base_url) }}
                                 </div>
                             </div>
                         </div>
@@ -631,7 +631,7 @@
                         <!-- Top badges (always visible) -->
                         <div class="absolute top-2 left-2">
                             {% if item.status or item.in_plex %}
-                            {{ media_status_badge(item, style='overlay', size='sm') }}
+                            {{ media_status_badge(item, style='overlay', size='sm', base_url=base_url) }}
                             {% endif %}
                         </div>
                         

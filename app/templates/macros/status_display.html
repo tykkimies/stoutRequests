@@ -1,7 +1,7 @@
 <!-- Status Display Macros -->
 <!-- This provides isolated variable scoping for status display -->
 
-{% macro media_status_badge(item, style='badge', size='md', status=None, tmdb_id=None, media_type=None) -%}
+{% macro media_status_badge(item, style='badge', size='md', status=None, tmdb_id=None, media_type=None, base_url='') -%}
     {%- set computed_status = status if status else (item.status if item and item.status else 'available') -%}
     {%- set item_tmdb_id = tmdb_id if tmdb_id else (item.id if item else '') -%}
     {%- set item_media_type = media_type if media_type else (item.media_type if item else '') -%}
@@ -155,6 +155,7 @@
 
     {%- else -%}
         <!-- Available status - show request button instead -->
+         
         {%- if display_style == 'button' -%}
             <form hx-post="{{ base_url }}/requests/create" hx-target="this" hx-swap="outerHTML" class="w-full relative z-30" onclick="event.stopPropagation();">
                 <input type="hidden" name="tmdb_id" value="{{ item_tmdb_id }}">

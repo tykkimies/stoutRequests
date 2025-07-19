@@ -347,6 +347,18 @@
         console.log('✅ JavaScript loaded successfully in base.html');
         console.log('HTMX available:', typeof htmx !== 'undefined');
         
+        // FORCE CLEAR ALL CACHE to fix base_url issues - VERSION 2
+        console.log('🗑️ FORCE CLEARING ALL CACHE VERSION 2...');
+        Object.keys(sessionStorage).forEach(key => {
+            if (key.startsWith('category-cache-')) {
+                sessionStorage.removeItem(key);
+                console.log('🗑️ Cleared cache key:', key);
+            }
+        });
+        // Clear everything to be sure
+        sessionStorage.clear();
+        localStorage.clear();
+        
         // Check for elements on page load
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DOM loaded, checking elements:');

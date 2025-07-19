@@ -61,7 +61,7 @@
                         <div class="ml-4 flex-shrink-0">
                             {% set status = item.get('status', 'available') %}
                             {% if status != 'not_media' %}
-                            {{ media_status_badge(item, style='search', size='md', status=status) }}
+                            {{ media_status_badge(item, style='search', size='md', status=status, base_url=base_url) }}
                             {% endif %}
                         </div>
                     </div>

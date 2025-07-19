@@ -128,9 +128,13 @@ security = HTTPBearer(auto_error=False)
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
     current_user = context.get('current_user')
-    global_context = get_global_template_context(current_user)
+    request = context.get('request')
+    global_context = get_global_template_context(current_user, request)
     # Merge contexts, with explicit context taking precedence
     merged_context = {**global_context, **context}
+    print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Template: {template_name}")
+    print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Global context base_url: '{global_context.get('base_url', 'MISSING')}'")
+    print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Final merged context base_url: '{merged_context.get('base_url', 'MISSING')}'")
     return templates.TemplateResponse(template_name, merged_context)
 
 

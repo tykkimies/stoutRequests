@@ -26,7 +26,7 @@ def url_for(path: str, base_url: str = "") -> str:
     return result
 
 
-def get_global_template_context(current_user=None) -> dict:
+def get_global_template_context(current_user=None, request=None) -> dict:
     """Get global template context that should be available to all templates"""
     try:
         session = SQLSession(engine)
@@ -38,6 +38,9 @@ def get_global_template_context(current_user=None) -> dict:
         
         # Ensure base_url doesn't create double slashes when empty
         base_url = settings.base_url.rstrip('/') if settings.base_url else ''
+        
+        # Debug logging
+        print(f"🔧 [TEMPLATE CONTEXT] FINAL base_url being returned: '{base_url}'")
         
         # Add admin status if user is provided
         user_is_admin = False
