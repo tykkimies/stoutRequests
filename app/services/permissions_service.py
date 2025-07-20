@@ -131,7 +131,15 @@ class PermissionsService:
         if not user_perms:
             return False
         
-        # Check custom permission override first
+        # Check dedicated user permission columns first (these override everything)
+        if permission == PermissionFlags.REQUEST_MOVIES and user_perms.can_request_movies is not None:
+            return user_perms.can_request_movies
+        elif permission == PermissionFlags.REQUEST_TV and user_perms.can_request_tv is not None:
+            return user_perms.can_request_tv
+        elif permission == PermissionFlags.REQUEST_4K and user_perms.can_request_4k is not None:
+            return user_perms.can_request_4k
+        
+        # Check custom permission override
         custom_perm = user_perms.has_custom_permission(permission)
         if custom_perm is not None:
             return custom_perm

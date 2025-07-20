@@ -52,6 +52,7 @@
 <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
     {% for request in requests %}
     <div class="request-item bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer" 
+         id="request-card-{{ request.id }}"
          data-media-type="{{ request.media_type.value }}" 
          data-status="{{ request.status.value }}"
          onclick="openMediaInfo('{{ request.media_type.value }}', '{{ request.tmdb_id }}')">
@@ -135,7 +136,7 @@
                         {% if request.status.value == 'PENDING' %}
                         <button 
                             hx-post="{{ base_url }}/requests/{{ request.id }}/approve?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
-                            hx-target="#main-content"
+                            hx-swap="none"
                             hx-confirm="Approve this request?"
                             onclick="event.stopPropagation();"
                             class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
@@ -145,7 +146,7 @@
                         </button>
                         <button 
                             hx-post="{{ base_url }}/requests/{{ request.id }}/reject?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
-                            hx-target="#main-content"
+                            hx-swap="none"
                             hx-confirm="Reject this request?"
                             onclick="event.stopPropagation();"
                             class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
@@ -180,7 +181,7 @@
                     {% if user_is_admin or (user_lookup.get(request.id) and user_lookup[request.id].id == current_user.id) %}
                     <button 
                         hx-delete="{{ base_url }}/requests/{{ request.id }}/delete?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
-                        hx-target="#main-content"
+                        hx-swap="none"
                         hx-confirm="Are you sure you want to delete this request? This action cannot be undone."
                         onclick="event.stopPropagation();"
                         class="bg-gray-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"

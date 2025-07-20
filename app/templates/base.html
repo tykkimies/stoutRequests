@@ -18,10 +18,28 @@
             // Get the current URL and check if it starts with a relative path
             let url = evt.detail.path;
             
-            // If it's a relative URL starting with /newrequests (base_url), 
+            // Get the base URL from the current page's configuration
+            const baseUrl = '{{ base_url }}';
+            
+            console.log('🔍 HTMX configRequest:', {
+                originalPath: url,
+                baseUrl: baseUrl,
+                currentOrigin: window.location.origin,
+                currentProtocol: window.location.protocol
+            });
+            
+            // If it's a relative URL starting with our base_url path, 
             // convert it to an absolute URL with current protocol
-            if (url && url.startsWith('/newrequests')) {
-                evt.detail.path = window.location.origin + url;
+            if (url && baseUrl && url.startsWith(baseUrl)) {
+                const newUrl = window.location.origin + url;
+                console.log('🔧 HTMX URL fixed:', url, '->', newUrl);
+                evt.detail.path = newUrl;
+            }
+            // Also handle any URL that starts with / but not with base_url
+            else if (url && url.startsWith('/') && !url.startsWith('http')) {
+                const newUrl = window.location.origin + url;
+                console.log('🔧 HTMX relative URL fixed:', url, '->', newUrl);
+                evt.detail.path = newUrl;
             }
         });
     </script>
@@ -151,7 +169,7 @@
                         <div class="ml-10 flex items-baseline space-x-4">
                             <a href="{{ base_url }}/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Search</a>
                             <a href="{{ base_url }}/requests/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Requests</a>
-                            {% if user_is_admin %}
+                            {% if user_permissions.can_manage_settings or user_permissions.can_manage_users or user_permissions.can_approve_requests or user_permissions.can_library_sync %}
                             <a href="{{ base_url }}/admin/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">⚙️ Admin</a>
                             {% endif %}
                         </div>

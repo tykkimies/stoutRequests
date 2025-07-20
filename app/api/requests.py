@@ -30,9 +30,13 @@ templates = Jinja2Templates(directory="app/templates")
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
     current_user = context.get('current_user')
-    global_context = get_global_template_context(current_user)
+    request = context.get('request')
+    global_context = get_global_template_context(current_user, request)
     # Merge contexts, with explicit context taking precedence
     merged_context = {**global_context, **context}
+    print(f"🔧 [REQUESTS API] Template: {template_name}")
+    print(f"🔧 [REQUESTS API] Global context base_url: '{global_context.get('base_url', 'MISSING')}'")
+    print(f"🔧 [REQUESTS API] Final merged context base_url: '{merged_context.get('base_url', 'MISSING')}'")
     return templates.TemplateResponse(template_name, merged_context)
 
 
@@ -43,6 +47,92 @@ class CreateRequestData(BaseModel):
     overview: Optional[str] = None
     poster_path: Optional[str] = None
     release_date: Optional[str] = None
+
+
+async def integrate_with_services(media_request: MediaRequest, session: Session) -> Optional[Dict]:
+    """
+    Automatically send approved requests to Radarr/Sonarr
+    Returns integration result or None if no service configured
+    """
+    import asyncio
+    
+    try:
+        if media_request.media_type == MediaType.MOVIE:
+            # Send to Radarr
+            from ..services.radarr_service import RadarrService
+            
+            radarr = RadarrService(session)
+            if not radarr.base_url or not radarr.api_key:
+                print(f"⚠️ Radarr not configured, skipping integration for movie request {media_request.id}")
+                return None
+            
+            print(f"🎬 Sending movie '{media_request.title}' (TMDB: {media_request.tmdb_id}) to Radarr...")
+            
+            # Add a timeout to prevent hanging
+            try:
+                result = await asyncio.wait_for(
+                    radarr.add_movie(
+                        tmdb_id=media_request.tmdb_id,
+                        user_id=media_request.user_id
+                    ),
+                    timeout=30.0
+                )
+                
+                if result:
+                    return {
+                        'service': 'Radarr',
+                        'service_id': result.get('id'),
+                        'title': result.get('title', media_request.title)
+                    }
+                else:
+                    print(f"❌ Failed to add movie to Radarr: {media_request.title}")
+                    return None
+            except asyncio.TimeoutError:
+                print(f"⏰ Radarr integration timeout for request {media_request.id}")
+                return None
+                
+        elif media_request.media_type == MediaType.TV:
+            # Send to Sonarr
+            from ..services.sonarr_service import SonarrService
+            
+            sonarr = SonarrService(session)
+            if not sonarr.base_url or not sonarr.api_key:
+                print(f"⚠️ Sonarr not configured, skipping integration for TV request {media_request.id}")
+                return None
+            
+            print(f"📺 Sending TV series '{media_request.title}' (TMDB: {media_request.tmdb_id}) to Sonarr...")
+            
+            # Add a timeout to prevent hanging
+            try:
+                result = await asyncio.wait_for(
+                    sonarr.add_series(
+                        tmdb_id=media_request.tmdb_id,
+                        user_id=media_request.user_id,
+                        monitor_type='all'  # Default to monitoring all episodes
+                    ),
+                    timeout=30.0
+                )
+                
+                if result:
+                    return {
+                        'service': 'Sonarr',
+                        'service_id': result.get('id'),
+                        'title': result.get('title', media_request.title)
+                    }
+                else:
+                    print(f"❌ Failed to add TV series to Sonarr: {media_request.title}")
+                    return None
+            except asyncio.TimeoutError:
+                print(f"⏰ Sonarr integration timeout for request {media_request.id}")
+                return None
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error integrating request {media_request.id} with services: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 @router.post("/create")
 async def create_request(
@@ -174,10 +264,19 @@ async def create_request(
     if initial_status == RequestStatus.PENDING:
         permissions_service.increment_user_request_count(current_user.id)
     
+    # 🎬 NEW: Automatic Service Integration for Auto-Approved Requests
+    integration_message = ""
+    if initial_status == RequestStatus.APPROVED:
+        integration_result = await integrate_with_services(new_request, session)
+        if integration_result:
+            integration_message = f" and sent to {integration_result['service']}"
+            print(f"✅ Auto-approved request {new_request.id} integrated with {integration_result['service']}")
+        else:
+            print(f"⚠️ Auto-approved request {new_request.id} could not be integrated (services may not be configured)")
 
     # Return appropriate message based on initial status
     if initial_status == RequestStatus.APPROVED:
-        message = "Auto-approved!"
+        message = f"Auto-approved{integration_message}!"
         color_class = "blue"
     else:
         message = "Requested!"
@@ -244,6 +343,7 @@ async def create_request(
 
 
 @router.get("/", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)  # Handle both with and without trailing slash
 async def unified_requests(
     request: Request,
     status: Optional[str] = None,
@@ -255,23 +355,32 @@ async def unified_requests(
 ):
     """Unified requests page with visibility controls"""
     try:
-        # Get visibility settings
-        visibility_config = SettingsService.get_request_visibility_config(session)
+        # Get user's specific permissions directly from PermissionsService
+        from ..services.permissions_service import PermissionsService
+        from ..models.user_permissions import UserPermissions
         
-        # Determine what requests to show based on user permissions and settings
+        permissions_service = PermissionsService(session)
+        user_perms_obj = permissions_service.get_user_permissions(current_user.id)
+        custom_perms = user_perms_obj.get_custom_permissions() if user_perms_obj else {}
+        
+        # Determine what requests to show based on user permissions
         user_lookup = {}  # Dictionary to store user info by request ID
         
         from ..core.permissions import is_user_admin
         user_is_admin = is_user_admin(current_user, session)
         
+        # Check user's specific viewing permissions
+        can_view_all_requests = user_is_admin or custom_perms.get('can_view_other_users_requests', False)
+        can_view_request_user = user_is_admin or custom_perms.get('can_see_requester_username', False)
+        
         # Build query parameters once
         def build_base_query(include_user=True, include_status_filter=True, include_media_filter=True):
-            if user_is_admin or (visibility_config['can_view_all_requests'] and visibility_config['can_view_request_user']):
+            if user_is_admin or (can_view_all_requests and can_view_request_user):
                 if include_user:
                     query = select(MediaRequest, User).join(User, MediaRequest.user_id == User.id)
                 else:
                     query = select(MediaRequest)
-            elif visibility_config['can_view_all_requests']:
+            elif can_view_all_requests:
                 query = select(MediaRequest)
             else:
                 # Regular users can only see their own requests
@@ -305,7 +414,7 @@ async def unified_requests(
         user_lookup = {}
         requests_with_users = []
         
-        if user_is_admin or (visibility_config['can_view_all_requests'] and visibility_config['can_view_request_user']):
+        if user_is_admin or (can_view_all_requests and can_view_request_user):
             # Query returns both MediaRequest and User
             results = session.exec(statement).all()
             for media_request, user in results:
@@ -316,7 +425,7 @@ async def unified_requests(
             requests_with_users = session.exec(statement).all()
             
             # Add current user info for their own requests if needed
-            if not visibility_config['can_view_all_requests']:
+            if not can_view_all_requests:
                 for media_request in requests_with_users:
                     user_lookup[media_request.id] = current_user
         
@@ -344,8 +453,8 @@ async def unified_requests(
                     "current_user": current_user,
                     "user_lookup": user_lookup,
                     "user_is_admin": user_is_admin,
-                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
-                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests'],
+                    "show_request_user": can_view_request_user,
+                    "can_view_all_requests": can_view_all_requests,
                     "current_status_filter": status or 'all',
                     "current_media_type_filter": media_type or 'all',
                     "current_page": page,
@@ -365,8 +474,8 @@ async def unified_requests(
                     "current_user": current_user,
                     "user_lookup": user_lookup,
                     "user_is_admin": user_is_admin,
-                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
-                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests'],
+                    "show_request_user": can_view_request_user,
+                    "can_view_all_requests": can_view_all_requests,
                     "current_status_filter": status or 'all',
                     "current_media_type_filter": media_type or 'all',
                     "current_page": page,
@@ -448,6 +557,16 @@ async def approve_request(
     session.add(media_request)
     session.commit()
     
+    # 🎬 NEW: Automatic Service Integration
+    # Send approved request to Radarr/Sonarr if services are configured
+    integration_message = ""
+    if was_pending:  # Only integrate newly approved requests, not already approved ones
+        integration_result = await integrate_with_services(media_request, session)
+        if integration_result:
+            integration_message = f" and sent to {integration_result['service']}"
+            print(f"✅ Successfully integrated request {request_id} with {integration_result['service']}")
+        else:
+            print(f"⚠️ Could not integrate request {request_id} with services (may not be configured)")
     
     # Content negotiation - check if this is an HTMX request
     if request.headers.get("HX-Request"):
@@ -462,7 +581,7 @@ async def approve_request(
             media_type_filter = request.query_params.get('media_type', 'all')
             
             # Call unified_requests to get the updated content
-            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
+            return await unified_requests(request, status_filter, media_type_filter, 1, 24, current_user, session)
             
         elif hx_target == "request-section":
             # From media detail page - return updated request section
@@ -478,6 +597,7 @@ async def approve_request(
                 "has_complete_request": not media_request.is_season_request,
                 "has_partial_requests": media_request.is_season_request,
                 "user_partial_requests": [media_request] if media_request.is_season_request else [],
+                "integration_message": integration_message,
                 "media_type": media_request.media_type.value,
                 "current_user": current_user,
                 "user_is_admin": user_is_admin,
@@ -514,13 +634,14 @@ async def approve_request(
             </span>
             ''')
         elif hx_target.startswith("status-badge-"):
-            # From recent requests horizontal - update just the status badge
+            # From recent requests horizontal - update the status badge and hide admin actions
             return HTMLResponse(f'''
             <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
                     ✓ Approved
                 </span>
             </div>
+            <div hx-swap-oob="outerHTML:#admin-actions-{media_request.id}"></div>
             ''')
         else:
             # From admin requests list - return status badge
@@ -536,7 +657,7 @@ async def approve_request(
             ''')
     else:
         # Regular API response
-        return {"message": "Request approved"}
+        return {"message": f"Request approved{integration_message}"}
 
 
 @router.post("/{request_id}/reject")
@@ -582,7 +703,7 @@ async def reject_request(
             media_type_filter = request.query_params.get('media_type', 'all')
             
             # Call unified_requests to get the updated content
-            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
+            return await unified_requests(request, status_filter, media_type_filter, 1, 24, current_user, session)
             
         elif hx_target == "request-section":
             # From media detail page - return updated request section
@@ -634,13 +755,14 @@ async def reject_request(
             </span>
             ''')
         elif hx_target.startswith("status-badge-"):
-            # From recent requests horizontal - update just the status badge
+            # From recent requests horizontal - update the status badge and hide admin actions
             return HTMLResponse(f'''
             <div class="ml-2 flex-shrink-0" id="status-badge-{media_request.id}">
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
                     ✗ Rejected
                 </span>
             </div>
+            <div hx-swap-oob="outerHTML:#admin-actions-{media_request.id}"></div>
             ''')
         else:
             # From admin requests list - return status badge
@@ -687,7 +809,7 @@ async def mark_as_available(
             media_type_filter = request.query_params.get('media_type', 'all')
             
             # Call unified_requests to get the updated content
-            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
+            return await unified_requests(request, status_filter, media_type_filter, 1, 24, current_user, session)
     
     return {"message": "Request marked as available"}
 

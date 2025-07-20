@@ -72,10 +72,10 @@ class ServiceInstance(SQLModel, table=True):
             data['api_key'] = value[:8] + '•' * (len(value) - 8) if len(value) > 8 else '•' * len(value)
         return data
     
-    def test_connection(self) -> dict:
+    async def test_connection(self) -> dict:
         """Test connection to the service"""
         try:
-            import requests
+            import httpx
             
             # Get connection settings
             settings = self.get_settings()
@@ -105,12 +105,12 @@ class ServiceInstance(SQLModel, table=True):
                 # Future service types
                 endpoint = f"{base_url}/api/system/status"
             
-            response = requests.get(
-                endpoint,
-                headers={'X-Api-Key': self.api_key},
-                timeout=10,
-                verify=False  # Allow self-signed certificates
-            )
+            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:  # Allow self-signed certificates and follow redirects
+                response = await client.get(
+                    endpoint,
+                    headers={'X-Api-Key': self.api_key},
+                    timeout=10
+                )
             
             if response.status_code == 200:
                 data = response.json()
@@ -136,12 +136,12 @@ class ServiceInstance(SQLModel, table=True):
                     "message": f"HTTP {response.status_code}: {response.text[:200]}"
                 }
                 
-        except requests.exceptions.ConnectionError as e:
+        except httpx.ConnectError as e:
             result = {
                 "status": "error",
                 "message": f"Connection failed: Cannot reach {base_url}"
             }
-        except requests.exceptions.Timeout as e:
+        except httpx.TimeoutException as e:
             result = {
                 "status": "error",
                 "message": "Connection timeout - service may be slow or unreachable"
@@ -159,14 +159,15 @@ class ServiceInstance(SQLModel, table=True):
     async def get_quality_profiles(self) -> list:
         """Get available quality profiles from the service"""
         try:
-            import requests
+            import httpx
             
             endpoint = f"{self.url}/api/v3/qualityprofile"
-            response = requests.get(
-                endpoint,
-                headers={'X-Api-Key': self.api_key},
-                timeout=10
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    endpoint,
+                    headers={'X-Api-Key': self.api_key},
+                    timeout=10
+                )
             
             if response.status_code == 200:
                 return response.json()
@@ -180,14 +181,15 @@ class ServiceInstance(SQLModel, table=True):
     async def get_root_folders(self) -> list:
         """Get available root folders from the service"""
         try:
-            import requests
+            import httpx
             
             endpoint = f"{self.url}/api/v3/rootfolder"
-            response = requests.get(
-                endpoint,
-                headers={'X-Api-Key': self.api_key},
-                timeout=10
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    endpoint,
+                    headers={'X-Api-Key': self.api_key},
+                    timeout=10
+                )
             
             if response.status_code == 200:
                 return response.json()
@@ -201,14 +203,15 @@ class ServiceInstance(SQLModel, table=True):
     async def get_tags(self) -> list:
         """Get available tags from the service"""
         try:
-            import requests
+            import httpx
             
             endpoint = f"{self.url}/api/v3/tag"
-            response = requests.get(
-                endpoint,
-                headers={'X-Api-Key': self.api_key},
-                timeout=10
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    endpoint,
+                    headers={'X-Api-Key': self.api_key},
+                    timeout=10
+                )
             
             if response.status_code == 200:
                 return response.json()

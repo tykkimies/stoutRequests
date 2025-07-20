@@ -1,4 +1,4 @@
-import requests
+import httpx
 from typing import Dict, List, Optional
 from sqlmodel import Session
 
@@ -59,55 +59,60 @@ class SonarrService:
         if hasattr(self, '_owns_session') and self._owns_session and hasattr(self, 'session'):
             self.session.close()
     
-    def test_connection(self) -> bool:
+    async def test_connection(self) -> bool:
         """Test connection to Sonarr"""
         if not self.base_url or not self.api_key:
             return False
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/system/status",
-                headers=self.headers,
-                timeout=10
-            )
-            return response.status_code == 200
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/system/status",
+                    headers=self.headers,
+                    timeout=10
+                )
+                return response.status_code == 200
         except Exception as e:
             print(f"Sonarr connection test failed: {e}")
             return False
     
-    def get_root_folders(self) -> List[Dict]:
+    async def get_root_folders(self) -> List[Dict]:
         """Get available root folders"""
         if not self.base_url or not self.api_key:
             return []
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/rootfolder",
-                headers=self.headers
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/rootfolder",
+                    headers=self.headers,
+                    timeout=10
+                )
             response.raise_for_status()
             return response.json()
         except Exception as e:
             print(f"Error getting Sonarr root folders: {e}")
             return []
     
-    def get_quality_profiles(self) -> List[Dict]:
+    async def get_quality_profiles(self) -> List[Dict]:
         """Get available quality profiles"""
         if not self.base_url or not self.api_key:
             return []
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/qualityprofile",
-                headers=self.headers
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/qualityprofile",
+                    headers=self.headers,
+                    timeout=10
+                )
             response.raise_for_status()
             return response.json()
         except Exception as e:
             print(f"Error getting Sonarr quality profiles: {e}")
             return []
     
-    def search_series(self, tmdb_id: int) -> Optional[Dict]:
+    async def search_series(self, tmdb_id: int) -> Optional[Dict]:
         """Search for TV series by TMDB ID"""
         if not self.base_url:
             print("Sonarr error: No URL configured. Please set up Sonarr in the Services section.")
@@ -117,19 +122,21 @@ class SonarrService:
             return None
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/series/lookup",
-                headers=self.headers,
-                params={'term': f'tmdb:{tmdb_id}'}
-            )
-            response.raise_for_status()
-            results = response.json()
-            return results[0] if results else None
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/series/lookup",
+                    headers=self.headers,
+                    params={'term': f'tmdb:{tmdb_id}'},
+                    timeout=10
+                )
+                response.raise_for_status()
+                results = response.json()
+                return results[0] if results else None
         except Exception as e:
             print(f"Error searching series in Sonarr: {e}")
             return None
     
-    def add_series(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, monitor_type: str = 'all', user_id: int = None) -> Optional[Dict]:
+    async def add_series(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, monitor_type: str = 'all', user_id: int = None) -> Optional[Dict]:
         """Add TV series to Sonarr"""
         if not self.base_url:
             print("Sonarr error: No URL configured. Please set up Sonarr in the Services section.")
@@ -140,7 +147,7 @@ class SonarrService:
             
         try:
             # First search for the series
-            series_data = self.search_series(tmdb_id)
+            series_data = await self.search_series(tmdb_id)
             if not series_data:
                 print(f"❌ TV series not found in Sonarr search for TMDB ID: {tmdb_id}")
                 return None
@@ -148,7 +155,7 @@ class SonarrService:
             print(f"🔍 Found TV series in Sonarr: {series_data.get('title', 'Unknown')} (TMDB: {tmdb_id})")
             
             # Check if series already exists in Sonarr
-            existing_series = self.get_series_by_tmdb_id(tmdb_id)
+            existing_series = await self.get_series_by_tmdb_id(tmdb_id)
             if existing_series:
                 print(f"⚠️ TV series already exists in Sonarr with ID: {existing_series.get('id')}")
                 return existing_series  # Return existing series data instead of failing
@@ -171,7 +178,7 @@ class SonarrService:
                 
                 # Finally fallback to first available
                 if not quality_profile_id:
-                    profiles = self.get_quality_profiles()
+                    profiles = await self.get_quality_profiles()
                     if profiles:
                         quality_profile_id = profiles[0]['id']
                         print(f"🔍 Using default quality profile: {profiles[0].get('name', 'Unknown')} (ID: {quality_profile_id})")
@@ -187,7 +194,7 @@ class SonarrService:
                 
                 # Fallback to first available
                 if not root_folder_path:
-                    folders = self.get_root_folders()
+                    folders = await self.get_root_folders()
                     if folders:
                         root_folder_path = folders[0]['path']
                         print(f"🔍 Using default root folder: {root_folder_path}")
@@ -241,19 +248,21 @@ class SonarrService:
             
             print(f"🔍 Sonarr payload for '{series_data['title']}': {add_data}")
             
-            response = requests.post(
-                f"{self.base_url}/api/v3/series",
-                headers=self.headers,
-                json=add_data
-            )
-            
-            if not response.ok:
-                print(f"❌ Sonarr API error {response.status_code}: {response.text}")
-                print(f"🔍 Request URL: {response.url}")
-                print(f"🔍 Request headers: {self.headers}")
-            
-            response.raise_for_status()
-            return response.json()
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v3/series",
+                    headers=self.headers,
+                    json=add_data,
+                    timeout=15
+                )
+                
+                if not response.is_success:
+                    print(f"❌ Sonarr API error {response.status_code}: {response.text}")
+                    print(f"🔍 Request URL: {response.url}")
+                    print(f"🔍 Request headers: {self.headers}")
+                
+                response.raise_for_status()
+                return response.json()
             
         except Exception as e:
             print(f"Error adding series to Sonarr: {e}")
@@ -261,7 +270,7 @@ class SonarrService:
                 print(f"🔍 Response content: {e.response.text}")
             return None
     
-    def get_series_by_tmdb_id(self, tmdb_id: int) -> Optional[Dict]:
+    async def get_series_by_tmdb_id(self, tmdb_id: int) -> Optional[Dict]:
         """Check if series already exists in Sonarr"""
         if not self.base_url:
             print("Sonarr error: No URL configured. Please set up Sonarr in the Services section.")
@@ -271,19 +280,21 @@ class SonarrService:
             return None
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/series",
-                headers=self.headers
-            )
-            response.raise_for_status()
-            series_list = response.json()
-            
-            # Sonarr doesn't always store TMDB ID, so we need to search by title as well
-            search_result = self.search_series(tmdb_id)
-            if not search_result:
-                return None
-            
-            search_title = search_result.get('title', '').lower()
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/series",
+                    headers=self.headers,
+                    timeout=10
+                )
+                response.raise_for_status()
+                series_list = response.json()
+                
+                # Sonarr doesn't always store TMDB ID, so we need to search by title as well
+                search_result = await self.search_series(tmdb_id)
+                if not search_result:
+                    return None
+                
+                search_title = search_result.get('title', '').lower()
             
             for series in series_list:
                 if (series.get('tmdbId') == tmdb_id or 
@@ -295,7 +306,7 @@ class SonarrService:
             print(f"Error checking series in Sonarr: {e}")
             return None
     
-    def get_series_details(self, sonarr_id: int) -> Optional[Dict]:
+    async def get_series_details(self, sonarr_id: int) -> Optional[Dict]:
         """Get detailed series information from Sonarr by internal ID"""
         if not self.base_url:
             print("Sonarr error: No URL configured. Please set up Sonarr in the Services section.")
@@ -305,10 +316,12 @@ class SonarrService:
             return None
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/series/{sonarr_id}",
-                headers=self.headers
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/series/{sonarr_id}",
+                    headers=self.headers,
+                    timeout=10
+                )
             response.raise_for_status()
             return response.json()
             

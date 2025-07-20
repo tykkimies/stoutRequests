@@ -50,6 +50,7 @@
                         class="admin-tab-btn border-primary-500 text-primary-600 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     📊 Overview
                 </button>
+                {% if user_permissions.can_manage_users %}
                 <button hx-get="{{ base_url }}/admin/tabs/users" 
                         hx-target="#admin-tab-content" 
                         hx-trigger="click"
@@ -58,6 +59,8 @@
                         class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     👥 Users
                 </button>
+                {% endif %}
+                {% if user_permissions.can_manage_settings %}
                 <button hx-get="{{ base_url }}/admin/tabs/general" 
                         hx-target="#admin-tab-content" 
                         hx-trigger="click"
@@ -66,6 +69,8 @@
                         class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     ⚙️ General
                 </button>
+                {% endif %}
+                {% if user_permissions.can_manage_settings %}
                 <button hx-get="{{ base_url }}/admin/tabs/media-servers" 
                         hx-target="#admin-tab-content" 
                         hx-trigger="click"
@@ -82,6 +87,8 @@
                         class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     🔧 Services
                 </button>
+                {% endif %}
+                {% if user_permissions.can_library_sync %}
                 <button hx-get="{{ base_url }}/admin/tabs/jobs" 
                         hx-target="#admin-tab-content" 
                         hx-trigger="click"
@@ -90,6 +97,7 @@
                         class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     ⏰ Scheduled Jobs
                 </button>
+                {% endif %}
             </nav>
         </div>
 
@@ -562,11 +570,13 @@ function handlePermissionsSave(userId) {
     data.role_id = formData.get('role_id') ? parseInt(formData.get('role_id')) : null;
     data.max_requests = formData.get('max_requests') ? parseInt(formData.get('max_requests')) : null;
     
-    // Handle checkboxes explicitly
+    // Handle checkboxes explicitly (send true/false to override role permissions)
     data.auto_approve = formData.has('auto_approve');
     data.can_request_movies = formData.has('can_request_movies');
     data.can_request_tv = formData.has('can_request_tv');
     data.can_request_4k = formData.has('can_request_4k');
+    data.can_view_other_users_requests = formData.has('can_view_other_users_requests');
+    data.can_see_requester_username = formData.has('can_see_requester_username');
     
     console.log('📋 Form data to send:', data);
     

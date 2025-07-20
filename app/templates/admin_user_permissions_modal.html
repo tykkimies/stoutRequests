@@ -176,6 +176,38 @@
                         <div class="flex items-center">
                             <input 
                                 type="checkbox" 
+                                name="can_view_other_users_requests" 
+                                id="can_view_other_users_requests"
+                                {% if user_permissions and user_permissions.get_custom_permissions().get('can_view_other_users_requests') %}checked{% endif %}
+                                class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                            >
+                            <label for="can_view_other_users_requests" class="ml-2 text-sm text-gray-700 flex items-center">
+                                <svg class="w-4 h-4 text-purple-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                                </svg>
+                                Can view other users' requests
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                name="can_see_requester_username" 
+                                id="can_see_requester_username"
+                                {% if user_permissions and user_permissions.get_custom_permissions().get('can_see_requester_username') %}checked{% endif %}
+                                class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                            >
+                            <label for="can_see_requester_username" class="ml-2 text-sm text-gray-700 flex items-center">
+                                <svg class="w-4 h-4 text-indigo-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                                </svg>
+                                Can see who made requests
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
                                 name="auto_approve" 
                                 id="auto_approve"
                                 {% if user_permissions and user_permissions.auto_approve_enabled %}checked{% endif %}
@@ -192,52 +224,6 @@
                 </div>
             </div>
 
-            <!-- Quality Profile Overrides -->
-            <div class="mb-6">
-                <h5 class="text-sm font-medium text-gray-800 mb-3 flex items-center">
-                    <svg class="w-4 h-4 text-indigo-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                    </svg>
-                    Quality Profile Overrides
-                </h5>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="movie_quality_profile_id" class="block text-sm font-medium text-gray-700 mb-1">
-                            Movie Quality Profile
-                        </label>
-                        <select 
-                            name="movie_quality_profile_id" 
-                            id="movie_quality_profile_id"
-                            class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                        >
-                            <option value="">Use system default</option>
-                            <!-- TODO: Populate with actual Radarr quality profiles -->
-                            <option value="1" {% if user_permissions and user_permissions.movie_quality_profile_id == 1 %}selected{% endif %}>HD-1080p</option>
-                            <option value="2" {% if user_permissions and user_permissions.movie_quality_profile_id == 2 %}selected{% endif %}>Ultra-HD</option>
-                            <option value="3" {% if user_permissions and user_permissions.movie_quality_profile_id == 3 %}selected{% endif %}>SD</option>
-                        </select>
-                        <p class="text-xs text-gray-500 mt-1">Default quality for movie requests</p>
-                    </div>
-                    
-                    <div>
-                        <label for="tv_quality_profile_id" class="block text-sm font-medium text-gray-700 mb-1">
-                            TV Quality Profile
-                        </label>
-                        <select 
-                            name="tv_quality_profile_id" 
-                            id="tv_quality_profile_id"
-                            class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                        >
-                            <option value="">Use system default</option>
-                            <!-- TODO: Populate with actual Sonarr quality profiles -->
-                            <option value="1" {% if user_permissions and user_permissions.tv_quality_profile_id == 1 %}selected{% endif %}>HD-1080p</option>
-                            <option value="2" {% if user_permissions and user_permissions.tv_quality_profile_id == 2 %}selected{% endif %}>Ultra-HD</option>
-                            <option value="3" {% if user_permissions and user_permissions.tv_quality_profile_id == 3 %}selected{% endif %}>SD</option>
-                        </select>
-                        <p class="text-xs text-gray-500 mt-1">Default quality for TV requests</p>
-                    </div>
-                </div>
-            </div>
 
             <!-- Notification Settings -->
             <div class="mb-6">

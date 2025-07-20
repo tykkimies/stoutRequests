@@ -107,6 +107,28 @@
                         >
                         <label for="can_request_4k" class="ml-2 text-sm text-gray-700">Can request 4K content</label>
                     </div>
+                    
+                    <div class="flex items-center">
+                        <input 
+                            type="checkbox" 
+                            name="can_view_other_users_requests" 
+                            id="can_view_other_users_requests"
+                            {% if user_permissions and user_permissions.get_custom_permissions().get('can_view_other_users_requests') %}checked{% endif %}
+                            class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        >
+                        <label for="can_view_other_users_requests" class="ml-2 text-sm text-gray-700">Can view other users' requests</label>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <input 
+                            type="checkbox" 
+                            name="can_see_requester_username" 
+                            id="can_see_requester_username"
+                            {% if user_permissions and user_permissions.get_custom_permissions().get('can_see_requester_username') %}checked{% endif %}
+                            class="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        >
+                        <label for="can_see_requester_username" class="ml-2 text-sm text-gray-700">Can see who made requests</label>
+                    </div>
                 </div>
             </div>
         </div>

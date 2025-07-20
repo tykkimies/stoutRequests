@@ -153,7 +153,7 @@
                     <!-- Request Section -->
                     {% if (plex_status != 'in_plex' or plex_status == 'partial_plex') and not has_complete_request %}
                     <div class="request-section">
-                        {% if media_type == 'tv' and media.seasons %}
+                        {% if media_type == 'tv' and media.seasons and user_permissions.can_request_tv %}
                         <div class="bg-black bg-opacity-50 rounded-lg p-6">
                             <h3 class="text-xl font-semibold mb-4 flex items-center">
                                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -256,7 +256,7 @@
                                 </form>
                             </div>
                         </div>
-                        {% else %}
+                        {% elif media_type == 'movie' and user_permissions.can_request_movies %}
                         <form hx-post="{{ base_url }}/requests/create" hx-target="this" hx-swap="outerHTML">
                             <input type="hidden" name="tmdb_id" value="{{ media.id }}">
                             <input type="hidden" name="media_type" value="{{ media_type }}">
@@ -268,6 +268,18 @@
                                 Request {{ 'Movie' if media_type == 'movie' else 'TV Series' }}
                             </button>
                         </form>
+                        {% else %}
+                        <!-- No permission message -->
+                        <div class="bg-black bg-opacity-50 rounded-lg p-6 text-center">
+                            <div class="text-gray-300 mb-4">
+                                <svg class="w-12 h-12 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                </svg>
+                                <h3 class="text-lg font-semibold text-white mb-2">Permission Required</h3>
+                                <p class="text-sm">You don't have permission to request {{ 'movies' if media_type == 'movie' else 'TV shows' }}.</p>
+                                <p class="text-xs text-gray-400 mt-2">Contact an administrator if you need access.</p>
+                            </div>
+                        </div>
                         {% endif %}
                     </div>
                     {% endif %}

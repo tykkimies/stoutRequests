@@ -1,4 +1,4 @@
-import requests
+import httpx
 from typing import Dict, List, Optional
 from sqlmodel import Session
 
@@ -59,55 +59,60 @@ class RadarrService:
         if hasattr(self, '_owns_session') and self._owns_session and hasattr(self, 'session'):
             self.session.close()
     
-    def test_connection(self) -> bool:
+    async def test_connection(self) -> bool:
         """Test connection to Radarr"""
         if not self.base_url or not self.api_key:
             return False
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/system/status",
-                headers=self.headers,
-                timeout=10
-            )
-            return response.status_code == 200
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/system/status",
+                    headers=self.headers,
+                    timeout=10
+                )
+                return response.is_success
         except Exception as e:
             print(f"Radarr connection test failed: {e}")
             return False
     
-    def get_root_folders(self) -> List[Dict]:
+    async def get_root_folders(self) -> List[Dict]:
         """Get available root folders"""
         if not self.base_url or not self.api_key:
             return []
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/rootfolder",
-                headers=self.headers
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/rootfolder",
+                    headers=self.headers,
+                    timeout=10
+                )
             response.raise_for_status()
             return response.json()
         except Exception as e:
             print(f"Error getting Radarr root folders: {e}")
             return []
     
-    def get_quality_profiles(self) -> List[Dict]:
+    async def get_quality_profiles(self) -> List[Dict]:
         """Get available quality profiles"""
         if not self.base_url or not self.api_key:
             return []
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/qualityprofile",
-                headers=self.headers
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/qualityprofile",
+                    headers=self.headers,
+                    timeout=10
+                )
             response.raise_for_status()
             return response.json()
         except Exception as e:
             print(f"Error getting Radarr quality profiles: {e}")
             return []
     
-    def search_movie(self, tmdb_id: int) -> Optional[Dict]:
+    async def search_movie(self, tmdb_id: int) -> Optional[Dict]:
         """Search for movie by TMDB ID"""
         if not self.base_url:
             print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
@@ -117,19 +122,21 @@ class RadarrService:
             return None
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/movie/lookup",
-                headers=self.headers,
-                params={'term': f'tmdb:{tmdb_id}'}
-            )
-            response.raise_for_status()
-            results = response.json()
-            return results[0] if results else None
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/movie/lookup",
+                    headers=self.headers,
+                    params={'term': f'tmdb:{tmdb_id}'},
+                    timeout=10
+                )
+                response.raise_for_status()
+                results = response.json()
+                return results[0] if results else None
         except Exception as e:
             print(f"Error searching movie in Radarr: {e}")
             return None
     
-    def add_movie(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, user_id: int = None) -> Optional[Dict]:
+    async def add_movie(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, user_id: int = None) -> Optional[Dict]:
         """Add movie to Radarr"""
         if not self.base_url:
             print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
@@ -140,7 +147,7 @@ class RadarrService:
             
         try:
             # First search for the movie
-            movie_data = self.search_movie(tmdb_id)
+            movie_data = await self.search_movie(tmdb_id)
             if not movie_data:
                 print(f"❌ Movie not found in Radarr search for TMDB ID: {tmdb_id}")
                 return None
@@ -148,7 +155,7 @@ class RadarrService:
             print(f"🔍 Found movie in Radarr: {movie_data.get('title', 'Unknown')} (TMDB: {tmdb_id})")
             
             # Check if movie already exists in Radarr
-            existing_movie = self.get_movie_by_tmdb_id(tmdb_id)
+            existing_movie = await self.get_movie_by_tmdb_id(tmdb_id)
             if existing_movie:
                 print(f"⚠️ Movie already exists in Radarr with ID: {existing_movie.get('id')}")
                 return existing_movie  # Return existing movie data instead of failing
@@ -171,7 +178,7 @@ class RadarrService:
                 
                 # Finally fallback to first available
                 if not quality_profile_id:
-                    profiles = self.get_quality_profiles()
+                    profiles = await self.get_quality_profiles()
                     if profiles:
                         quality_profile_id = profiles[0]['id']
                         print(f"🔍 Using default quality profile: {profiles[0].get('name', 'Unknown')} (ID: {quality_profile_id})")
@@ -187,7 +194,7 @@ class RadarrService:
                 
                 # Fallback to first available
                 if not root_folder_path:
-                    folders = self.get_root_folders()
+                    folders = await self.get_root_folders()
                     if folders:
                         root_folder_path = folders[0]['path']
                         print(f"🔍 Using default root folder: {root_folder_path}")
@@ -233,19 +240,21 @@ class RadarrService:
             
             print(f"🔍 Radarr payload for '{movie_data['title']}': {add_data}")
             
-            response = requests.post(
-                f"{self.base_url}/api/v3/movie",
-                headers=self.headers,
-                json=add_data
-            )
-            
-            if not response.ok:
-                print(f"❌ Radarr API error {response.status_code}: {response.text}")
-                print(f"🔍 Request URL: {response.url}")
-                print(f"🔍 Request headers: {self.headers}")
-            
-            response.raise_for_status()
-            return response.json()
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v3/movie",
+                    headers=self.headers,
+                    json=add_data,
+                    timeout=15
+                )
+                
+                if not response.is_success:
+                    print(f"❌ Radarr API error {response.status_code}: {response.text}")
+                    print(f"🔍 Request URL: {response.url}")
+                    print(f"🔍 Request headers: {self.headers}")
+                
+                response.raise_for_status()
+                return response.json()
             
         except Exception as e:
             print(f"Error adding movie to Radarr: {e}")
@@ -253,7 +262,7 @@ class RadarrService:
                 print(f"🔍 Response content: {e.response.text}")
             return None
     
-    def get_movie_by_tmdb_id(self, tmdb_id: int) -> Optional[Dict]:
+    async def get_movie_by_tmdb_id(self, tmdb_id: int) -> Optional[Dict]:
         """Check if movie already exists in Radarr"""
         if not self.base_url:
             print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
@@ -263,23 +272,25 @@ class RadarrService:
             return None
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/movie",
-                headers=self.headers
-            )
-            response.raise_for_status()
-            movies = response.json()
-            
-            for movie in movies:
-                if movie.get('tmdbId') == tmdb_id:
-                    return movie
-            return None
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/movie",
+                    headers=self.headers,
+                    timeout=10
+                )
+                response.raise_for_status()
+                movies = response.json()
+                
+                for movie in movies:
+                    if movie.get('tmdbId') == tmdb_id:
+                        return movie
+                return None
             
         except Exception as e:
             print(f"Error checking movie in Radarr: {e}")
             return None
     
-    def get_movie_details(self, radarr_id: int) -> Optional[Dict]:
+    async def get_movie_details(self, radarr_id: int) -> Optional[Dict]:
         """Get detailed movie information from Radarr by internal ID"""
         if not self.base_url:
             print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
@@ -289,10 +300,12 @@ class RadarrService:
             return None
             
         try:
-            response = requests.get(
-                f"{self.base_url}/api/v3/movie/{radarr_id}",
-                headers=self.headers
-            )
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v3/movie/{radarr_id}",
+                    headers=self.headers,
+                    timeout=10
+                )
             response.raise_for_status()
             return response.json()
             

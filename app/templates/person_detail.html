@@ -87,7 +87,7 @@
             <h2 class="text-3xl font-bold text-gray-900 mb-8">Known For</h2>
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7 gap-4">
                 {% for item in credits %}
-                <div class="media-card group relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
+                <div class="media-card group relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105" data-tmdb-id="{{ item.id }}">
                     <div class="relative aspect-[2/3]">
                         {% if item.poster_url %}
                         <img src="{{ item.poster_url }}" alt="{{ item.title or item.name }}" class="w-full h-full object-cover">
@@ -137,7 +137,7 @@
                                     </div>
                                     
                                     <!-- Action button -->
-                                    {{ media_status_badge(item, style='button', size='md') }}
+                                    {{ media_status_badge(item, style='button', size='md', base_url=base_url) }}
                                 </div>
                             </div>
                         </div>
@@ -145,7 +145,7 @@
                         <!-- Top badges -->
                         <div class="absolute top-2 left-2">
                             {% if item.status and (item.status == 'in_plex' or item.status == 'partial_plex') or item.in_plex %}
-                            {{ media_status_badge(item, style='overlay', size='sm') }}
+                            {{ media_status_badge(item, style='overlay', size='sm', base_url=base_url) }}
                             {% endif %}
                         </div>
                         
@@ -172,6 +172,42 @@
         </button>
     </div>
 </div>
+
+<script>
+// Listen for status badge refresh events from request submissions
+document.body.addEventListener('refreshStatusBadges', function(event) {
+    const { updatedItemId, newStatus } = event.detail;
+    
+    // Find all cards for this item in the Known For section
+    const cards = document.querySelectorAll(`[data-tmdb-id="${updatedItemId}"]`);
+    
+    cards.forEach(card => {
+        // Update the overlay badge
+        const badgeContainer = card.querySelector('.absolute.top-2.left-2');
+        if (badgeContainer) {
+            let badgeHtml = '';
+            if (newStatus === 'PENDING') {
+                badgeHtml = '<span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Pending</span>';
+            } else if (newStatus === 'APPROVED') {
+                badgeHtml = '<span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Approved</span>';
+            }
+            badgeContainer.innerHTML = badgeHtml;
+        }
+        
+        // Update the action button to show the new status
+        const actionButton = card.querySelector('form[hx-post*="requests/create"]');
+        if (actionButton) {
+            let statusHtml = '';
+            if (newStatus === 'PENDING') {
+                statusHtml = '<div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium text-center">⏳ Pending</div>';
+            } else if (newStatus === 'APPROVED') {
+                statusHtml = '<div class="w-full bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium text-center">✓ Approved</div>';
+            }
+            actionButton.outerHTML = statusHtml;
+        }
+    });
+});
+</script>
 
 <style>
 .line-clamp-1 {

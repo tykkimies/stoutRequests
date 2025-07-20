@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
 from typing import Optional
 from datetime import datetime
+from pydantic import BaseModel
 
 from ..core.database import get_session
 from ..core.template_context import get_global_template_context
@@ -35,6 +36,9 @@ def create_template_response(template_name: str, context: dict):
     global_context = get_global_template_context(current_user, request)
     # Merge contexts, with explicit context taking precedence
     merged_context = {**global_context, **context}
+    print(f"🔧 [ADMIN API] Template: {template_name}")
+    print(f"🔧 [ADMIN API] Global context base_url: '{global_context.get('base_url', 'MISSING')}'")
+    print(f"🔧 [ADMIN API] Final merged context base_url: '{merged_context.get('base_url', 'MISSING')}'")
     return templates.TemplateResponse(template_name, merged_context)
 
 
@@ -1014,7 +1018,7 @@ async def get_service_status(
                     "message": "Service not configured",
                     "color": "gray"
                 })
-            elif radarr_service.test_connection():
+            elif await radarr_service.test_connection():
                 status_items.append({
                     "service": "Radarr",
                     "status": "connected",
@@ -1046,7 +1050,7 @@ async def get_service_status(
                     "message": "Service not configured",
                     "color": "gray"
                 })
-            elif sonarr_service.test_connection():
+            elif await sonarr_service.test_connection():
                 status_items.append({
                     "service": "Sonarr",
                     "status": "connected", 
@@ -1307,24 +1311,27 @@ async def set_user_custom_permission(
         }
 
 
+class UserPermissionsUpdate(BaseModel):
+    """Request model for updating user permissions"""
+    role_id: Optional[int] = None
+    max_requests: Optional[int] = None
+    auto_approve: bool = False
+    can_request_movies: bool = False
+    can_request_tv: bool = False
+    can_request_4k: bool = False
+    can_view_other_users_requests: bool = False
+    can_see_requester_username: bool = False
+
+
 @router.post("/users/{user_id}/permissions/save")
 async def save_user_permissions(
     request: Request,
     user_id: int,
-    role_id: Optional[int] = Form(None),
-    max_requests: Optional[int] = Form(None),
-    request_retention_days: Optional[int] = Form(None),
-    auto_approve: bool = Form(False),
-    can_request_movies: Optional[bool] = Form(None),
-    can_request_tv: Optional[bool] = Form(None),
-    can_request_4k: Optional[bool] = Form(None),
-    movie_quality_profile_id: Optional[int] = Form(None),
-    tv_quality_profile_id: Optional[int] = Form(None),
-    notification_enabled: bool = Form(False),
+    permissions_data: UserPermissionsUpdate,
     current_user: User = Depends(get_current_admin_user_flexible),
     session: Session = Depends(get_session)
 ):
-    """Save all user permissions in one go"""
+    """Save all user permissions in one go (accepts JSON)"""
     try:
         print(f"🔍 SAVE PERMISSIONS ENDPOINT HIT!")
         print(f"🔍 Request method: {request.method}")
@@ -1332,26 +1339,22 @@ async def save_user_permissions(
         print(f"🔍 Request headers: {dict(request.headers)}")
         print(f"🔍 HX-Request header: {request.headers.get('HX-Request')}")
         print(f"🔍 Content-Type: {request.headers.get('Content-Type')}")
-        print(f"🔍 Form data - user_id={user_id}, role_id={role_id}, max_requests={max_requests}")
+        print(f"🔍 JSON data: {permissions_data}")
         
         # Get the user
         statement = select(User).where(User.id == user_id)
         user = session.exec(statement).first()
         
         if not user:
-            if request.headers.get("HX-Request"):
-                return HTMLResponse('<div class="p-4 bg-red-50 border border-red-200 rounded-md"><p class="text-red-800">User not found</p></div>')
             return {"success": False, "message": "User not found"}
         
         # Initialize permissions service
         permissions_service = PermissionsService(session)
         
         # Assign role if provided
-        if role_id:
-            success = permissions_service.assign_role(user_id, role_id)
+        if permissions_data.role_id:
+            success = permissions_service.assign_role(user_id, permissions_data.role_id)
             if not success:
-                if request.headers.get("HX-Request"):
-                    return HTMLResponse('<div class="p-4 bg-red-50 border border-red-200 rounded-md"><p class="text-red-800">Failed to assign role</p></div>')
                 return {"success": False, "message": "Failed to assign role"}
         
         # Get or create user permissions
@@ -1361,45 +1364,35 @@ async def save_user_permissions(
             user_permissions = UserPermissions(user_id=user_id)
             session.add(user_permissions)
         
-        # Update permissions based on form data
-        if max_requests is not None:
-            user_permissions.max_requests = max_requests
-        if request_retention_days is not None:
-            user_permissions.request_retention_days = request_retention_days
-        user_permissions.auto_approve_enabled = auto_approve
-        if can_request_movies is not None:
-            user_permissions.can_request_movies = can_request_movies
-        if can_request_tv is not None:
-            user_permissions.can_request_tv = can_request_tv
-        if can_request_4k is not None:
-            user_permissions.can_request_4k = can_request_4k
-        if movie_quality_profile_id is not None:
-            user_permissions.movie_quality_profile_id = movie_quality_profile_id
-        if tv_quality_profile_id is not None:
-            user_permissions.tv_quality_profile_id = tv_quality_profile_id
-        user_permissions.notification_enabled = notification_enabled
+        # Update permissions based on JSON data
+        if permissions_data.max_requests is not None:
+            user_permissions.max_requests = permissions_data.max_requests
+        user_permissions.auto_approve_enabled = permissions_data.auto_approve
+        # Always save the boolean values to override role permissions
+        user_permissions.can_request_movies = permissions_data.can_request_movies
+        user_permissions.can_request_tv = permissions_data.can_request_tv
+        user_permissions.can_request_4k = permissions_data.can_request_4k
+        
+        # Handle new permission fields via custom_permissions JSON
+        custom_perms = user_permissions.get_custom_permissions()
+        custom_perms['can_view_other_users_requests'] = permissions_data.can_view_other_users_requests
+        custom_perms['can_see_requester_username'] = permissions_data.can_see_requester_username
+        user_permissions.set_custom_permissions(custom_perms)
+        
         user_permissions.updated_at = datetime.utcnow()
         
         # Save changes
         session.add(user_permissions)
         session.commit()
         
-        # Content negotiation for HTMX vs API
-        if request.headers.get("HX-Request"):
-            # For HTMX, return empty response - let the JavaScript handle UI updates
-            from fastapi.responses import HTMLResponse
-            return HTMLResponse("")
-        else:
-            return {
-                "success": True, 
-                "message": f"Permissions updated for {user.username}"
-            }
+        return {
+            "success": True, 
+            "message": f"Permissions updated for {user.username}"
+        }
         
     except Exception as e:
         print(f"❌ Error saving permissions: {e}")
         session.rollback()
-        if request.headers.get("HX-Request"):
-            return HTMLResponse(f'<div class="p-4 bg-red-50 border border-red-200 rounded-md"><p class="text-red-800">Error: {str(e)}</p></div>')
         return {"success": False, "message": f"Error saving permissions: {str(e)}"}
 
 
@@ -2183,7 +2176,7 @@ async def list_radarr_instances(
     for instance in instances:
         # Test connection automatically to get current status
         try:
-            current_result = instance.test_connection()
+            current_result = await instance.test_connection()
             # Save the updated test result
             session.add(instance)
             session.commit()
@@ -2816,7 +2809,7 @@ async def test_radarr_connection(
         temp_instance.set_settings(settings)
         
         # Test the connection
-        result = temp_instance.test_connection()
+        result = await temp_instance.test_connection()
         
         if result.get('status') == 'connected':
             # Fetch quality profiles and root folders
@@ -2994,7 +2987,7 @@ async def create_radarr_instance(
         session.refresh(new_instance)
         
         # Test the connection
-        result = new_instance.test_connection()
+        result = await new_instance.test_connection()
         
         # Get current base_url for HTML responses  
         current_base_url = SettingsService.get_base_url(session)
@@ -3071,7 +3064,7 @@ async def test_sonarr_connection(
         temp_instance.set_settings(settings)
         
         # Test the connection
-        result = temp_instance.test_connection()
+        result = await temp_instance.test_connection()
         
         if result.get('status') == 'connected':
             # Fetch quality profiles, language profiles and root folders
@@ -3273,7 +3266,7 @@ async def create_sonarr_instance(
         session.refresh(new_instance)
         
         # Test the connection
-        result = new_instance.test_connection()
+        result = await new_instance.test_connection()
         
         # Get current base_url for HTML responses  
         current_base_url = SettingsService.get_base_url(session)
@@ -3372,7 +3365,7 @@ async def test_radarr_instance(
             ''')
         
         # Test the connection
-        result = instance.test_connection()
+        result = await instance.test_connection()
         
         # Update the instance in database
         session.add(instance)
@@ -3436,7 +3429,7 @@ async def list_sonarr_instances(
     for instance in instances:
         # Test connection automatically to get current status
         try:
-            current_result = instance.test_connection()
+            current_result = await instance.test_connection()
             # Save the updated test result
             session.add(instance)
             session.commit()
@@ -3574,7 +3567,7 @@ async def test_sonarr_instance(
             ''')
         
         # Test the connection
-        result = instance.test_connection()
+        result = await instance.test_connection()
         
         # Update the instance in database
         session.add(instance)

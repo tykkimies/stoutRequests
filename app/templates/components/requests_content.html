@@ -84,12 +84,12 @@
             <!-- Action buttons -->
             <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-1">
-                    <!-- Admin Actions -->
-                    {% if user_is_admin %}
+                    <!-- Approval/Rejection Actions -->
+                    {% if user_permissions.can_approve_requests %}
                         {% if request.status.value == 'PENDING' %}
                         <button 
                             hx-post="{{ base_url }}/requests/{{ request.id }}/approve?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
-                            hx-target="#requests-content"
+                            hx-swap="none"
                             hx-confirm="Approve this request?"
                             onclick="event.stopPropagation();"
                             class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
@@ -99,8 +99,8 @@
                         </button>
                         <button 
                             hx-post="{{ base_url }}/requests/{{ request.id }}/reject?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
-                            hx-target="#requests-content"
-                                            hx-confirm="Reject this request?"
+                            hx-swap="none"
+                            hx-confirm="Reject this request?"
                             onclick="event.stopPropagation();"
                             class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
                             title="Reject Request"
@@ -130,12 +130,12 @@
                     <span class="text-xs text-gray-400" title="Approved by admin">👤 Admin</span>
                     {% endif %}
                     
-                    <!-- Delete button (visible to admins or request owner) -->
-                    {% if user_is_admin or (user_lookup.get(request.id) and user_lookup[request.id].id == current_user.id) %}
+                    <!-- Delete button (visible to users with delete permissions or request owner) -->
+                    {% if user_permissions.can_delete_requests or user_permissions.can_manage_all_requests or (user_lookup.get(request.id) and user_lookup[request.id].id == current_user.id) %}
                     <button 
                         hx-delete="{{ base_url }}/requests/{{ request.id }}/delete?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
-                        hx-target="#requests-content"
-                                    hx-confirm="Are you sure you want to delete this request? This action cannot be undone."
+                        hx-swap="none"
+                        hx-confirm="Are you sure you want to delete this request? This action cannot be undone."
                         onclick="event.stopPropagation();"
                         class="bg-gray-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
                         title="Delete Request"

@@ -1165,9 +1165,18 @@ async def discover_category(
                 from app.services.settings_service import SettingsService
                 from .core.permissions import is_user_admin
                 
-                # Get visibility settings and user admin status
-                visibility_config = SettingsService.get_request_visibility_config(session)
+                # Get user's specific permissions directly from PermissionsService
+                from app.services.permissions_service import PermissionsService
+                
+                permissions_service = PermissionsService(session)
+                user_perms_obj = permissions_service.get_user_permissions(current_user.id)
+                custom_perms = user_perms_obj.get_custom_permissions() if user_perms_obj else {}
+                
                 user_is_admin = is_user_admin(current_user, session)
+                
+                # Check user's specific viewing permissions
+                can_view_all_requests = user_is_admin or custom_perms.get('can_view_other_users_requests', False)
+                can_view_request_user = user_is_admin or custom_perms.get('can_see_requester_username', False)
                 
                 # Import the status enum to filter properly
                 from app.models.media_request import RequestStatus
@@ -1176,7 +1185,7 @@ async def discover_category(
                 # Limit: 20 for horizontal scroll, 40 max for expanded view
                 max_limit = min(limit, 40)  # Cap at 40 for expanded view, 20 for horizontal
                 
-                if user_is_admin or visibility_config['can_view_all_requests']:
+                if user_is_admin or can_view_all_requests:
                     # Show all recent requests (excluding fulfilled ones) with user join
                     recent_statement = select(MediaRequest, User).outerjoin(
                         User, MediaRequest.user_id == User.id
@@ -1238,7 +1247,7 @@ async def discover_category(
                         
                         # Determine user visibility
                         visible_user = None
-                        if user_is_admin or visibility_config['can_view_request_user']:
+                        if user_is_admin or can_view_request_user:
                             visible_user = user
                         elif request_item.user_id == current_user.id:
                             visible_user = current_user
@@ -1273,7 +1282,7 @@ async def discover_category(
                         
                         # Determine user visibility  
                         visible_user = None
-                        if user_is_admin or visibility_config['can_view_request_user']:
+                        if user_is_admin or can_view_request_user:
                             visible_user = user
                         elif request_item.user_id == current_user.id:
                             visible_user = current_user
@@ -1349,8 +1358,8 @@ async def discover_category(
                     "results": recent_items,
                     "current_user": current_user,
                     "user_is_admin": user_is_admin,
-                    "show_request_user": user_is_admin or visibility_config['can_view_request_user'],
-                    "can_view_all_requests": user_is_admin or visibility_config['can_view_all_requests'],
+                    "show_request_user": can_view_request_user,
+                    "can_view_all_requests": can_view_all_requests,
                     "media_type": "mixed",  # Mixed content type
                     "sort_by": sort,
                     "has_more": has_more,  # Always False - show all items at once (max 20)
@@ -2765,14 +2774,51 @@ async def person_detail(
         movie_status = sync_service.check_items_status(movie_ids, 'movie') if movie_ids else {}
         tv_status = sync_service.check_items_status(tv_ids, 'tv') if tv_ids else {}
         
+        # Check for existing requests by current user
+        from sqlmodel import select
+        from .models.media_request import MediaRequest, MediaType, RequestStatus
+        
+        # Get all request IDs for this user and these items
+        request_query = select(MediaRequest).where(
+            MediaRequest.user_id == current_user.id,
+            MediaRequest.tmdb_id.in_([item['id'] for item in all_credits])
+        )
+        user_requests = session.exec(request_query).all()
+        
+        # Create a lookup for requests by tmdb_id and media_type
+        request_lookup = {}
+        for req in user_requests:
+            key = (req.tmdb_id, req.media_type.value)
+            request_lookup[key] = req
+        
         # Add status to items
         for item in all_credits:
+            # Check Plex status
             if item['media_type'] == 'movie':
-                status = movie_status.get(item['id'], 'available')
-                item['in_plex'] = status == 'in_plex'
+                plex_status = movie_status.get(item['id'], 'available')
+                item['in_plex'] = plex_status == 'in_plex'
             else:
-                status = tv_status.get(item['id'], 'available')
-                item['in_plex'] = status == 'in_plex'
+                plex_status = tv_status.get(item['id'], 'available')
+                item['in_plex'] = plex_status == 'in_plex'
+            
+            # Check request status
+            request_key = (item['id'], item['media_type'])
+            if request_key in request_lookup:
+                req = request_lookup[request_key]
+                if req.status == RequestStatus.PENDING:
+                    item['status'] = 'requested_pending'
+                elif req.status == RequestStatus.APPROVED:
+                    item['status'] = 'requested_approved'
+                elif req.status == RequestStatus.AVAILABLE:
+                    item['status'] = 'in_plex'
+                elif req.status == RequestStatus.REJECTED:
+                    item['status'] = 'requested_rejected'
+                else:
+                    item['status'] = 'available'
+            elif item['in_plex']:
+                item['status'] = 'in_plex'
+            else:
+                item['status'] = 'available'
         
         # Add profile image URL
         if person.get('profile_path'):
