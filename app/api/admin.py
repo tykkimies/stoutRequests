@@ -19,6 +19,9 @@ from ..services.plex_sync_service import PlexSyncService
 from ..services.permissions_service import PermissionsService
 import secrets
 import string
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="app/templates")
@@ -27,7 +30,8 @@ templates = Jinja2Templates(directory="app/templates")
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
     current_user = context.get('current_user')
-    global_context = get_global_template_context(current_user)
+    request = context.get('request')
+    global_context = get_global_template_context(current_user, request)
     # Merge contexts, with explicit context taking precedence
     merged_context = {**global_context, **context}
     return templates.TemplateResponse(template_name, merged_context)
@@ -95,29 +99,19 @@ async def update_general_settings(
     current_user: User = Depends(get_current_admin_user_flexible),
     session: Session = Depends(get_session),
     
-    # App settings
+    # App settings (truly global)
     app_name: str = Form("Stout Requests"),
     base_url: str = Form(""),
-    require_approval: bool = Form(True),
-    auto_approve_admin: bool = Form(True),
     max_requests_per_user: int = Form(10),
-    site_theme: str = Form("default"),
-    
-    # Request visibility settings
-    can_view_all_requests: bool = Form(False),
-    can_view_request_user: bool = Form(False)
+    site_theme: str = Form("default")
 ):
-    """Update general application settings"""
+    """Update general application settings (global settings only)"""
     try:
         settings_data = {
             'app_name': app_name.strip(),
             'base_url': base_url.strip(),
-            'require_approval': require_approval,
-            'auto_approve_admin': auto_approve_admin,
             'max_requests_per_user': max_requests_per_user,
-            'site_theme': site_theme.strip(),
-            'can_view_all_requests': can_view_all_requests,
-            'can_view_request_user': can_view_request_user
+            'site_theme': site_theme.strip()
         }
         
         # Update settings (only the general ones, don't touch media settings)
@@ -535,11 +529,8 @@ async def toggle_user_active(
     
     # Content negotiation: HTMX vs API clients
     if request.headers.get("HX-Request"):
-        # HTMX request - return HTML that triggers refresh
-        from fastapi.responses import HTMLResponse
-        return HTMLResponse("""
-            <div hx-get="{current_base_url}/admin/users/list" hx-target="#users-list" hx-trigger="load" style="display: none;"></div>
-        """)
+        # HTMX request - reload the users list
+        return await users_list(request, current_user, session)
     else:
         # API request (mobile app, etc.) - return JSON
         return {
@@ -556,6 +547,7 @@ async def toggle_user_active(
 
 @router.delete("/users/{user_id}")
 async def delete_user(
+    request: Request,
     user_id: int,
     current_user: User = Depends(get_current_admin_user_flexible),
     session: Session = Depends(get_session),
@@ -592,6 +584,31 @@ async def delete_user(
         for request in user_requests:
             session.delete(request)
     
+    # Check and clean up user permissions
+    from ..models.user_permissions import UserPermissions
+    permissions_statement = select(UserPermissions).where(UserPermissions.user_id == user_id)
+    user_permissions = session.exec(permissions_statement).all()
+    
+    if user_permissions:
+        print(f"🗑️ Cleaning up {len(user_permissions)} permission records for user {user.username}")
+        for permission in user_permissions:
+            session.delete(permission)
+    
+    # Check and clean up any other related records (category preferences, etc.)
+    try:
+        from ..models.user_category_preferences import UserCategoryPreferences
+        category_prefs_statement = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == user_id)
+        category_prefs = session.exec(category_prefs_statement).all()
+        
+        if category_prefs:
+            print(f"🗑️ Cleaning up {len(category_prefs)} category preference records for user {user.username}")
+            for pref in category_prefs:
+                session.delete(pref)
+    except ImportError:
+        print(f"⚠️ UserCategoryPreferences model not found, skipping category cleanup")
+    except Exception as e:
+        print(f"⚠️ Could not clean up category preferences: {e}")
+    
     # Delete the user
     session.delete(user)
     session.commit()
@@ -599,11 +616,8 @@ async def delete_user(
     # Get current base_url for HTML responses  
     current_base_url = SettingsService.get_base_url(session)
     
-    # Return HTMX-friendly HTML response that triggers refresh
-    from fastapi.responses import HTMLResponse
-    return HTMLResponse(f"""
-        <div hx-get="{current_base_url}/admin/users/list" hx-target="#users-list" hx-trigger="load" style="display: none;"></div>
-    """)
+    # Return updated users list for HTMX
+    return await users_list(request, current_user, session)
 
 
 @router.get("/users/list", response_class=HTMLResponse)
@@ -1561,6 +1575,58 @@ async def admin_jobs_content(
         return HTMLResponse(f'<div class="text-red-600">Error loading jobs: {str(e)}</div>')
 
 
+@router.get("/jobs/status")
+async def admin_jobs_status(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get job status data for auto-refresh (JSON only)"""
+    try:
+        from ..services.background_jobs import background_jobs
+        from ..services.plex_sync_service import PlexSyncService
+
+        # Get job status
+        all_jobs = background_jobs.get_all_jobs_status()
+        
+        # Get library sync stats
+        sync_stats = None
+        try:
+            sync_service = PlexSyncService(session)
+            sync_stats = sync_service.get_sync_stats()
+        except Exception as e:
+            print(f"Error getting sync stats: {e}")
+            sync_stats = {'error': str(e)}
+        
+        # Format the jobs for JSON response
+        jobs_info = {}
+        for job_name, job_data in all_jobs.items():
+            jobs_info[job_name] = {
+                'name': job_data.get('name', job_name.replace('_', ' ').title()),
+                'description': job_data.get('description', ''),
+                'interval': f"Every {job_data.get('interval_seconds', 3600) // 60} minutes",
+                'last_run': job_data.get('last_run').strftime('%Y-%m-%d %H:%M:%S') if job_data.get('last_run') else 'Never',
+                'next_run': job_data.get('next_run').strftime('%Y-%m-%d %H:%M:%S') if job_data.get('next_run') else 'Not scheduled',
+                'running': job_data.get('running', False),
+                'stats': job_data.get('stats', {})
+            }
+        
+        return {
+            "success": True,
+            "jobs": jobs_info,
+            "sync_stats": sync_stats
+        }
+        
+    except Exception as e:
+        print(f"Error getting jobs status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "jobs": {},
+            "sync_stats": {}
+        }
+
+
 @router.post("/jobs/trigger-library-sync")
 async def trigger_library_sync_job(
     request: Request,
@@ -1732,4 +1798,3053 @@ async def trigger_download_status_job(
                 "success": False,
                 "message": f"Error triggering download status check: {str(e)}"
             }
+
+
+# HTMX Tab Content Endpoints
+@router.get("/tabs/overview", response_class=HTMLResponse)
+async def admin_overview_tab(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get overview tab content"""
+    try:
+        # Get stats
+        from sqlmodel import select, func
+        from ..models.user import User
+        from ..models.media_request import MediaRequest, RequestStatus
+        
+        total_users = session.exec(select(func.count(User.id))).first()
+        pending_requests = session.exec(
+            select(func.count(MediaRequest.id)).where(MediaRequest.status == RequestStatus.PENDING)
+        ).first()
+        
+        # Get connection status
+        connection_status = {"all_connected": True}  # Simplified for now
+        
+        stats = {
+            "total_users": total_users or 0,
+            "pending_requests": pending_requests or 0,
+            "library_items": 0  # TODO: Get from Plex
+        }
+        
+        return create_template_response("admin_tabs/overview.html", {
+            "request": request,
+            "current_user": current_user,
+            "stats": stats,
+            "connection_status": connection_status
+        })
+        
+    except Exception as e:
+        return HTMLResponse(f'<div class="text-red-600">Error loading overview: {str(e)}</div>')
+
+
+@router.get("/tabs/users", response_class=HTMLResponse)
+async def admin_users_tab(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get users tab content"""
+    return create_template_response("admin_tabs/users.html", {
+        "request": request,
+        "current_user": current_user
+    })
+
+
+@router.get("/tabs/general", response_class=HTMLResponse)
+async def admin_general_tab(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get general settings tab content"""
+    settings = SettingsService.get_settings(session)
+    return create_template_response("admin_tabs/general.html", {
+        "request": request,
+        "current_user": current_user,
+        "settings": settings
+    })
+
+
+@router.get("/tabs/media-servers", response_class=HTMLResponse)
+async def admin_media_servers_tab(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get media servers tab content"""
+    settings = SettingsService.get_settings(session)
+    return create_template_response("admin_tabs/media_servers.html", {
+        "request": request,
+        "current_user": current_user,
+        "settings": settings
+    })
+
+
+@router.post("/settings/update-media-servers", response_class=HTMLResponse)
+async def update_media_servers_settings(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Update media server settings"""
+    try:
+        form_data = await request.form()
+        
+        # Handle library preferences
+        monitored_libraries = form_data.getlist("monitored_libraries")
+        import json
+        library_preferences_json = json.dumps(monitored_libraries) if monitored_libraries else None
+        
+        # Create settings data dictionary for update
+        settings_data = {
+            "plex_url": form_data.get("plex_url", "").strip(),
+            "plex_token": form_data.get("plex_token", "").strip(),
+            "sync_library_preferences": library_preferences_json
+        }
+        
+        # Save to database using the correct format
+        SettingsService.update_settings(session, settings_data, current_user.id)
+        
+        if request.headers.get("HX-Request"):
+            # Get current base_url for HTML responses
+            current_base_url = SettingsService.get_base_url(session)
+            return HTMLResponse(
+                '<div class="p-3 bg-green-50 border border-green-200 rounded-md">'
+                '<p class="text-green-800 font-medium">✓ Media server settings updated successfully</p>'
+                '</div>'
+                f'<div hx-get="{current_base_url}/admin/clear-feedback" hx-trigger="load delay:3s" hx-target="#settings-feedback"></div>'
+            )
+        else:
+            return {"success": True, "message": "Media server settings updated successfully"}
+            
+    except Exception as e:
+        logger.error(f"Error updating media server settings: {e}")
+        if request.headers.get("HX-Request"):
+            return HTMLResponse(
+                '<div class="p-3 bg-red-50 border border-red-200 rounded-md">'
+                f'<p class="text-red-800 font-medium">✗ Error updating settings: {str(e)}</p>'
+                '</div>'
+                '<div hx-get="/admin/clear-feedback" hx-trigger="load delay:5s" hx-target="#settings-feedback"></div>'
+            )
+        else:
+            return {"success": False, "error": str(e)}
+
+
+@router.post("/test-connection", response_class=HTMLResponse)
+async def test_plex_connection(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Test Plex server connection"""
+    try:
+        form_data = await request.form()
+        plex_url = form_data.get("plex_url", "").strip()
+        plex_token = form_data.get("plex_token", "").strip()
+        
+        if not plex_url or not plex_token:
+            return HTMLResponse(
+                '<div class="flex items-center text-red-600">'
+                '<svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">'
+                '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>'
+                '</svg>'
+                '<span class="text-sm">URL and token are required</span>'
+                '</div>'
+            )
+        
+        # Create a temporary settings object to test connection
+        temp_settings = Settings()
+        temp_settings.plex_url = plex_url
+        temp_settings.plex_token = plex_token
+        
+        # Use the existing test_connections method
+        results = temp_settings.test_connections()
+        plex_result = results.get('plex', {})
+        
+        if plex_result.get('status') == 'connected':
+            return HTMLResponse(
+                '<div class="flex items-center text-green-600">'
+                '<svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">'
+                '<path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>'
+                '</svg>'
+                f'<span class="text-sm">{plex_result.get("message", "Connection successful")}</span>'
+                '</div>'
+            )
+        else:
+            return HTMLResponse(
+                '<div class="flex items-center text-red-600">'
+                '<svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">'
+                '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>'
+                '</svg>'
+                f'<span class="text-sm">{plex_result.get("message", "Connection failed")}</span>'
+                '</div>'
+            )
+        
+    except Exception as e:
+        logger.error(f"Error testing Plex connection: {e}")
+        return HTMLResponse(
+            '<div class="flex items-center text-red-600">'
+            '<svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">'
+            '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>'
+            '</svg>'
+            f'<span class="text-sm">Connection error: {str(e)}</span>'
+            '</div>'
+        )
+
+
+@router.post("/load-libraries", response_class=HTMLResponse)
+async def load_plex_libraries(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Load available Plex libraries"""
+    try:
+        form_data = await request.form()
+        plex_url = form_data.get("plex_url", "").strip()
+        plex_token = form_data.get("plex_token", "").strip()
+        
+        if not plex_url or not plex_token:
+            return HTMLResponse(
+                '<div class="text-sm text-red-600">URL and token are required to load libraries</div>'
+            )
+        
+        # Create a temporary settings object with the provided credentials
+        temp_settings = Settings()
+        temp_settings.plex_url = plex_url
+        temp_settings.plex_token = plex_token
+        
+        # Use the existing Plex service to get libraries
+        plex_service = PlexService(session=session)
+        plex_service.plex_url = plex_url
+        plex_service.plex_token = plex_token
+        
+        try:
+            # Try to get libraries using the Plex service
+            libraries = plex_service.get_available_libraries()
+            
+            if not libraries:
+                return HTMLResponse(
+                    '<div class="text-sm text-gray-600">No libraries found or connection failed</div>'
+                )
+            
+            # Get current library preferences
+            settings = SettingsService.get_settings(session)
+            current_preferences = settings.get_sync_library_preferences()
+            
+            html = '<div class="grid grid-cols-2 gap-3">'
+            found_media_libs = False
+            
+            for lib in libraries:
+                lib_type = lib.get("type", "unknown")
+                lib_name = lib.get("title", "Unknown")
+                lib_key = str(lib.get("key", ""))
+                
+                # Only show movie and show libraries
+                if lib_type in ["movie", "show"]:
+                    found_media_libs = True
+                    checked = 'checked' if lib_name in current_preferences else ''
+                    html += f'''
+                    <div class="flex items-center p-2 bg-white border border-gray-200 rounded text-sm">
+                        <input type="checkbox" name="monitored_libraries" value="{lib_name}" 
+                               id="lib_{lib_key}" {checked} class="h-4 w-4 text-orange-600 border-gray-300 rounded flex-shrink-0">
+                        <label for="lib_{lib_key}" class="ml-2 flex-1 min-w-0">
+                            <span class="font-medium text-gray-900 truncate block">{lib_name}</span>
+                            <span class="text-xs text-gray-500">({lib_type})</span>
+                        </label>
+                    </div>
+                    '''
+            
+            html += '</div>'
+            
+            if not found_media_libs:
+                html = '<div class="text-sm text-gray-600">No movie or TV show libraries found</div>'
+            
+            return HTMLResponse(html)
+            
+        except Exception as plex_error:
+            # Fallback to direct requests approach
+            import requests
+            headers = {"X-Plex-Token": plex_token}
+            response = requests.get(f"{plex_url}/library/sections", headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                libraries = data.get("MediaContainer", {}).get("Directory", [])
+                
+                # Get current library preferences
+                settings = SettingsService.get_settings(session)
+                current_preferences = settings.get_sync_library_preferences()
+                
+                html = '<div class="grid grid-cols-2 gap-3">'
+                found_media_libs = False
+                
+                for lib in libraries:
+                    lib_type = lib.get("type", "unknown")
+                    lib_name = lib.get("title", "Unknown")
+                    lib_key = str(lib.get("key", ""))
+                    
+                    # Only show movie and show libraries
+                    if lib_type in ["movie", "show"]:
+                        found_media_libs = True
+                        checked = 'checked' if lib_name in current_preferences else ''
+                        html += f'''
+                        <div class="flex items-center p-2 bg-white border border-gray-200 rounded text-sm">
+                            <input type="checkbox" name="monitored_libraries" value="{lib_name}" 
+                                   id="lib_{lib_key}" {checked} class="h-4 w-4 text-orange-600 border-gray-300 rounded flex-shrink-0">
+                            <label for="lib_{lib_key}" class="ml-2 flex-1 min-w-0">
+                                <span class="font-medium text-gray-900 truncate block">{lib_name}</span>
+                                <span class="text-xs text-gray-500">({lib_type})</span>
+                            </label>
+                        </div>
+                        '''
+                
+                html += '</div>'
+                
+                if not found_media_libs:
+                    html = '<div class="text-sm text-gray-600">No movie or TV show libraries found</div>'
+                
+                return HTMLResponse(html)
+            else:
+                return HTMLResponse(
+                    f'<div class="text-sm text-red-600">Failed to load libraries (HTTP {response.status_code})</div>'
+                )
+        
+    except Exception as e:
+        logger.error(f"Error loading Plex libraries: {e}")
+        return HTMLResponse(
+            f'<div class="text-sm text-red-600">Error loading libraries: {str(e)}</div>'
+        )
+
+
+
+
+@router.get("/clear-feedback", response_class=HTMLResponse)
+async def clear_feedback(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible)
+):
+    """Clear feedback messages"""
+    return HTMLResponse("")
+
+
+@router.get("/tabs/services", response_class=HTMLResponse)
+async def admin_services_tab(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get services tab content"""
+    settings = SettingsService.get_settings(session)
+    return create_template_response("admin_tabs/services.html", {
+        "request": request,
+        "current_user": current_user,
+        "settings": settings
+    })
+
+
+# Radarr Service Endpoints
+@router.get("/services/radarr/list", response_class=HTMLResponse)
+async def list_radarr_instances(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """List all Radarr instances"""
+    from sqlmodel import select
+    from ..models.service_instance import ServiceInstance, ServiceType
+    
+    # Get all Radarr instances from database
+    statement = select(ServiceInstance).where(ServiceInstance.service_type == ServiceType.RADARR)
+    instances = session.exec(statement).all()
+    
+    if not instances:
+        return HTMLResponse('''
+            <div class="p-6 text-center text-gray-500">
+                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                </svg>
+                <p class="text-sm">No Radarr instances configured</p>
+                <p class="text-xs text-gray-400 mt-1">Add an instance to get started with movie automation</p>
+            </div>
+        ''')
+    
+    # Get current base_url for HTML responses  
+    current_base_url = SettingsService.get_base_url(session)
+    
+    # Build HTML for each instance
+    instances_html = ""
+    for instance in instances:
+        # Test connection automatically to get current status
+        try:
+            current_result = instance.test_connection()
+            # Save the updated test result
+            session.add(instance)
+            session.commit()
+            test_result = current_result
+        except Exception as e:
+            print(f"Error testing Radarr {instance.name}: {e}")
+            test_result = instance.get_test_result()
+        
+        status_color = "green" if test_result.get("status") == "connected" else "red"
+        status_text = "Connected" if test_result.get("status") == "connected" else "Disconnected"
+        
+        # Get settings for display
+        settings = instance.get_settings()
+        hostname = settings.get("hostname", "Unknown")
+        port = settings.get("port", "Unknown")
+        use_ssl = settings.get("use_ssl", False)
+        protocol = "HTTPS" if use_ssl else "HTTP"
+        
+        instances_html += f'''
+            <div class="p-4 border-b border-gray-200 last:border-b-0">
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center">
+                            <h4 class="text-lg font-medium text-gray-900">{instance.name}</h4>
+                            <span class="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-{status_color}-100 text-{status_color}-800">
+                                <div class="w-2 h-2 bg-{status_color}-400 rounded-full mr-1"></div>
+                                {status_text}
+                            </span>
+                        </div>
+                        <div class="mt-1 text-sm text-gray-500">
+                            <span>{protocol}://{hostname}:{port}</span>
+                            {f' • Version: {test_result.get("version", "Unknown")}' if test_result.get("version") else ''}
+                        </div>
+                        <div class="mt-1 text-xs text-gray-400">
+                            Created: {instance.created_at.strftime("%Y-%m-%d %H:%M") if instance.created_at else "Unknown"}
+                            {f' • Last tested: {instance.last_tested_at.strftime("%Y-%m-%d %H:%M")}' if instance.last_tested_at else ''}
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button type="button" 
+                                hx-post="{current_base_url}/admin/services/radarr/{instance.id}/test"
+                                hx-target="#instance-{instance.id}-status"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-medium">
+                            Test
+                        </button>
+                        <button type="button" 
+                                hx-get="{current_base_url}/admin/services/radarr/{instance.id}/edit"
+                                hx-target="#service-modal-content"
+                                onclick="showServiceModal('Edit Radarr Instance')"
+                                class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs font-medium">
+                            Edit
+                        </button>
+                        <button type="button" 
+                                hx-delete="{current_base_url}/admin/services/radarr/{instance.id}"
+                                hx-target="#radarr-instances"
+                                hx-confirm="Are you sure you want to delete this Radarr instance?"
+                                class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs font-medium">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+                <div id="instance-{instance.id}-status" class="mt-2"></div>
+            </div>
+        '''
+    
+    return HTMLResponse(instances_html)
+
+
+@router.get("/services/radarr/{instance_id}/edit", response_class=HTMLResponse)
+async def edit_radarr_form(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get Radarr instance edit form with existing data"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.RADARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Radarr instance not found</p>
+                </div>
+            ''')
+        
+        # Get current base_url for HTML responses  
+        current_base_url = SettingsService.get_base_url(session)
+        
+        # Get instance settings
+        settings = instance.get_settings()
+        hostname = settings.get("hostname", "")
+        port = settings.get("port", 7878)
+        use_ssl = settings.get("use_ssl", False)
+        base_url = settings.get("base_url", "")
+        quality_profile_id = settings.get("quality_profile_id", "")
+        root_folder_path = settings.get("root_folder_path", "")
+        minimum_availability = settings.get("minimum_availability", "inCinemas")
+        monitored = settings.get("monitored", True)
+        search_for_movie = settings.get("search_for_movie", True)
+        tags = settings.get("tags", [])
+        
+        return HTMLResponse(f'''
+            <div>
+                <h4 class="text-lg font-medium text-gray-900 mb-6">Edit Radarr Instance</h4>
+                <form hx-post="{current_base_url}/admin/services/radarr/{instance_id}/update" hx-target="#radarr-instances" class="space-y-6">
+                    
+                    <!-- Instance Name -->
+                    <div>
+                        <label for="radarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                        <input type="text" name="radarr_name" id="radarr_name" 
+                               value="{instance.name}"
+                               placeholder="e.g., Radarr 4K, Movies HD"
+                               class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                    
+                    <!-- Connection Settings -->
+                    <div>
+                        <h5 class="text-md font-semibold text-gray-900 mb-4">Connection Settings</h5>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="radarr_hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                                <input type="text" name="radarr_hostname" id="radarr_hostname" 
+                                       value="{hostname}"
+                                       placeholder="172.20.0.11 or localhost"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            </div>
+                            
+                            <div>
+                                <label for="radarr_port" class="block text-sm font-medium text-gray-700">Port</label>
+                                <input type="number" name="radarr_port" id="radarr_port" 
+                                       value="{port}"
+                                       min="1" max="65535"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            </div>
+                            
+                            <div class="flex items-end">
+                                <div class="flex items-center h-10">
+                                    <input type="checkbox" name="use_ssl" id="use_ssl" 
+                                           {"checked" if use_ssl else ""}
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="use_ssl" class="ml-2 text-sm text-gray-700">Use HTTPS</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                            <div>
+                                <label for="radarr_api_key" class="block text-sm font-medium text-gray-700">API Key</label>
+                                <input type="password" name="radarr_api_key" id="radarr_api_key" 
+                                       value="{instance.api_key}"
+                                       placeholder="Your Radarr API key"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            </div>
+                            
+                            <div>
+                                <label for="radarr_base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
+                                <input type="text" name="radarr_base_url" id="radarr_base_url" 
+                                       value="{base_url}"
+                                       placeholder="/radarr (optional)"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Test Connection -->
+                    <div>
+                        <button type="button" 
+                                hx-post="{current_base_url}/admin/services/radarr/test" 
+                                hx-target="#test-results"
+                                hx-include="form"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                            <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Test Connection
+                        </button>
+                        <div id="test-results" class="mt-4"></div>
+                    </div>
+                    
+                    <!-- Advanced Settings -->
+                    <div class="border-t pt-4">
+                        <button type="button" onclick="toggleAdvancedSettings()" 
+                                class="flex items-center justify-between w-full text-left focus:outline-none">
+                            <h5 class="text-md font-semibold text-gray-900">Advanced Settings</h5>
+                            <svg id="advanced-chevron" class="w-5 h-5 text-gray-500 transform transition-transform duration-200" 
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        
+                        <div id="radarr-advanced-settings" class="mt-4 space-y-4">
+                            <!-- Default Settings -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="radarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
+                                    <select name="radarr_quality_profile_id" id="radarr_quality_profile_id" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Select quality profile...</option>
+                                        {f'<option value="{quality_profile_id}" selected>Profile ID {quality_profile_id}</option>' if quality_profile_id else ''}
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="radarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
+                                    <select name="radarr_root_folder_path" id="radarr_root_folder_path" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Select root folder...</option>
+                                        {f'<option value="{root_folder_path}" selected>{root_folder_path}</option>' if root_folder_path else ''}
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="minimum_availability" class="block text-sm font-medium text-gray-700">Minimum Availability</label>
+                                    <select name="minimum_availability" id="minimum_availability" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="announced" {"selected" if minimum_availability == "announced" else ""}>Announced</option>
+                                        <option value="inCinemas" {"selected" if minimum_availability == "inCinemas" else ""}>In Cinemas</option>
+                                        <option value="released" {"selected" if minimum_availability == "released" else ""}>Released</option>
+                                        <option value="preDB" {"selected" if minimum_availability == "preDB" else ""}>PreDB</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                                    <input type="text" name="tags" id="tags" 
+                                           value="{', '.join(tags) if isinstance(tags, list) else tags}"
+                                           placeholder="4k, uhd, remux (comma separated)"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <p class="mt-1 text-xs text-gray-500">Optional tags to apply to requests</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Monitoring Options -->
+                            <div class="space-y-3">
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="monitored" id="monitored" 
+                                           {"checked" if monitored else ""}
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="monitored" class="ml-2 text-sm text-gray-700">Monitor movies by default</label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="search_for_movie" id="search_for_movie" 
+                                           {"checked" if search_for_movie else ""}
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="search_for_movie" class="ml-2 text-sm text-gray-700">Search for movies upon adding</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Form Actions -->
+                    <div class="flex justify-end space-x-3 pt-6 border-t">
+                        <button type="button" onclick="hideServiceModal()"
+                                class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                            Cancel
+                        </button>
+                        <button type="submit" 
+                                class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                            Update Instance
+                        </button>
+                    </div>
+                </form>
+            </div>
+        ''')
+        
+    except Exception as e:
+        logger.error(f"Error loading Radarr edit form: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error loading edit form: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.post("/services/radarr/{instance_id}/update", response_class=HTMLResponse)
+async def update_radarr_instance(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Update an existing Radarr instance"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.RADARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Radarr instance not found</p>
+                </div>
+            ''')
+        
+        # Extract form data
+        form_data = await request.form()
+        radarr_name = form_data.get("radarr_name", "").strip()
+        radarr_hostname = form_data.get("radarr_hostname", "").strip()
+        radarr_port = form_data.get("radarr_port", "7878").strip()
+        radarr_api_key = form_data.get("radarr_api_key", "").strip()
+        use_ssl = form_data.get("use_ssl") == "on"
+        radarr_base_url = form_data.get("radarr_base_url", "").strip()
+        
+        # Validation
+        if not radarr_name or not radarr_hostname or not radarr_port or not radarr_api_key:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md mb-4">
+                    <p class="text-red-800 text-sm">✗ Instance name, hostname, port, and API key are required</p>
+                </div>
+            ''')
+        
+        # Build URL from components
+        protocol = "https" if use_ssl else "http"
+        radarr_url = f"{protocol}://{radarr_hostname}:{radarr_port}"
+        
+        # Update instance
+        instance.name = radarr_name
+        instance.url = radarr_url
+        instance.api_key = radarr_api_key
+        
+        # Update settings
+        from ..models.service_instance import RADARR_DEFAULT_SETTINGS
+        settings = RADARR_DEFAULT_SETTINGS.copy()
+        settings.update({
+            "hostname": radarr_hostname,
+            "port": int(radarr_port),
+            "use_ssl": use_ssl,
+            "base_url": radarr_base_url
+        })
+        instance.set_settings(settings)
+        
+        # Save to database
+        session.add(instance)
+        session.commit()
+        
+        # Get current base_url for HTML responses  
+        current_base_url = SettingsService.get_base_url(session)
+        
+        # Close modal and refresh list
+        return HTMLResponse(f'''
+            <div class="p-3 bg-green-50 border border-green-200 rounded-md mb-4">
+                <p class="text-green-800 text-sm font-medium">✓ Radarr instance "{radarr_name}" updated successfully!</p>
+            </div>
+            <script>
+                // Close modal
+                hideServiceModal();
+                // Refresh the instances list
+                htmx.ajax('GET', '{current_base_url}/admin/services/radarr/list', {{
+                    target: '#radarr-instances',
+                    swap: 'innerHTML'
+                }});
+            </script>
+        ''')
+        
+    except Exception as e:
+        logger.error(f"Error updating Radarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-808 text-sm">✗ Error updating instance: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.get("/services/radarr/add", response_class=HTMLResponse)
+async def add_radarr_form(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get Radarr instance add form"""
+    current_base_url = SettingsService.get_base_url(session)
+    
+    return HTMLResponse(f'''
+        <div>
+            <h4 class="text-lg font-medium text-gray-900 mb-6">Add Radarr Instance</h4>
+            <form hx-post="{current_base_url}/admin/services/radarr/create" hx-target="#radarr-instances" class="space-y-6">
+                
+                <!-- Instance Name -->
+                <div>
+                    <label for="radarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                    <input type="text" name="radarr_name" id="radarr_name" 
+                           placeholder="e.g., Radarr 4K, Movies HD"
+                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    <p class="mt-1 text-xs text-gray-500">Friendly name to identify this instance</p>
+                </div>
+                
+                <!-- Connection Settings -->
+                <div>
+                    <h5 class="text-md font-semibold text-gray-900 mb-4">Connection Settings</h5>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="radarr_hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                            <input type="text" name="radarr_hostname" id="radarr_hostname" 
+                                   placeholder="172.20.0.11 or localhost"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <p class="mt-1 text-xs text-gray-500">Server hostname or IP address</p>
+                        </div>
+                        
+                        <div>
+                            <label for="radarr_port" class="block text-sm font-medium text-gray-700">Port</label>
+                            <input type="number" name="radarr_port" id="radarr_port" 
+                                   value="7878"
+                                   min="1" max="65535"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <p class="mt-1 text-xs text-gray-500">Default: 7878</p>
+                        </div>
+                        
+                        <div class="flex items-end">
+                            <div class="flex items-center h-10">
+                                <input type="checkbox" name="use_ssl" id="use_ssl" 
+                                       class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                <label for="use_ssl" class="ml-2 text-sm text-gray-700">Use HTTPS</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                            <label for="radarr_api_key" class="block text-sm font-medium text-gray-700">API Key</label>
+                            <input type="password" name="radarr_api_key" id="radarr_api_key" 
+                                   placeholder="Your Radarr API key"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <p class="mt-1 text-xs text-gray-500">Found in Radarr Settings → General → Security</p>
+                        </div>
+                        
+                        <div>
+                            <label for="radarr_base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
+                            <input type="text" name="radarr_base_url" id="radarr_base_url" 
+                                   placeholder="/radarr (optional)"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <p class="mt-1 text-xs text-gray-500">For reverse proxy setups</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Test Connection -->
+                <div>
+                    <button type="button" 
+                            hx-post="{current_base_url}/admin/services/radarr/test" 
+                            hx-target="#test-results"
+                            hx-include="form"
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                        <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Test Connection
+                    </button>
+                    <div id="test-results" class="mt-4"></div>
+                </div>
+                
+                <!-- Advanced Settings (Collapsed by default) -->
+                <div class="border-t pt-4">
+                    <button type="button" onclick="toggleAdvancedSettings()" 
+                            class="flex items-center justify-between w-full text-left focus:outline-none">
+                        <h5 class="text-md font-semibold text-gray-900">Advanced Settings</h5>
+                        <svg id="advanced-chevron" class="w-5 h-5 text-gray-500 transform transition-transform duration-200" 
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </button>
+                    
+                    <div id="radarr-advanced-settings" class="hidden mt-4 space-y-4">
+                        <!-- Default Settings -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="radarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
+                                <select name="radarr_quality_profile_id" id="radarr_quality_profile_id" 
+                                        class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <option value="">Test connection to load profiles</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label for="radarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
+                                <select name="radarr_root_folder_path" id="radarr_root_folder_path" 
+                                        class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <option value="">Test connection to load folders</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label for="minimum_availability" class="block text-sm font-medium text-gray-700">Minimum Availability</label>
+                                <select name="minimum_availability" id="minimum_availability" 
+                                        class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                    <option value="announced">Announced</option>
+                                    <option value="inCinemas">In Cinemas</option>
+                                    <option value="released" selected>Released</option>
+                                    <option value="preDB">PreDB</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label for="tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                                <input type="text" name="tags" id="tags" 
+                                       placeholder="4k, uhd, remux (comma separated)"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                <p class="mt-1 text-xs text-gray-500">Optional tags to apply to requests</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Checkboxes -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                            <div class="flex items-center">
+                                <input type="checkbox" name="is_default" id="is_default" 
+                                       class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                <label for="is_default" class="ml-2 text-sm text-gray-700">
+                                    Default instance for movie requests
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center">
+                                <input type="checkbox" name="enable_scan" id="enable_scan" checked
+                                       class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                <label for="enable_scan" class="ml-2 text-sm text-gray-700">
+                                    Enable library scanning
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center">
+                                <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" checked
+                                       class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                <label for="enable_automatic_search" class="ml-2 text-sm text-gray-700">
+                                    Enable automatic search on approval
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- External URL -->
+                        <div class="pt-4">
+                            <label for="external_url" class="block text-sm font-medium text-gray-700">External URL</label>
+                            <input type="url" name="external_url" id="external_url" 
+                                   placeholder="https://radarr.yourdomain.com (optional)"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                            <p class="mt-1 text-xs text-gray-500">Public URL for external access</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Buttons -->
+                <div class="flex justify-end pt-6 border-t space-x-3">
+                    <button type="button" onclick="hideServiceModal()"
+                            class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Add Radarr Instance
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <script>
+        function toggleAdvancedSettings() {{
+            const settings = document.getElementById('radarr-advanced-settings');
+            const chevron = document.getElementById('advanced-chevron');
+            
+            if (settings.classList.contains('hidden')) {{
+                settings.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            }} else {{
+                settings.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }}
+        }}
+        </script>
+    ''')
+
+
+@router.post("/services/radarr/test", response_class=HTMLResponse)
+async def test_radarr_connection(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Test Radarr connection and load profiles/folders"""
+    try:
+        form_data = await request.form()
+        radarr_name = form_data.get("radarr_name", "").strip()
+        radarr_hostname = form_data.get("radarr_hostname", "").strip()
+        radarr_port = form_data.get("radarr_port", "7878").strip()
+        radarr_api_key = form_data.get("radarr_api_key", "").strip()
+        use_ssl = form_data.get("use_ssl") == "on"
+        radarr_base_url = form_data.get("radarr_base_url", "").strip()
+        
+        if not radarr_hostname or not radarr_port or not radarr_api_key:
+            return HTMLResponse('''
+                <div id="test-results" class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Hostname, port, and API key are required</p>
+                </div>
+            ''')
+        
+        # Build URL from hostname, port, and SSL settings
+        protocol = "https" if use_ssl else "http"
+        radarr_url = f"{protocol}://{radarr_hostname}:{radarr_port}"
+        
+        # Create temporary ServiceInstance for testing
+        from ..models.service_instance import ServiceInstance, ServiceType, RADARR_DEFAULT_SETTINGS
+        temp_instance = ServiceInstance(
+            name=radarr_name or "Test Instance",
+            service_type=ServiceType.RADARR,
+            url=radarr_url,
+            api_key=radarr_api_key
+        )
+        
+        # Set connection settings
+        settings = RADARR_DEFAULT_SETTINGS.copy()
+        settings.update({
+            "hostname": radarr_hostname,
+            "port": int(radarr_port),
+            "use_ssl": use_ssl,
+            "base_url": radarr_base_url
+        })
+        temp_instance.set_settings(settings)
+        
+        # Test the connection
+        result = temp_instance.test_connection()
+        
+        if result.get('status') == 'connected':
+            # Fetch quality profiles and root folders
+            try:
+                import requests
+                base_url = radarr_url.rstrip('/')
+                if radarr_base_url:
+                    base_url = f"{base_url}/{radarr_base_url.strip('/')}"
+                
+                # Get quality profiles
+                profiles_response = requests.get(
+                    f"{base_url}/api/v3/qualityprofile",
+                    headers={'X-Api-Key': radarr_api_key},
+                    timeout=10,
+                    verify=False
+                )
+                quality_profiles = profiles_response.json() if profiles_response.status_code == 200 else []
+                
+                # Get root folders
+                folders_response = requests.get(
+                    f"{base_url}/api/v3/rootfolder", 
+                    headers={'X-Api-Key': radarr_api_key},
+                    timeout=10,
+                    verify=False
+                )
+                root_folders = folders_response.json() if folders_response.status_code == 200 else []
+                
+                # Build quality profile options
+                profile_options = ""
+                for profile in quality_profiles:
+                    profile_options += f'<option value="{profile["id"]}">{profile["name"]}</option>'
+                
+                # Build root folder options
+                folder_options = ""
+                for folder in root_folders:
+                    folder_options += f'<option value="{folder["path"]}">{folder["path"]} ({folder.get("freeSpace", "Unknown")} free)</option>'
+                
+                # Return success message and populate dropdowns
+                return HTMLResponse(f'''
+                    <div id="test-results" class="p-3 bg-green-50 border border-green-200 rounded-md mb-4">
+                        <p class="text-green-800 text-sm font-medium">✓ Connection successful!</p>
+                        <p class="text-green-700 text-xs mt-1">Version: {result.get("version", "Unknown")}</p>
+                        <p class="text-green-700 text-xs">Instance: {result.get("instance_name", radarr_name)}</p>
+                    </div>
+                    <script>
+                        // Expand the advanced settings section
+                        const advancedSection = document.getElementById('radarr-advanced-settings');
+                        const chevron = document.getElementById('advanced-chevron');
+                        if (advancedSection && chevron) {{
+                            advancedSection.classList.remove('hidden');
+                            chevron.classList.add('rotate-180');
+                            
+                            // Populate quality profiles
+                            const qualitySelect = document.getElementById('radarr_quality_profile_id');
+                            if (qualitySelect) {{
+                                qualitySelect.innerHTML = '<option value="">Select quality profile...</option>{profile_options}';
+                            }}
+                            
+                            // Populate root folders
+                            const rootFolderSelect = document.getElementById('radarr_root_folder_path');
+                            if (rootFolderSelect) {{
+                                rootFolderSelect.innerHTML = '<option value="">Select root folder...</option>{folder_options}';
+                            }}
+                        }}
+                    </script>
+                ''')
+                
+            except Exception as e:
+                # Connection worked but couldn't fetch additional data
+                return HTMLResponse(f'''
+                    <div id="test-results" class="p-3 bg-yellow-50 border border-yellow-200 rounded-md mb-4">
+                        <p class="text-yellow-800 text-sm font-medium">✓ Connection successful!</p>
+                        <p class="text-yellow-700 text-xs mt-1">Version: {result.get("version", "Unknown")}</p>
+                        <p class="text-yellow-700 text-xs">Warning: Could not load profiles/folders: {str(e)}</p>
+                    </div>
+                    <script>
+                        // Expand the advanced settings section anyway
+                        const advancedSection = document.getElementById('radarr-advanced-settings');
+                        const chevron = document.getElementById('advanced-chevron');
+                        if (advancedSection && chevron) {{
+                            advancedSection.classList.remove('hidden');
+                            chevron.classList.add('rotate-180');
+                        }}
+                    </script>
+                ''')
+        else:
+            error_msg = result.get('message', 'Connection failed')
+            return HTMLResponse(f'''
+                <div id="test-results" class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Connection failed: {error_msg}</p>
+                </div>
+            ''')
+            
+    except Exception as e:
+        logger.error(f"Error testing Radarr connection: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error testing connection: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.post("/services/radarr/create", response_class=HTMLResponse)
+async def create_radarr_instance(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Create a new Radarr instance"""
+    try:
+        form_data = await request.form()
+        
+        # Extract form data
+        radarr_name = form_data.get("radarr_name", "").strip()
+        radarr_hostname = form_data.get("radarr_hostname", "").strip()
+        radarr_port = form_data.get("radarr_port", "7878").strip()
+        radarr_api_key = form_data.get("radarr_api_key", "").strip()
+        use_ssl = form_data.get("use_ssl") == "on"
+        radarr_base_url = form_data.get("radarr_base_url", "").strip()
+        
+        # Advanced settings
+        radarr_quality_profile_id = form_data.get("radarr_quality_profile_id", "").strip()
+        radarr_root_folder_path = form_data.get("radarr_root_folder_path", "").strip()
+        minimum_availability = form_data.get("minimum_availability", "inCinemas").strip()
+        tags = form_data.get("tags", "").strip()
+        monitored = form_data.get("monitored") == "on"
+        search_for_movie = form_data.get("search_for_movie") == "on"
+        
+        # Validation
+        if not radarr_name or not radarr_hostname or not radarr_port or not radarr_api_key:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md mb-4">
+                    <p class="text-red-800 text-sm">✗ Instance name, hostname, port, and API key are required</p>
+                </div>
+            ''')
+        
+        # Build URL from components
+        protocol = "https" if use_ssl else "http"
+        radarr_url = f"{protocol}://{radarr_hostname}:{radarr_port}"
+        
+        # Create ServiceInstance
+        from ..models.service_instance import ServiceInstance, ServiceType, RADARR_DEFAULT_SETTINGS
+        
+        # Prepare settings
+        settings = RADARR_DEFAULT_SETTINGS.copy()
+        settings.update({
+            "hostname": radarr_hostname,
+            "port": int(radarr_port),
+            "use_ssl": use_ssl,
+            "base_url": radarr_base_url,
+            "quality_profile_id": int(radarr_quality_profile_id) if radarr_quality_profile_id else None,
+            "root_folder_path": radarr_root_folder_path or None,
+            "minimum_availability": minimum_availability,
+            "tags": [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else [],
+            "monitored": monitored,
+            "search_for_movie": search_for_movie,
+            "enable_scan": True,
+            "enable_automatic_search": True
+        })
+        
+        # Create the instance
+        new_instance = ServiceInstance(
+            name=radarr_name,
+            service_type=ServiceType.RADARR,
+            url=radarr_url,
+            api_key=radarr_api_key,
+            is_enabled=True,
+            created_by=current_user.id
+        )
+        new_instance.set_settings(settings)
+        
+        # Save to database
+        session.add(new_instance)
+        session.commit()
+        session.refresh(new_instance)
+        
+        # Test the connection
+        result = new_instance.test_connection()
+        
+        # Get current base_url for HTML responses  
+        current_base_url = SettingsService.get_base_url(session)
+        
+        # Close modal and refresh list
+        return HTMLResponse(f'''
+            <div class="p-3 bg-green-50 border border-green-200 rounded-md mb-4">
+                <p class="text-green-800 text-sm font-medium">✓ Radarr instance "{radarr_name}" created successfully!</p>
+            </div>
+            <script>
+                // Close modal
+                hideServiceModal();
+                // Refresh the instances list
+                htmx.ajax('GET', '{current_base_url}/admin/services/radarr/list', {{
+                    target: '#radarr-instances',
+                    swap: 'innerHTML'
+                }});
+            </script>
+        ''')
+        
+    except Exception as e:
+        logger.error(f"Error creating Radarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error creating instance: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.post("/services/sonarr/test", response_class=HTMLResponse)
+async def test_sonarr_connection(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Test Sonarr connection and load profiles/folders"""
+    try:
+        form_data = await request.form()
+        sonarr_name = form_data.get("sonarr_name", "").strip()
+        sonarr_hostname = form_data.get("sonarr_hostname", "").strip()
+        sonarr_port = form_data.get("sonarr_port", "8989").strip()
+        sonarr_api_key = form_data.get("sonarr_api_key", "").strip()
+        use_ssl = form_data.get("use_ssl") == "on"
+        sonarr_base_url = form_data.get("sonarr_base_url", "").strip()
+        
+        if not sonarr_hostname or not sonarr_port or not sonarr_api_key:
+            return HTMLResponse('''
+                <div id="sonarr-test-results" class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Hostname, port, and API key are required</p>
+                </div>
+            ''')
+        
+        # Build URL from hostname, port, and SSL settings
+        protocol = "https" if use_ssl else "http"
+        sonarr_url = f"{protocol}://{sonarr_hostname}:{sonarr_port}"
+        
+        # Create temporary ServiceInstance for testing
+        from ..models.service_instance import ServiceInstance, ServiceType, SONARR_DEFAULT_SETTINGS
+        temp_instance = ServiceInstance(
+            name=sonarr_name or "Test Instance",
+            service_type=ServiceType.SONARR,
+            url=sonarr_url,
+            api_key=sonarr_api_key
+        )
+        
+        # Set connection settings
+        settings = SONARR_DEFAULT_SETTINGS.copy()
+        settings.update({
+            "hostname": sonarr_hostname,
+            "port": int(sonarr_port),
+            "use_ssl": use_ssl,
+            "base_url": sonarr_base_url
+        })
+        temp_instance.set_settings(settings)
+        
+        # Test the connection
+        result = temp_instance.test_connection()
+        
+        if result.get('status') == 'connected':
+            # Fetch quality profiles, language profiles and root folders
+            try:
+                import requests
+                base_url = sonarr_url.rstrip('/')
+                if sonarr_base_url:
+                    base_url = f"{base_url}/{sonarr_base_url.strip('/')}"
+                
+                # Get quality profiles
+                profiles_response = requests.get(
+                    f"{base_url}/api/v3/qualityprofile",
+                    headers={'X-Api-Key': sonarr_api_key},
+                    timeout=10,
+                    verify=False
+                )
+                quality_profiles = profiles_response.json() if profiles_response.status_code == 200 else []
+                
+                # Get language profiles (Sonarr v3)
+                language_response = requests.get(
+                    f"{base_url}/api/v3/languageprofile",
+                    headers={'X-Api-Key': sonarr_api_key},
+                    timeout=10,
+                    verify=False
+                )
+                language_profiles = language_response.json() if language_response.status_code == 200 else []
+                
+                # Get root folders
+                folders_response = requests.get(
+                    f"{base_url}/api/v3/rootfolder", 
+                    headers={'X-Api-Key': sonarr_api_key},
+                    timeout=10,
+                    verify=False
+                )
+                root_folders = folders_response.json() if folders_response.status_code == 200 else []
+                
+                # Build quality profile options
+                quality_options = ""
+                for profile in quality_profiles:
+                    quality_options += f'<option value="{profile["id"]}">{profile["name"]}</option>'
+                
+                # Build language profile options
+                language_options = ""
+                for profile in language_profiles:
+                    language_options += f'<option value="{profile["id"]}">{profile["name"]}</option>'
+                
+                # Build root folder options
+                folder_options = ""
+                for folder in root_folders:
+                    folder_options += f'<option value="{folder["path"]}">{folder["path"]} ({folder.get("freeSpace", "Unknown")} free)</option>'
+                
+                # Return success message and populate dropdowns
+                return HTMLResponse(f'''
+                    <div id="sonarr-test-results" class="p-3 bg-green-50 border border-green-200 rounded-md mb-4">
+                        <p class="text-green-800 text-sm font-medium">✓ Connection successful!</p>
+                        <p class="text-green-700 text-xs mt-1">Version: {result.get("version", "Unknown")}</p>
+                        <p class="text-green-700 text-xs">Instance: {result.get("instance_name", sonarr_name)}</p>
+                    </div>
+                    <script>
+                        // Expand the advanced settings section
+                        const advancedSection = document.getElementById('sonarr-advanced-settings');
+                        const chevron = document.getElementById('sonarr-advanced-chevron');
+                        if (advancedSection && chevron) {{
+                            advancedSection.classList.remove('hidden');
+                            chevron.classList.add('rotate-180');
+                            
+                            // Populate quality profiles
+                            const qualitySelect = document.getElementById('sonarr_quality_profile_id');
+                            if (qualitySelect) {{
+                                qualitySelect.innerHTML = '<option value="">Select quality profile...</option>{quality_options}';
+                            }}
+                            
+                            // Populate language profiles
+                            const languageSelect = document.getElementById('sonarr_language_profile_id');
+                            if (languageSelect) {{
+                                languageSelect.innerHTML = '<option value="">Select language profile...</option>{language_options}';
+                            }}
+                            
+                            // Populate root folders
+                            const rootFolderSelect = document.getElementById('sonarr_root_folder_path');
+                            if (rootFolderSelect) {{
+                                rootFolderSelect.innerHTML = '<option value="">Select root folder...</option>{folder_options}';
+                            }}
+                        }}
+                    </script>
+                ''')
+                
+            except Exception as e:
+                # Connection worked but couldn't fetch additional data
+                return HTMLResponse(f'''
+                    <div id="sonarr-test-results" class="p-3 bg-yellow-50 border border-yellow-200 rounded-md mb-4">
+                        <p class="text-yellow-800 text-sm font-medium">✓ Connection successful!</p>
+                        <p class="text-yellow-700 text-xs mt-1">Version: {result.get("version", "Unknown")}</p>
+                        <p class="text-yellow-700 text-xs">Warning: Could not load profiles/folders: {str(e)}</p>
+                    </div>
+                    <script>
+                        // Expand the advanced settings section anyway
+                        const advancedSection = document.getElementById('sonarr-advanced-settings');
+                        const chevron = document.getElementById('sonarr-advanced-chevron');
+                        if (advancedSection && chevron) {{
+                            advancedSection.classList.remove('hidden');
+                            chevron.classList.add('rotate-180');
+                        }}
+                    </script>
+                ''')
+        else:
+            error_msg = result.get('message', 'Connection failed')
+            return HTMLResponse(f'''
+                <div id="sonarr-test-results" class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Connection failed: {error_msg}</p>
+                </div>
+            ''')
+            
+    except Exception as e:
+        logger.error(f"Error testing Sonarr connection: {e}")
+        return HTMLResponse(f'''
+            <div id="sonarr-test-results" class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error testing connection: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.post("/services/sonarr/create", response_class=HTMLResponse)
+async def create_sonarr_instance(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Create a new Sonarr instance"""
+    try:
+        form_data = await request.form()
+        
+        # Extract form data
+        sonarr_name = form_data.get("sonarr_name", "").strip()
+        sonarr_hostname = form_data.get("sonarr_hostname", "").strip()
+        sonarr_port = form_data.get("sonarr_port", "8989").strip()
+        sonarr_api_key = form_data.get("sonarr_api_key", "").strip()
+        use_ssl = form_data.get("use_ssl") == "on"
+        sonarr_base_url = form_data.get("sonarr_base_url", "").strip()
+        
+        # Advanced settings
+        sonarr_quality_profile_id = form_data.get("sonarr_quality_profile_id", "").strip()
+        sonarr_language_profile_id = form_data.get("sonarr_language_profile_id", "").strip()
+        sonarr_root_folder_path = form_data.get("sonarr_root_folder_path", "").strip()
+        minimum_availability = form_data.get("minimum_availability", "inCinemas").strip()
+        tags = form_data.get("tags", "").strip()
+        monitored = form_data.get("monitored") == "on"
+        season_folder = form_data.get("season_folder") == "on"
+        search_for_missing = form_data.get("search_for_missing_episodes") == "on"
+        
+        # Validation
+        if not sonarr_name or not sonarr_hostname or not sonarr_port or not sonarr_api_key:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md mb-4">
+                    <p class="text-red-800 text-sm">✗ Instance name, hostname, port, and API key are required</p>
+                </div>
+            ''')
+        
+        # Build URL from components
+        protocol = "https" if use_ssl else "http"
+        sonarr_url = f"{protocol}://{sonarr_hostname}:{sonarr_port}"
+        
+        # Create ServiceInstance
+        from ..models.service_instance import ServiceInstance, ServiceType, SONARR_DEFAULT_SETTINGS
+        
+        # Prepare settings
+        settings = SONARR_DEFAULT_SETTINGS.copy()
+        settings.update({
+            "hostname": sonarr_hostname,
+            "port": int(sonarr_port),
+            "use_ssl": use_ssl,
+            "base_url": sonarr_base_url,
+            "quality_profile_id": int(sonarr_quality_profile_id) if sonarr_quality_profile_id else None,
+            "language_profile_id": int(sonarr_language_profile_id) if sonarr_language_profile_id else None,
+            "root_folder_path": sonarr_root_folder_path or None,
+            "minimum_availability": minimum_availability,
+            "tags": [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else [],
+            "monitored": monitored,
+            "season_folder": season_folder,
+            "search_for_missing_episodes": search_for_missing,
+            "enable_scan": True,
+            "enable_automatic_search": True
+        })
+        
+        # Create the instance
+        new_instance = ServiceInstance(
+            name=sonarr_name,
+            service_type=ServiceType.SONARR,
+            url=sonarr_url,
+            api_key=sonarr_api_key,
+            is_enabled=True,
+            created_by=current_user.id
+        )
+        new_instance.set_settings(settings)
+        
+        # Save to database
+        session.add(new_instance)
+        session.commit()
+        session.refresh(new_instance)
+        
+        # Test the connection
+        result = new_instance.test_connection()
+        
+        # Get current base_url for HTML responses  
+        current_base_url = SettingsService.get_base_url(session)
+        
+        # Close modal and refresh list
+        return HTMLResponse(f'''
+            <div class="p-3 bg-green-50 border border-green-200 rounded-md mb-4">
+                <p class="text-green-800 text-sm font-medium">✓ Sonarr instance "{sonarr_name}" created successfully!</p>
+            </div>
+            <script>
+                // Close modal
+                hideServiceModal();
+                // Refresh the instances list
+                htmx.ajax('GET', '{current_base_url}/admin/services/sonarr/list', {{
+                    target: '#sonarr-instances',
+                    swap: 'innerHTML'
+                }});
+            </script>
+        ''')
+        
+    except Exception as e:
+        logger.error(f"Error creating Sonarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error creating instance: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.delete("/services/radarr/{instance_id}", response_class=HTMLResponse)
+async def delete_radarr_instance(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Delete a Radarr instance"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.RADARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Radarr instance not found</p>
+                </div>
+            ''')
+        
+        # Delete the instance
+        session.delete(instance)
+        session.commit()
+        
+        # Return updated list
+        return await list_radarr_instances(request, current_user, session)
+        
+    except Exception as e:
+        logger.error(f"Error deleting Radarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error deleting instance: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.post("/services/radarr/{instance_id}/test", response_class=HTMLResponse)
+async def test_radarr_instance(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Test connection for a specific Radarr instance"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.RADARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Radarr instance not found</p>
+                </div>
+            ''')
+        
+        # Test the connection
+        result = instance.test_connection()
+        
+        # Update the instance in database
+        session.add(instance)
+        session.commit()
+        
+        if result.get('status') == 'connected':
+            return HTMLResponse(f'''
+                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p class="text-green-800 text-sm font-medium">✓ Connection successful!</p>
+                    <p class="text-green-700 text-xs mt-1">Version: {result.get("version", "Unknown")}</p>
+                </div>
+            ''')
+        else:
+            error_msg = result.get('message', 'Connection failed')
+            return HTMLResponse(f'''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Connection failed: {error_msg}</p>
+                </div>
+            ''')
+            
+    except Exception as e:
+        logger.error(f"Error testing Radarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error testing connection: {str(e)}</p>
+            </div>
+        ''')
+
+
+# Sonarr Service Endpoints  
+@router.get("/services/sonarr/list", response_class=HTMLResponse)
+async def list_sonarr_instances(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """List all Sonarr instances"""
+    from sqlmodel import select
+    from ..models.service_instance import ServiceInstance, ServiceType
+    
+    # Get all Sonarr instances from database
+    statement = select(ServiceInstance).where(ServiceInstance.service_type == ServiceType.SONARR)
+    instances = session.exec(statement).all()
+    
+    if not instances:
+        return HTMLResponse('''
+            <div class="p-6 text-center text-gray-500">
+                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                </svg>
+                <p class="text-sm">No Sonarr instances configured</p>
+                <p class="text-xs text-gray-400 mt-1">Add an instance to get started with TV show automation</p>
+            </div>
+        ''')
+    
+    # Get current base_url for HTML responses  
+    current_base_url = SettingsService.get_base_url(session)
+    
+    # Build HTML for each instance
+    instances_html = ""
+    for instance in instances:
+        # Test connection automatically to get current status
+        try:
+            current_result = instance.test_connection()
+            # Save the updated test result
+            session.add(instance)
+            session.commit()
+            test_result = current_result
+        except Exception as e:
+            print(f"Error testing Sonarr {instance.name}: {e}")
+            test_result = instance.get_test_result()
+        
+        status_color = "green" if test_result.get("status") == "connected" else "red"
+        status_text = "Connected" if test_result.get("status") == "connected" else "Disconnected"
+        
+        # Get settings for display
+        settings = instance.get_settings()
+        hostname = settings.get("hostname", "Unknown")
+        port = settings.get("port", "Unknown")
+        use_ssl = settings.get("use_ssl", False)
+        protocol = "HTTPS" if use_ssl else "HTTP"
+        
+        instances_html += f'''
+            <div class="p-4 border-b border-gray-200 last:border-b-0">
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center">
+                            <h4 class="text-lg font-medium text-gray-900">{instance.name}</h4>
+                            <span class="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-{status_color}-100 text-{status_color}-800">
+                                <div class="w-2 h-2 bg-{status_color}-400 rounded-full mr-1"></div>
+                                {status_text}
+                            </span>
+                        </div>
+                        <div class="mt-1 text-sm text-gray-500">
+                            <span>{protocol}://{hostname}:{port}</span>
+                            {f' • Version: {test_result.get("version", "Unknown")}' if test_result.get("version") else ''}
+                        </div>
+                        <div class="mt-1 text-xs text-gray-400">
+                            Created: {instance.created_at.strftime("%Y-%m-%d %H:%M") if instance.created_at else "Unknown"}
+                            {f' • Last tested: {instance.last_tested_at.strftime("%Y-%m-%d %H:%M")}' if instance.last_tested_at else ''}
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button type="button" 
+                                hx-post="{current_base_url}/admin/services/sonarr/{instance.id}/test"
+                                hx-target="#instance-{instance.id}-status"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-medium">
+                            Test
+                        </button>
+                        <button type="button" 
+                                hx-get="{current_base_url}/admin/services/sonarr/{instance.id}/edit"
+                                hx-target="#service-modal-content"
+                                onclick="showServiceModal('Edit Sonarr Instance')"
+                                class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs font-medium">
+                            Edit
+                        </button>
+                        <button type="button" 
+                                hx-delete="{current_base_url}/admin/services/sonarr/{instance.id}"
+                                hx-target="#sonarr-instances"
+                                hx-confirm="Are you sure you want to delete this Sonarr instance?"
+                                class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs font-medium">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+                <div id="instance-{instance.id}-status" class="mt-2"></div>
+            </div>
+        '''
+    
+    return HTMLResponse(instances_html)
+
+
+@router.delete("/services/sonarr/{instance_id}", response_class=HTMLResponse)
+async def delete_sonarr_instance(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Delete a Sonarr instance"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.SONARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Sonarr instance not found</p>
+                </div>
+            ''')
+        
+        # Delete the instance
+        session.delete(instance)
+        session.commit()
+        
+        # Return updated list
+        return await list_sonarr_instances(request, current_user, session)
+        
+    except Exception as e:
+        logger.error(f"Error deleting Sonarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error deleting instance: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.post("/services/sonarr/{instance_id}/test", response_class=HTMLResponse)
+async def test_sonarr_instance(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Test connection for a specific Sonarr instance"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.SONARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Sonarr instance not found</p>
+                </div>
+            ''')
+        
+        # Test the connection
+        result = instance.test_connection()
+        
+        # Update the instance in database
+        session.add(instance)
+        session.commit()
+        
+        if result.get('status') == 'connected':
+            return HTMLResponse(f'''
+                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p class="text-green-800 text-sm font-medium">✓ Connection successful!</p>
+                    <p class="text-green-700 text-xs mt-1">Version: {result.get("version", "Unknown")}</p>
+                </div>
+            ''')
+        else:
+            error_msg = result.get('message', 'Connection failed')
+            return HTMLResponse(f'''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Connection failed: {error_msg}</p>
+                </div>
+            ''')
+            
+    except Exception as e:
+        logger.error(f"Error testing Sonarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error testing connection: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.get("/services/sonarr/{instance_id}/edit", response_class=HTMLResponse)
+async def edit_sonarr_form(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get Sonarr instance edit form with existing data"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.SONARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Sonarr instance not found</p>
+                </div>
+            ''')
+        
+        # Get current base_url for HTML responses  
+        current_base_url = SettingsService.get_base_url(session)
+        
+        # Get instance settings
+        settings = instance.get_settings()
+        hostname = settings.get("hostname", "")
+        port = settings.get("port", 8989)
+        use_ssl = settings.get("use_ssl", False)
+        base_url = settings.get("base_url", "")
+        quality_profile_id = settings.get("quality_profile_id", "")
+        language_profile_id = settings.get("language_profile_id", "")
+        root_folder_path = settings.get("root_folder_path", "")
+        minimum_availability = settings.get("minimum_availability", "inCinemas")
+        monitored = settings.get("monitored", True)
+        season_folder = settings.get("season_folder", True)
+        search_for_missing = settings.get("search_for_missing_episodes", True)
+        tags = settings.get("tags", [])
+        
+        return HTMLResponse(f'''
+            <div>
+                <h4 class="text-lg font-medium text-gray-900 mb-6">Edit Sonarr Instance</h4>
+                <form hx-post="{current_base_url}/admin/services/sonarr/{instance_id}/update" hx-target="#sonarr-instances" class="space-y-6">
+                    
+                    <!-- Instance Name -->
+                    <div>
+                        <label for="sonarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                        <input type="text" name="sonarr_name" id="sonarr_name" 
+                               value="{instance.name}"
+                               placeholder="e.g., Sonarr 4K, TV Shows HD"
+                               class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                    </div>
+                    
+                    <!-- Connection Settings -->
+                    <div>
+                        <h5 class="text-md font-semibold text-gray-900 mb-4">Connection Settings</h5>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="sonarr_hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                                <input type="text" name="sonarr_hostname" id="sonarr_hostname" 
+                                       value="{hostname}"
+                                       placeholder="172.20.0.11 or localhost"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            </div>
+                            
+                            <div>
+                                <label for="sonarr_port" class="block text-sm font-medium text-gray-700">Port</label>
+                                <input type="number" name="sonarr_port" id="sonarr_port" 
+                                       value="{port}"
+                                       min="1" max="65535"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            </div>
+                            
+                            <div class="flex items-end">
+                                <div class="flex items-center h-10">
+                                    <input type="checkbox" name="use_ssl" id="sonarr_use_ssl" 
+                                           {"checked" if use_ssl else ""}
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="sonarr_use_ssl" class="ml-2 text-sm text-gray-700">Use HTTPS</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                            <div>
+                                <label for="sonarr_api_key" class="block text-sm font-medium text-gray-700">API Key</label>
+                                <input type="password" name="sonarr_api_key" id="sonarr_api_key" 
+                                       value="{instance.api_key}"
+                                       placeholder="Your Sonarr API key"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            </div>
+                            
+                            <div>
+                                <label for="sonarr_base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
+                                <input type="text" name="sonarr_base_url" id="sonarr_base_url" 
+                                       value="{base_url}"
+                                       placeholder="/sonarr (optional)"
+                                       class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Test Connection -->
+                    <div>
+                        <button type="button" 
+                                hx-post="{current_base_url}/admin/services/sonarr/test" 
+                                hx-target="#sonarr-test-results"
+                                hx-include="form"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                            <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Test Connection
+                        </button>
+                        <div id="sonarr-test-results" class="mt-4"></div>
+                    </div>
+                    
+                    <!-- Advanced Settings -->
+                    <div class="border-t pt-4">
+                        <button type="button" onclick="toggleSonarrAdvancedSettings()" 
+                                class="flex items-center justify-between w-full text-left focus:outline-none">
+                            <h5 class="text-md font-semibold text-gray-900">Advanced Settings</h5>
+                            <svg id="sonarr-advanced-chevron" class="w-5 h-5 text-gray-500 transform transition-transform duration-200" 
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        
+                        <div id="sonarr-advanced-settings" class="mt-4 space-y-4">
+                            <!-- Default Settings -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="sonarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
+                                    <select name="sonarr_quality_profile_id" id="sonarr_quality_profile_id" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="">Select quality profile...</option>
+                                        {f'<option value="{quality_profile_id}" selected>Profile ID {quality_profile_id}</option>' if quality_profile_id else ''}
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr_language_profile_id" class="block text-sm font-medium text-gray-700">Language Profile</label>
+                                    <select name="sonarr_language_profile_id" id="sonarr_language_profile_id" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="">Select language profile...</option>
+                                        {f'<option value="{language_profile_id}" selected>Language ID {language_profile_id}</option>' if language_profile_id else ''}
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
+                                    <select name="sonarr_root_folder_path" id="sonarr_root_folder_path" 
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="">Select root folder...</option>
+                                        {f'<option value="{root_folder_path}" selected>{root_folder_path}</option>' if root_folder_path else ''}
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                                    <input type="text" name="tags" id="tags" 
+                                           value="{', '.join(tags) if isinstance(tags, list) else tags}"
+                                           placeholder="4k, uhd, anime (comma separated)"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                    <p class="mt-1 text-xs text-gray-500">Optional tags to apply to requests</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Monitoring Options -->
+                            <div class="space-y-3">
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="monitored" id="monitored" 
+                                           {"checked" if monitored else ""}
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="monitored" class="ml-2 text-sm text-gray-700">Monitor series by default</label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="season_folder" id="season_folder" 
+                                           {"checked" if season_folder else ""}
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="season_folder" class="ml-2 text-sm text-gray-700">Use season folders</label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="search_for_missing_episodes" id="search_for_missing_episodes" 
+                                           {"checked" if search_for_missing else ""}
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="search_for_missing_episodes" class="ml-2 text-sm text-gray-700">Search for missing episodes</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Form Actions -->
+                    <div class="flex justify-end space-x-3 pt-6 border-t">
+                        <button type="button" onclick="hideServiceModal()"
+                                class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                            Cancel
+                        </button>
+                        <button type="submit" 
+                                class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                            Update Instance
+                        </button>
+                    </div>
+                </form>
+            </div>
+        ''')
+        
+    except Exception as e:
+        logger.error(f"Error loading Sonarr edit form: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error loading edit form: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.post("/services/sonarr/{instance_id}/update", response_class=HTMLResponse)
+async def update_sonarr_instance(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Update an existing Sonarr instance"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.SONARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-800 text-sm">✗ Sonarr instance not found</p>
+                </div>
+            ''')
+        
+        # Extract form data
+        form_data = await request.form()
+        sonarr_name = form_data.get("sonarr_name", "").strip()
+        sonarr_hostname = form_data.get("sonarr_hostname", "").strip()
+        sonarr_port = form_data.get("sonarr_port", "8989").strip()
+        sonarr_api_key = form_data.get("sonarr_api_key", "").strip()
+        use_ssl = form_data.get("use_ssl") == "on"
+        sonarr_base_url = form_data.get("sonarr_base_url", "").strip()
+        
+        # Validation
+        if not sonarr_name or not sonarr_hostname or not sonarr_port or not sonarr_api_key:
+            return HTMLResponse('''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md mb-4">
+                    <p class="text-red-800 text-sm">✗ Instance name, hostname, port, and API key are required</p>
+                </div>
+            ''')
+        
+        # Build URL from components
+        protocol = "https" if use_ssl else "http"
+        sonarr_url = f"{protocol}://{sonarr_hostname}:{sonarr_port}"
+        
+        # Update instance
+        instance.name = sonarr_name
+        instance.url = sonarr_url
+        instance.api_key = sonarr_api_key
+        
+        # Update settings
+        from ..models.service_instance import SONARR_DEFAULT_SETTINGS
+        settings = SONARR_DEFAULT_SETTINGS.copy()
+        settings.update({
+            "hostname": sonarr_hostname,
+            "port": int(sonarr_port),
+            "use_ssl": use_ssl,
+            "base_url": sonarr_base_url
+        })
+        instance.set_settings(settings)
+        
+        # Save to database
+        session.add(instance)
+        session.commit()
+        
+        # Get current base_url for HTML responses  
+        current_base_url = SettingsService.get_base_url(session)
+        
+        # Close modal and refresh list
+        return HTMLResponse(f'''
+            <div class="p-3 bg-green-50 border border-green-200 rounded-md mb-4">
+                <p class="text-green-800 text-sm font-medium">✓ Sonarr instance "{sonarr_name}" updated successfully!</p>
+            </div>
+            <script>
+                // Close modal
+                hideServiceModal();
+                // Refresh the instances list
+                htmx.ajax('GET', '{current_base_url}/admin/services/sonarr/list', {{
+                    target: '#sonarr-instances',
+                    swap: 'innerHTML'
+                }});
+            </script>
+        ''')
+        
+    except Exception as e:
+        logger.error(f"Error updating Sonarr instance: {e}")
+        return HTMLResponse(f'''
+            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-red-800 text-sm">✗ Error updating instance: {str(e)}</p>
+            </div>
+        ''')
+
+
+@router.get("/services/sonarr/add", response_class=HTMLResponse)
+async def add_sonarr_form(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get Sonarr instance add form"""
+    current_base_url = SettingsService.get_base_url(session)
+    
+    return HTMLResponse(f'''
+        <div>
+            <h4 class="text-lg font-medium text-gray-900 mb-4">Add Sonarr Instance</h4>
+            <form hx-post="{current_base_url}/admin/services/sonarr/create" hx-target="#sonarr-instances" class="space-y-6">
+                
+                <!-- Basic Settings -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="sonarr_name" class="block text-sm font-medium text-gray-700">Instance Name</label>
+                        <input type="text" name="sonarr_name" id="sonarr_name" 
+                               placeholder="e.g., Sonarr 4K, TV Shows HD"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                        <p class="mt-1 text-xs text-gray-500">Friendly name to identify this instance</p>
+                    </div>
+                    
+                    <div class="flex items-center mt-6">
+                        <input type="checkbox" name="is_default" id="is_default" 
+                               class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                        <label for="is_default" class="ml-2 text-sm text-gray-700">
+                            Default instance for TV show requests
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Connection Settings -->
+                <div class="border-t pt-6">
+                    <h5 class="text-md font-semibold text-gray-900 mb-4">Connection Settings</h5>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="sonarr_hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                            <input type="text" name="sonarr_hostname" id="sonarr_hostname" 
+                                   placeholder="172.20.0.11 or localhost"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            <p class="mt-1 text-xs text-gray-500">Server hostname or IP address</p>
+                        </div>
+                        
+                        <div>
+                            <label for="sonarr_port" class="block text-sm font-medium text-gray-700">Port</label>
+                            <input type="number" name="sonarr_port" id="sonarr_port" 
+                                   value="8989"
+                                   min="1" max="65535"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            <p class="mt-1 text-xs text-gray-500">Default: 8989</p>
+                        </div>
+                        
+                        <div class="flex items-end">
+                            <div class="flex items-center h-10">
+                                <input type="checkbox" name="use_ssl" id="sonarr_use_ssl" 
+                                       class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                <label for="sonarr_use_ssl" class="ml-2 text-sm text-gray-700">Use HTTPS</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        
+                        <div>
+                            <label for="sonarr_api_key" class="block text-sm font-medium text-gray-700">API Key</label>
+                            <input type="password" name="sonarr_api_key" id="sonarr_api_key" 
+                                   placeholder="Your Sonarr API key"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            <p class="mt-1 text-xs text-gray-500">Found in Sonarr Settings → General → Security</p>
+                        </div>
+                        
+                        <div>
+                            <label for="sonarr_base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
+                            <input type="text" name="sonarr_base_url" id="sonarr_base_url" 
+                                   placeholder="/sonarr (optional)"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            <p class="mt-1 text-xs text-gray-500">For reverse proxy setups</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Test Connection -->
+                <div>
+                    <button type="button" 
+                            hx-post="{current_base_url}/admin/services/sonarr/test" 
+                            hx-target="#sonarr-test-results"
+                            hx-include="form"
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                        <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Test Connection
+                    </button>
+                    <div id="sonarr-test-results" class="mt-4"></div>
+                </div>
+                
+                <!-- Advanced Settings (Collapsed by default) -->
+                <div class="border-t pt-4">
+                    <button type="button" onclick="toggleSonarrAdvancedSettings()" 
+                            class="flex items-center justify-between w-full text-left focus:outline-none">
+                        <h5 class="text-md font-semibold text-gray-900">Advanced Settings</h5>
+                        <svg id="sonarr-advanced-chevron" class="w-5 h-5 text-gray-500 transform transition-transform duration-200" 
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </button>
+                    
+                    <div id="sonarr-advanced-settings" class="hidden mt-4 space-y-4">
+                        <!-- Default Settings -->
+                <div class="border-t pt-6">
+                    <h5 class="text-md font-medium text-gray-900 mb-4">Default Settings</h5>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="sonarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
+                            <select name="sonarr_quality_profile_id" id="sonarr_quality_profile_id" 
+                                    class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                <option value="">Test connection to load profiles</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="sonarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
+                            <select name="sonarr_root_folder_path" id="sonarr_root_folder_path" 
+                                    class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                <option value="">Test connection to load folders</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="sonarr_language_profile_id" class="block text-sm font-medium text-gray-700">Language Profile</label>
+                            <select name="sonarr_language_profile_id" id="sonarr_language_profile_id" 
+                                    class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                <option value="">Test connection to load profiles</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                            <input type="text" name="tags" id="tags" 
+                                   placeholder="4k, uhd, anime (comma separated)"
+                                   class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                            <p class="mt-1 text-xs text-gray-500">Optional tags to apply to requests</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Advanced Settings -->
+                <div class="border-t pt-6">
+                    <h5 class="text-md font-medium text-gray-900 mb-4">Advanced Settings</h5>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="flex items-center">
+                            <input type="checkbox" name="enable_scan" id="enable_scan" checked
+                                   class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                            <label for="enable_scan" class="ml-2 text-sm text-gray-700">
+                                Enable library scanning
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" checked
+                                   class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                            <label for="enable_automatic_search" class="ml-2 text-sm text-gray-700">
+                                Enable automatic search on approval
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <input type="checkbox" name="enable_season_folders" id="enable_season_folders" checked
+                                   class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                            <label for="enable_season_folders" class="ml-2 text-sm text-gray-700">
+                                Enable season folders
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <input type="checkbox" name="anime_standard_format" id="anime_standard_format"
+                                   class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                            <label for="anime_standard_format" class="ml-2 text-sm text-gray-700">
+                                Use anime standard format
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <label for="external_url" class="block text-sm font-medium text-gray-700">External URL</label>
+                        <input type="url" name="external_url" id="external_url" 
+                               placeholder="https://sonarr.yourdomain.com (optional)"
+                               class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                        <p class="mt-1 text-xs text-gray-500">Public URL for external access</p>
+                    </div>
+                </div>
+                
+                <div class="flex justify-between pt-6 border-t">
+                    <button type="button" 
+                            hx-post="{current_base_url}/admin/services/sonarr/test" 
+                            hx-target="#test-results"
+                            hx-include="form"
+                            class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Test Connection
+                    </button>
+                    <div class="space-x-3">
+                        <button type="button" onclick="hideServiceModal()"
+                                class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                            Cancel
+                        </button>
+                        <button type="submit" 
+                                class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                            Save Sonarr Instance
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="test-results" class="mt-4"></div>
+            </form>
+        </div>
+    ''')
+
+
+@router.get("/tabs/jobs", response_class=HTMLResponse)
+async def admin_jobs_tab(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get jobs tab content"""
+    from ..services.background_jobs import background_jobs
+    from ..services.plex_sync_service import PlexSyncService
+
+    # Get job status
+    all_jobs = background_jobs.get_all_jobs_status()
+    
+    # Get library sync stats
+    sync_stats = None
+    try:
+        sync_service = PlexSyncService(session)
+        sync_stats = sync_service.get_sync_stats()
+    except Exception as e:
+        print(f"Error getting sync stats: {e}")
+        sync_stats = {'error': str(e)}
+    
+    # Format the jobs for display
+    jobs_info = {}
+    for job_name, job_data in all_jobs.items():
+        jobs_info[job_name] = {
+            'name': job_data.get('name', job_name.replace('_', ' ').title()),
+            'description': job_data.get('description', ''),
+            'interval': f"Every {job_data.get('interval_seconds', 3600) // 60} minutes",
+            'last_run': job_data.get('last_run').strftime('%Y-%m-%d %H:%M:%S') if job_data.get('last_run') else 'Never',
+            'next_run': job_data.get('next_run').strftime('%Y-%m-%d %H:%M:%S') if job_data.get('next_run') else 'Not scheduled',
+            'running': job_data.get('running', False),
+            'stats': job_data.get('stats', {})
+        }
+    
+    return create_template_response("admin_jobs.html", {
+        "request": request,
+        "current_user": current_user,
+        "jobs": jobs_info,
+        "sync_stats": sync_stats
+    })
+
+
+# Enhanced Services Endpoints
+
+@router.post("/settings/update-services")
+async def update_services_settings(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session),
+    service: str = Form(...),
+    
+    # TMDB settings
+    tmdb_api_key: Optional[str] = Form(None),
+    tmdb_language: Optional[str] = Form(None),
+    
+    # Radarr settings
+    radarr_url: Optional[str] = Form(None),
+    radarr_api_key: Optional[str] = Form(None),
+    radarr_quality_profile: Optional[str] = Form(None),
+    radarr_root_folder: Optional[str] = Form(None),
+    
+    # Sonarr settings
+    sonarr_url: Optional[str] = Form(None),
+    sonarr_api_key: Optional[str] = Form(None),
+    sonarr_quality_profile: Optional[str] = Form(None),
+    sonarr_root_folder: Optional[str] = Form(None),
+    sonarr_language_profile: Optional[str] = Form(None)
+):
+    """Update individual service settings"""
+    try:
+        settings_data = {}
+        
+        if service == "tmdb":
+            if tmdb_api_key and tmdb_api_key != "•" * 20:
+                settings_data['tmdb_api_key'] = tmdb_api_key.strip()
+            # tmdb_language will be handled after database migration
+                
+        elif service == "radarr":
+            if radarr_url:
+                settings_data['radarr_url'] = radarr_url.strip()
+            if radarr_api_key and radarr_api_key != "•" * 20:
+                settings_data['radarr_api_key'] = radarr_api_key.strip()
+            # Additional radarr fields will be handled after database migration
+                
+        elif service == "sonarr":
+            if sonarr_url:
+                settings_data['sonarr_url'] = sonarr_url.strip()
+            if sonarr_api_key and sonarr_api_key != "•" * 20:
+                settings_data['sonarr_api_key'] = sonarr_api_key.strip()
+            # Additional sonarr fields will be handled after database migration
+        
+        # Update settings
+        SettingsService.update_settings(session, settings_data, current_user.id)
+        
+        # Get current base_url for HTML responses
+        current_base_url = SettingsService.get_base_url(session)
+        
+        # Return success message
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(f"""
+            <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
+                 hx-get="{current_base_url}/admin/clear-feedback" 
+                 hx-trigger="load delay:5s" 
+                 hx-swap="outerHTML">
+                <div class="flex">
+                    <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                    </svg>
+                    <p class="ml-3 text-sm text-green-700">{service.upper()} settings updated successfully!</p>
+                </div>
+            </div>
+        """)
+        
+    except Exception as e:
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(f"""
+            <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                <div class="flex">
+                    <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    <p class="ml-3 text-sm text-red-700">Failed to update {service} settings: {str(e)}</p>
+                </div>
+            </div>
+        """)
+
+
+@router.post("/services/test/{service}")
+async def test_service_connection(
+    service: str,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Test connection to a specific service"""
+    from fastapi.responses import HTMLResponse
+    
+    try:
+        settings = SettingsService.get_settings(session)
+        
+        if service == "tmdb":
+            if not settings.tmdb_api_key:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-yellow-700">TMDB API key is required for testing connection.</p>
+                        </div>
+                    </div>
+                """)
+            
+            # Test TMDB connection
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://api.themoviedb.org/3/configuration?api_key={settings.tmdb_api_key}"
+                )
+                
+            if response.status_code == 200:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-green-50 border border-green-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-green-700">TMDB connection successful!</p>
+                        </div>
+                    </div>
+                """)
+            else:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-red-700">TMDB connection failed: {response.status_code}</p>
+                        </div>
+                    </div>
+                """)
+                
+        elif service == "radarr":
+            if not settings.radarr_url or not settings.radarr_api_key:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-yellow-700">Radarr URL and API key are required for testing connection.</p>
+                        </div>
+                    </div>
+                """)
+            
+            # Test Radarr connection and load profiles/folders
+            import httpx
+            headers = {"X-Api-Key": settings.radarr_api_key}
+            base_url = settings.radarr_url.rstrip('/')
+            
+            async with httpx.AsyncClient() as client:
+                # Test system status
+                status_response = await client.get(f"{base_url}/api/v3/system/status", headers=headers)
+                
+                if status_response.status_code == 200:
+                    # Get quality profiles
+                    profiles_response = await client.get(f"{base_url}/api/v3/qualityprofile", headers=headers)
+                    root_folders_response = await client.get(f"{base_url}/api/v3/rootfolder", headers=headers)
+                    
+                    profiles = profiles_response.json() if profiles_response.status_code == 200 else []
+                    root_folders = root_folders_response.json() if root_folders_response.status_code == 200 else []
+                    
+                    # Build options HTML
+                    profile_options = "".join([f'<option value="{p["id"]}">{p["name"]}</option>' for p in profiles])
+                    folder_options = "".join([f'<option value="{f["id"]}">{f["path"]}</option>' for f in root_folders])
+                    
+                    return HTMLResponse(f"""
+                        <div class="p-4 bg-green-50 border border-green-200 rounded-md">
+                            <div class="flex">
+                                <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                <p class="ml-3 text-sm text-green-700">Radarr connection successful! Loaded {len(profiles)} quality profiles and {len(root_folders)} root folders.</p>
+                            </div>
+                        </div>
+                        <script>
+                            document.getElementById('radarr_quality_profile').innerHTML = '<option value="">Select Quality Profile</option>{profile_options}';
+                            document.getElementById('radarr_root_folder').innerHTML = '<option value="">Select Root Folder</option>{folder_options}';
+                        </script>
+                    """)
+                else:
+                    return HTMLResponse(f"""
+                        <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                            <div class="flex">
+                                <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                                </svg>
+                                <p class="ml-3 text-sm text-red-700">Radarr connection failed: {status_response.status_code}</p>
+                            </div>
+                        </div>
+                    """)
+                    
+        elif service == "sonarr":
+            if not settings.sonarr_url or not settings.sonarr_api_key:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-yellow-700">Sonarr URL and API key are required for testing connection.</p>
+                        </div>
+                    </div>
+                """)
+            
+            # Test Sonarr connection and load profiles/folders
+            import httpx
+            headers = {"X-Api-Key": settings.sonarr_api_key}
+            base_url = settings.sonarr_url.rstrip('/')
+            
+            async with httpx.AsyncClient() as client:
+                # Test system status
+                status_response = await client.get(f"{base_url}/api/v3/system/status", headers=headers)
+                
+                if status_response.status_code == 200:
+                    # Get quality profiles, language profiles, and root folders
+                    profiles_response = await client.get(f"{base_url}/api/v3/qualityprofile", headers=headers)
+                    language_response = await client.get(f"{base_url}/api/v3/languageprofile", headers=headers)
+                    root_folders_response = await client.get(f"{base_url}/api/v3/rootfolder", headers=headers)
+                    
+                    profiles = profiles_response.json() if profiles_response.status_code == 200 else []
+                    languages = language_response.json() if language_response.status_code == 200 else []
+                    root_folders = root_folders_response.json() if root_folders_response.status_code == 200 else []
+                    
+                    # Build options HTML
+                    profile_options = "".join([f'<option value="{p["id"]}">{p["name"]}</option>' for p in profiles])
+                    language_options = "".join([f'<option value="{l["id"]}">{l["name"]}</option>' for l in languages])
+                    folder_options = "".join([f'<option value="{f["id"]}">{f["path"]}</option>' for f in root_folders])
+                    
+                    return HTMLResponse(f"""
+                        <div class="p-4 bg-green-50 border border-green-200 rounded-md">
+                            <div class="flex">
+                                <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                <p class="ml-3 text-sm text-green-700">Sonarr connection successful! Loaded {len(profiles)} quality profiles, {len(languages)} language profiles, and {len(root_folders)} root folders.</p>
+                            </div>
+                        </div>
+                        <script>
+                            document.getElementById('sonarr_quality_profile').innerHTML = '<option value="">Select Quality Profile</option>{profile_options}';
+                            document.getElementById('sonarr_language_profile').innerHTML = '<option value="">Select Language Profile</option>{language_options}';
+                            document.getElementById('sonarr_root_folder').innerHTML = '<option value="">Select Root Folder</option>{folder_options}';
+                        </script>
+                    """)
+                else:
+                    return HTMLResponse(f"""
+                        <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                            <div class="flex">
+                                <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                                </svg>
+                                <p class="ml-3 text-sm text-red-700">Sonarr connection failed: {status_response.status_code}</p>
+                            </div>
+                        </div>
+                    """)
+        else:
+            return HTMLResponse(f"""
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-red-700">Unknown service: {service}</p>
+                    </div>
+                </div>
+            """)
+            
+    except Exception as e:
+        return HTMLResponse(f"""
+            <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                <div class="flex">
+                    <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    <p class="ml-3 text-sm text-red-700">Connection test failed: {str(e)}</p>
+                </div>
+            </div>
+        """)
+
+
+@router.post("/services/test-all")
+async def test_all_services(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Test connections to all configured services"""
+    from fastapi.responses import HTMLResponse
+    
+    try:
+        settings = SettingsService.get_settings(session)
+        results = []
+        
+        # Test TMDB
+        if settings.tmdb_api_key:
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"https://api.themoviedb.org/3/configuration?api_key={settings.tmdb_api_key}"
+                    )
+                if response.status_code == 200:
+                    results.append({"service": "TMDB", "status": "success", "message": "Connected"})
+                else:
+                    results.append({"service": "TMDB", "status": "error", "message": f"Failed ({response.status_code})"})
+            except Exception as e:
+                results.append({"service": "TMDB", "status": "error", "message": f"Error: {str(e)}"})
+        else:
+            results.append({"service": "TMDB", "status": "warning", "message": "Not configured"})
+        
+        # Test Radarr
+        if settings.radarr_url and settings.radarr_api_key:
+            try:
+                import httpx
+                headers = {"X-Api-Key": settings.radarr_api_key}
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(f"{settings.radarr_url.rstrip('/')}/api/v3/system/status", headers=headers)
+                if response.status_code == 200:
+                    results.append({"service": "Radarr", "status": "success", "message": "Connected"})
+                else:
+                    results.append({"service": "Radarr", "status": "error", "message": f"Failed ({response.status_code})"})
+            except Exception as e:
+                results.append({"service": "Radarr", "status": "error", "message": f"Error: {str(e)}"})
+        else:
+            results.append({"service": "Radarr", "status": "warning", "message": "Not configured"})
+        
+        # Test Sonarr
+        if settings.sonarr_url and settings.sonarr_api_key:
+            try:
+                import httpx
+                headers = {"X-Api-Key": settings.sonarr_api_key}
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(f"{settings.sonarr_url.rstrip('/')}/api/v3/system/status", headers=headers)
+                if response.status_code == 200:
+                    results.append({"service": "Sonarr", "status": "success", "message": "Connected"})
+                else:
+                    results.append({"service": "Sonarr", "status": "error", "message": f"Failed ({response.status_code})"})
+            except Exception as e:
+                results.append({"service": "Sonarr", "status": "error", "message": f"Error: {str(e)}"})
+        else:
+            results.append({"service": "Sonarr", "status": "warning", "message": "Not configured"})
+        
+        # Build results HTML
+        result_items = []
+        for result in results:
+            status_color = {
+                "success": "green",
+                "error": "red", 
+                "warning": "yellow"
+            }.get(result["status"], "gray")
+            
+            status_icon = {
+                "success": "M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+                "error": "M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z",
+                "warning": "M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+            }.get(result["status"], "")
+            
+            result_items.append(f"""
+                <div class="flex items-center justify-between p-3 bg-{status_color}-50 border border-{status_color}-200 rounded-md">
+                    <div class="flex items-center">
+                        <svg class="w-5 h-5 text-{status_color}-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="{status_icon}" clip-rule="evenodd"></path>
+                        </svg>
+                        <span class="ml-3 text-sm font-medium text-{status_color}-800">{result["service"]}</span>
+                    </div>
+                    <span class="text-sm text-{status_color}-600">{result["message"]}</span>
+                </div>
+            """)
+        
+        return HTMLResponse(f"""
+            <div class="space-y-3">
+                <h4 class="text-md font-medium text-gray-900 mb-3">Service Health Results</h4>
+                {"".join(result_items)}
+            </div>
+        """)
+        
+    except Exception as e:
+        return HTMLResponse(f"""
+            <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                <div class="flex">
+                    <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    <p class="ml-3 text-sm text-red-700">Health check failed: {str(e)}</p>
+                </div>
+            </div>
+        """)
+
+
+# Enhanced Jobs Endpoints
+
+@router.post("/jobs/run/{job_type}")
+async def run_manual_job(
+    job_type: str,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Run a manual job"""
+    from fastapi.responses import HTMLResponse
+    from ..services.background_jobs import background_jobs
+    
+    try:
+        if job_type == "sync-library":
+            result = await background_jobs.trigger_library_sync()
+            
+            if result['success']:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-green-50 border border-green-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-green-700">Library sync started successfully!</p>
+                        </div>
+                    </div>
+                """)
+            else:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-yellow-700">{result['message']}</p>
+                        </div>
+                    </div>
+                """)
+                
+        elif job_type == "cleanup-requests":
+            # Placeholder for request cleanup job
+            return HTMLResponse(f"""
+                <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-blue-700">Request cleanup functionality coming soon!</p>
+                    </div>
+                </div>
+            """)
+            
+        elif job_type == "update-metadata":
+            # Placeholder for metadata update job
+            return HTMLResponse(f"""
+                <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-blue-700">Metadata update functionality coming soon!</p>
+                    </div>
+                </div>
+            """)
+            
+        elif job_type == "health-check":
+            # Use the existing test-all services functionality
+            return await test_all_services(request, current_user, session)
+            
+        else:
+            return HTMLResponse(f"""
+                <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                    <div class="flex">
+                        <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="ml-3 text-sm text-red-700">Unknown job type: {job_type}</p>
+                    </div>
+                </div>
+            """)
+            
+    except Exception as e:
+        return HTMLResponse(f"""
+            <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                <div class="flex">
+                    <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    <p class="ml-3 text-sm text-red-700">Job execution failed: {str(e)}</p>
+                </div>
+            </div>
+        """)
+
+
+@router.get("/jobs/history")
+async def get_job_history(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get job execution history"""
+    from fastapi.responses import HTMLResponse
+    from ..services.background_jobs import background_jobs
+    
+    # Get all jobs status
+    all_jobs = background_jobs.get_all_jobs_status()
+    
+    # Build history HTML
+    history_items = []
+    for job_name, job_info in all_jobs.items():
+        status = "success" if not job_info.get('running', False) else "running"
+        status_color = "green" if status == "success" else "blue"
+        status_text = "Completed" if status == "success" else "Running"
+        
+        last_run = job_info.get('last_run')
+        last_run_text = last_run.strftime('%Y-%m-%d %H:%M:%S') if last_run else "Never"
+        
+        next_run = job_info.get('next_run')
+        next_run_text = next_run.strftime('%Y-%m-%d %H:%M:%S') if next_run else "Not scheduled"
+        
+        history_items.append(f"""
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {job_info.get('name', job_name)}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {job_info.get('description', 'No description')}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-{status_color}-100 text-{status_color}-800">
+                        {status_text}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {last_run_text}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {next_run_text}
+                </td>
+            </tr>
+        """)
+    
+    if not history_items:
+        history_content = """
+            <tr>
+                <td colspan="5" class="px-6 py-8 text-center text-sm text-gray-500">
+                    No job history available
+                </td>
+            </tr>
+        """
+    else:
+        history_content = "".join(history_items)
+    
+    return HTMLResponse(f"""
+        <div class="overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Name</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Run</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Run</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {history_content}
+                </tbody>
+            </table>
+        </div>
+    """)
+
+
+
+
+@router.post("/jobs/update-cleanup")
+async def update_cleanup_settings(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Update cleanup job settings (placeholder)"""
+    from fastapi.responses import HTMLResponse
+    
+    return HTMLResponse(f"""
+        <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
+            <div class="flex">
+                <svg class="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                </svg>
+                <p class="ml-3 text-sm text-blue-700">Cleanup settings configuration coming soon!</p>
+            </div>
+        </div>
+    """)
+
+
+@router.post("/jobs/update-schedule")
+async def update_job_schedule(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    job_name: str = Form(...),
+    interval: str = Form(...),
+    enabled: bool = Form(default=True)
+):
+    """Update job scheduling configuration"""
+    try:
+        from ..services.background_jobs import background_jobs
+        
+        # Convert interval string to seconds
+        interval_seconds = None
+        if interval == "disabled":
+            enabled = False
+        elif interval == "2minutes":
+            interval_seconds = 120
+        elif interval == "5minutes":
+            interval_seconds = 300
+        elif interval == "15minutes":
+            interval_seconds = 900
+        elif interval == "30minutes":
+            interval_seconds = 1800
+        elif interval == "hourly":
+            interval_seconds = 3600
+        elif interval == "4hours":
+            interval_seconds = 14400
+        elif interval == "daily":
+            interval_seconds = 86400
+        elif interval == "weekly":
+            interval_seconds = 604800
+        else:
+            raise ValueError(f"Unknown interval: {interval}")
+        
+        # Update the job schedule
+        success = background_jobs.update_job_schedule(
+            job_name=job_name,
+            interval_seconds=interval_seconds,
+            enabled=enabled
+        )
+        
+        if success:
+            if request.headers.get("HX-Request"):
+                return HTMLResponse(f'''
+                    <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                        <p class="text-green-700 text-sm">✓ Job schedule updated successfully</p>
+                    </div>
+                ''')
+            else:
+                return {"success": True, "message": "Job schedule updated successfully"}
+        else:
+            if request.headers.get("HX-Request"):
+                return HTMLResponse(f'''
+                    <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p class="text-red-700 text-sm">✗ Failed to update job schedule</p>
+                    </div>
+                ''')
+            else:
+                return {"success": False, "message": "Failed to update job schedule"}
+                
+    except Exception as e:
+        print(f"Error updating job schedule: {e}")
+        if request.headers.get("HX-Request"):
+            return HTMLResponse(f'''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-700 text-sm">✗ Error: {str(e)}</p>
+                </div>
+            ''')
+        else:
+            return {"success": False, "message": f"Error: {str(e)}"}
 

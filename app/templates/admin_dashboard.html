@@ -39,503 +39,65 @@
         </div>
         {% endif %}
 
-        <!-- Tab Navigation -->
+        <!-- HTMX Tab Navigation -->
         <div class="border-b border-gray-200 mb-8">
             <nav class="-mb-px flex space-x-8" aria-label="Tabs">
-                <button onclick="showTab('overview')" id="tab-overview" class="tab-button border-primary-500 text-primary-600 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button hx-get="{{ base_url }}/admin/tabs/overview" 
+                        hx-target="#admin-tab-content" 
+                        hx-trigger="click"
+                        hx-push-url="{{ base_url }}/admin?tab=overview"
+                        data-tab="overview"
+                        class="admin-tab-btn border-primary-500 text-primary-600 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     📊 Overview
                 </button>
-                <button onclick="showTab('users')" id="tab-users" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button hx-get="{{ base_url }}/admin/tabs/users" 
+                        hx-target="#admin-tab-content" 
+                        hx-trigger="click"
+                        hx-push-url="{{ base_url }}/admin?tab=users"
+                        data-tab="users"
+                        class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     👥 Users
                 </button>
-                <button onclick="showTab('general')" id="tab-general" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button hx-get="{{ base_url }}/admin/tabs/general" 
+                        hx-target="#admin-tab-content" 
+                        hx-trigger="click"
+                        hx-push-url="{{ base_url }}/admin?tab=general"
+                        data-tab="general"
+                        class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     ⚙️ General
                 </button>
-                <button onclick="showTab('media-servers')" id="tab-media-servers" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button hx-get="{{ base_url }}/admin/tabs/media-servers" 
+                        hx-target="#admin-tab-content" 
+                        hx-trigger="click"
+                        hx-push-url="{{ base_url }}/admin?tab=media-servers"
+                        data-tab="media-servers"
+                        class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     🖥️ Media Servers
                 </button>
-                <button onclick="showTab('services')" id="tab-services" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button hx-get="{{ base_url }}/admin/tabs/services" 
+                        hx-target="#admin-tab-content" 
+                        hx-trigger="click"
+                        hx-push-url="{{ base_url }}/admin?tab=services"
+                        data-tab="services"
+                        class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     🔧 Services
                 </button>
-                <button onclick="showTab('jobs')" id="tab-jobs" class="tab-button border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                <button hx-get="{{ base_url }}/admin/tabs/jobs" 
+                        hx-target="#admin-tab-content" 
+                        hx-trigger="click"
+                        hx-push-url="{{ base_url }}/admin?tab=jobs"
+                        data-tab="jobs"
+                        class="admin-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                     ⏰ Scheduled Jobs
                 </button>
             </nav>
         </div>
 
-        <!-- Tab Content -->
-        <div id="tab-content">
-            <!-- Overview Tab -->
-            <div id="overview-content" class="tab-content">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <!-- Stats Cards -->
-                    <div class="bg-white overflow-hidden shadow rounded-lg">
-                        <div class="p-5">
-                            <div class="flex items-center">
-                                <div class="flex-shrink-0">
-                                    <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
-                                        </svg>
-                                    </div>
-                                </div>
-                                <div class="ml-5 w-0 flex-1">
-                                    <dl>
-                                        <dt class="text-sm font-medium text-gray-500 truncate">Total Users</dt>
-                                        <dd class="text-lg font-medium text-gray-900" id="stats-users">{{ stats.total_users or 0 }}</dd>
-                                    </dl>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white overflow-hidden shadow rounded-lg">
-                        <div class="p-5">
-                            <div class="flex items-center">
-                                <div class="flex-shrink-0">
-                                    <div class="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                                        <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
-                                        </svg>
-                                    </div>
-                                </div>
-                                <div class="ml-5 w-0 flex-1">
-                                    <dl>
-                                        <dt class="text-sm font-medium text-gray-500 truncate">Pending Requests</dt>
-                                        <dd class="text-lg font-medium text-gray-900" id="stats-pending">{{ stats.pending_requests or 0 }}</dd>
-                                    </dl>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white overflow-hidden shadow rounded-lg">
-                        <div class="p-5">
-                            <div class="flex items-center">
-                                <div class="flex-shrink-0">
-                                    <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001-1v-8M7 8h10"></path>
-                                        </svg>
-                                    </div>
-                                </div>
-                                <div class="ml-5 w-0 flex-1">
-                                    <dl>
-                                        <dt class="text-sm font-medium text-gray-500 truncate">Library Items</dt>
-                                        <dd class="text-lg font-medium text-gray-900" id="stats-library">{{ stats.library_items or 0 }}</dd>
-                                    </dl>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white overflow-hidden shadow rounded-lg">
-                        <div class="p-5">
-                            <div class="flex items-center">
-                                <div class="flex-shrink-0">
-                                    <div class="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                                        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                                        </svg>
-                                    </div>
-                                </div>
-                                <div class="ml-5 w-0 flex-1">
-                                    <dl>
-                                        <dt class="text-sm font-medium text-gray-500 truncate">System Status</dt>
-                                        <dd class="text-lg font-medium text-gray-900" id="stats-status">
-                                            {% if connection_status.all_connected %}
-                                                <span class="text-green-600">Healthy</span>
-                                            {% else %}
-                                                <span class="text-red-600">Issues</span>
-                                            {% endif %}
-                                        </dd>
-                                    </dl>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Quick Actions -->
-                <div class="bg-white shadow rounded-lg p-6">
-                    <h3 class="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <button onclick="showTab('users')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
-                            👥 Manage Users
-                        </button>
-                        <button onclick="showTab('jobs')" class="bg-green-50 hover:bg-green-100 text-green-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
-                            🔄 Scheduled Jobs
-                        </button>
-                        <button onclick="testConnections()" class="bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
-                            🔍 Test Connections
-                        </button>
-                        <button onclick="clearAuth()" class="bg-red-50 hover:bg-red-100 text-red-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
-                            🚨 Clear Auth Issues
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Users Tab -->
-            <div id="users-content" class="tab-content hidden">
-                <div class="bg-white shadow rounded-lg">
-                    <div class="px-6 py-4 border-b border-gray-200">
-                        <div class="flex justify-between items-center">
-                            <h3 class="text-lg font-medium text-gray-900">User Management</h3>
-                            <div class="space-x-2">
-                                <button hx-post="{{ base_url }}/admin/import-friends" 
-                                        hx-target="#import-friends-feedback" 
-                                        hx-swap="innerHTML"
-                                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                    Import Plex Friends
-                                </button>
-                                <button onclick="showCreateLocalUser()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                    Create Local User
-                                </button>
-                                <button onclick="showCreateTestUser()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                    Create Test User
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Import Friends Feedback Area -->
-                    <div id="import-friends-feedback"></div>
-                    
-                    <!-- Create Test User Form (hidden by default) -->
-                    <div id="create-test-user-form" class="px-6 py-4 border-b border-gray-200 bg-gray-50 hidden">
-                        <h4 class="text-md font-medium text-gray-900 mb-4">Create Test User</h4>
-                        <form method="post" action="{{ base_url }}/admin/users/create-test" class="flex items-end space-x-4">
-                            <div class="flex-1">
-                                <label for="test-username" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                                <input type="text" name="username" id="test-username" required 
-                                       placeholder="testuser1" 
-                                       class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
-                            </div>
-                            <div class="flex items-center">
-                                <input type="checkbox" name="is_admin" id="test-is-admin" 
-                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
-                                <label for="test-is-admin" class="ml-2 text-sm text-gray-700">Admin User</label>
-                            </div>
-                            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                Create User
-                            </button>
-                            <button type="button" onclick="hideCreateTestUser()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
-                                Cancel
-                            </button>
-                        </form>
-                        <p class="text-xs text-gray-500 mt-2">Test users can be used to test different permission levels without Plex authentication.</p>
-                    </div>
-                    
-                    <!-- Create Local User Form (hidden by default) -->
-                    <div id="create-local-user-form" class="px-6 py-4 border-b border-gray-200 bg-purple-50 hidden">
-                        <h4 class="text-md font-medium text-gray-900 mb-4">Create Local User</h4>
-                        <form id="local-user-form" class="space-y-4">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label for="local-username" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                                    <input type="text" name="username" id="local-username" required 
-                                           placeholder="john.doe" 
-                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
-                                </div>
-                                <div>
-                                    <label for="local-full-name" class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                                    <input type="text" name="full_name" id="local-full-name" 
-                                           placeholder="John Doe" 
-                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
-                                </div>
-                            </div>
-                            
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label for="local-email" class="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
-                                    <input type="email" name="email" id="local-email" 
-                                           placeholder="john.doe@example.com" 
-                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
-                                </div>
-                                <div>
-                                    <label for="local-password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                    <input type="password" name="password" id="local-password" required 
-                                           placeholder="Secure password" 
-                                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
-                                </div>
-                            </div>
-                            
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center">
-                                    <input type="checkbox" name="is_admin" id="local-is-admin" 
-                                           class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
-                                    <label for="local-is-admin" class="ml-2 text-sm text-gray-700">Admin User</label>
-                                </div>
-                                
-                                <div class="flex space-x-2">
-                                    <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                        Create User
-                                    </button>
-                                    <button type="button" onclick="hideCreateLocalUser()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
-                                        Cancel
-                                    </button>
-                                </div>
-                            </div>
-                        </form>
-                        <p class="text-xs text-gray-500 mt-2">Local users can log in without a Plex account using their username and password.</p>
-                        <div id="local-user-feedback" class="mt-4 hidden">
-                            <!-- Feedback messages will appear here -->
-                        </div>
-                    </div>
-                    
-                    <div id="users-list" hx-get="{{ base_url }}/admin/users/list" hx-trigger="load">
-                        <div class="flex justify-center py-12">
-                            <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-
-            <!-- General Settings Tab -->
-            <div id="general-content" class="tab-content hidden">
-                <form hx-post="{{ base_url }}/admin/settings/update-general" hx-target="#settings-feedback" hx-on::after-request="handleGeneralSettingsResponse(event)">
-                    <div class="bg-white shadow rounded-lg p-6">
-                        <h3 class="text-lg font-medium text-gray-900 mb-6">General Settings</h3>
-                        
-                        <div class="grid grid-cols-1 gap-6">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label for="app_name" class="block text-sm font-medium text-gray-700">Application Name</label>
-                                    <input type="text" name="app_name" id="app_name" 
-                                           value="{{ settings.app_name or 'Stout Requests' }}"
-                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                </div>
-                                
-                                <div>
-                                    <label for="base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
-                                    <input type="text" name="base_url" id="base_url" 
-                                           value="{{ settings.base_url or '' }}"
-                                           placeholder="/stout (for reverse proxy setups)"
-                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                    <p class="mt-1 text-xs text-gray-500">
-                                        For reverse proxy setups (e.g., "/stout"). Leave empty if not using a reverse proxy.<br>
-                                        <strong>Examples:</strong> "/stout", "/requests", "/media" - Must start with "/" if specified.
-                                    </p>
-                                </div>
-                            </div>
-                            
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label for="site_theme" class="block text-sm font-medium text-gray-700">Site Theme</label>
-                                    <select name="site_theme" id="site_theme" 
-                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                        <option value="default" {{ 'selected' if settings.site_theme == 'default' else '' }}>Default (Orange)</option>
-                                        <option value="dark" {{ 'selected' if settings.site_theme == 'dark' else '' }}>Dark Mode</option>
-                                        <option value="blue" {{ 'selected' if settings.site_theme == 'blue' else '' }}>Blue Theme</option>
-                                        <option value="green" {{ 'selected' if settings.site_theme == 'green' else '' }}>Green Theme</option>
-                                        <option value="purple" {{ 'selected' if settings.site_theme == 'purple' else '' }}>Purple Theme</option>
-                                    </select>
-                                    <p class="mt-1 text-sm text-gray-500">Choose the visual theme for all users</p>
-                                </div>
-                            </div>
-                            
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label for="max_requests_per_user" class="block text-sm font-medium text-gray-700">Max Requests per User</label>
-                                    <input type="number" name="max_requests_per_user" id="max_requests_per_user" 
-                                           value="{{ settings.max_requests_per_user or 10 }}" min="1" max="100"
-                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                </div>
-                                
-                                <div class="space-y-4">
-                                    <div class="flex items-start">
-                                        <div class="flex items-center h-5">
-                                            <input type="checkbox" name="require_approval" id="require_approval" 
-                                                   {{ 'checked' if settings.require_approval else '' }}
-                                                   class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
-                                        </div>
-                                        <div class="ml-3 text-sm">
-                                            <label for="require_approval" class="font-medium text-gray-700">Require Approval</label>
-                                            <p class="text-gray-500">All requests must be approved by an admin</p>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="flex items-start">
-                                        <div class="flex items-center h-5">
-                                            <input type="checkbox" name="auto_approve_admin" id="auto_approve_admin" 
-                                                   {{ 'checked' if settings.auto_approve_admin else '' }}
-                                                   class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
-                                        </div>
-                                        <div class="ml-3 text-sm">
-                                            <label for="auto_approve_admin" class="font-medium text-gray-700">Auto-approve Admin Requests</label>
-                                            <p class="text-gray-500">Automatically approve requests from administrators</p>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Request Visibility Settings -->
-                                    <div class="border-t pt-4 mt-4">
-                                        <h4 class="text-sm font-medium text-gray-900 mb-3">Request Visibility</h4>
-                                        <div class="space-y-4">
-                                            <div class="flex items-start">
-                                                <div class="flex items-center h-5">
-                                                    <input type="checkbox" name="can_view_all_requests" id="can_view_all_requests" 
-                                                           {{ 'checked' if settings.can_view_all_requests else '' }}
-                                                           class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
-                                                </div>
-                                                <div class="ml-3 text-sm">
-                                                    <label for="can_view_all_requests" class="font-medium text-gray-700">Users can view all requests</label>
-                                                    <p class="text-gray-500">When enabled, regular users can see requests from all users on the Requests page and Discover page recent requests</p>
-                                                </div>
-                                            </div>
-                                            
-                                            <div class="flex items-start">
-                                                <div class="flex items-center h-5">
-                                                    <input type="checkbox" name="can_view_request_user" id="can_view_request_user" 
-                                                           {{ 'checked' if settings.can_view_request_user else '' }}
-                                                           class="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300 rounded">
-                                                </div>
-                                                <div class="ml-3 text-sm">
-                                                    <label for="can_view_request_user" class="font-medium text-gray-700">Users can see who made each request</label>
-                                                    <p class="text-gray-500">When enabled, regular users can see the username of who made each request. Admins always see this information</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="mt-6 flex justify-end">
-                            <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                Save General Settings
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Media Servers Tab -->
-            <div id="media-servers-content" class="tab-content hidden">
-                <form hx-post="{{ base_url }}/admin/settings/update-media" hx-target="#settings-feedback">
-                    <div class="space-y-6">
-                        <!-- Plex Settings -->
-                        <div class="bg-white shadow rounded-lg p-6">
-                            <div class="flex items-center justify-between mb-6">
-                                <div>
-                                    <h3 class="text-lg font-medium text-gray-900">Plex Media Server</h3>
-                                    <p class="text-sm text-gray-500 mt-1">Configure your Plex Media Server connection</p>
-                                </div>
-                                <div class="flex items-center">
-                                    <div class="w-3 h-3 bg-green-400 rounded-full mr-2"></div>
-                                    <span class="text-sm text-gray-600">Connected</span>
-                                </div>
-                            </div>
-                            <div class="grid grid-cols-1 gap-6">
-                                <div>
-                                    <label for="plex_url" class="block text-sm font-medium text-gray-700">Plex Server URL</label>
-                                    <input type="url" name="plex_url" id="plex_url" 
-                                           value="{{ settings.plex_url or '' }}"
-                                           placeholder="http://localhost:32400"
-                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                    <p class="mt-1 text-sm text-gray-500">The URL where your Plex server is accessible</p>
-                                </div>
-                                
-                                <div>
-                                    <label for="plex_token" class="block text-sm font-medium text-gray-700">Plex Token</label>
-                                    <input type="password" name="plex_token" id="plex_token" 
-                                           value="{{ '•' * 20 if settings.plex_token else '' }}"
-                                           placeholder="Your Plex authentication token"
-                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                    <p class="mt-1 text-sm text-gray-500">
-                                        Authentication token for your Plex server. 
-                                        <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" class="text-orange-600 hover:text-orange-500">How to find your token</a>
-                                    </p>
-                                </div>
-                                
-                                <div>
-                                    <label for="plex_client_id" class="block text-sm font-medium text-gray-700">Plex Client ID</label>
-                                    <input type="text" name="plex_client_id" id="plex_client_id" 
-                                           value="{{ settings.plex_client_id or 'stout-requests' }}"
-                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                    <p class="mt-1 text-sm text-gray-500">Unique identifier for this application</p>
-                                </div>
-                            </div>
-                        </div>
-
-                            <!-- Library Sync Preferences (attached to Plex section) -->
-                            <div class="mt-6 pt-6 border-t border-gray-200">
-                                <div class="flex items-center justify-between mb-4">
-                                    <div>
-                                        <h4 class="text-md font-medium text-gray-900">Library Sync Selection</h4>
-                                        <p class="text-sm text-gray-500">Choose which libraries to sync (leave all unchecked to sync everything)</p>
-                                    </div>
-                                    <div class="flex items-center space-x-2">
-                                        <button 
-                                            id="toggle-library-preferences"
-                                            type="button"
-                                            onclick="toggleLibraryPreferences()"
-                                            class="inline-flex items-center px-2 py-1 border border-gray-300 text-xs font-medium rounded text-gray-600 bg-white hover:bg-gray-50"
-                                        >
-                                            <span id="toggle-text">Show</span>
-                                            <svg id="toggle-icon" class="ml-1 w-3 h-3 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                            </svg>
-                                        </button>
-                                        <button 
-                                            id="save-library-preferences-btn"
-                                            type="button"
-                                            onclick="saveLibraryPreferences()"
-                                            class="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-                                        >
-                                            💾 Save Selection
-                                        </button>
-                                    </div>
-                                </div>
-                                
-                                <div id="library-preferences-container" class="hidden">
-                                    <div id="library-preferences-content" class="space-y-2">
-                                        <!-- Library checkboxes will be loaded here -->
-                                        <div class="flex justify-center py-4">
-                                            <div class="animate-spin w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full"></div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div id="library-preferences-feedback" class="mt-3 hidden">
-                                        <!-- Feedback messages will appear here -->
-                                    </div>
-                                </div>
-                                
-                                <!-- Future Multiple Servers Note -->
-                                <div class="mt-3 p-3 bg-blue-50 rounded-md">
-                                    <p class="text-xs text-blue-700">
-                                        <strong>📋 Note:</strong> This interface is designed to support multiple media servers in the future. 
-                                        Each server will have its own library selection settings when multiple Plex/Jellyfin/Emby servers are configured.
-                                    </p>
-                                </div>
-                            </div>
-
-                        <div class="flex justify-between">
-                            <button type="button" onclick="testPlexConnection()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                Test Plex Connection
-                            </button>
-                            <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                                Save Media Server Settings
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Services Tab -->
-            <div id="services-content" class="tab-content hidden">
-                {% include "admin_services.html" %}
-            </div>
-
-
-            <!-- Scheduled Jobs Tab -->
-            <div id="jobs-content" class="tab-content hidden">
-                <div id="jobs-frame" hx-get="{{ base_url }}/admin/jobs/content" hx-trigger="load">
-                    <div class="flex justify-center py-12">
-                        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full"></div>
-                    </div>
-                </div>
+        <!-- HTMX Tab Content Container -->
+        <div id="admin-tab-content">
+            <!-- Initial content will be loaded based on URL parameter -->
+            <div class="flex justify-center py-12">
+                <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full"></div>
             </div>
         </div>
 
@@ -545,42 +107,59 @@
 </div>
 
 <script>
-let currentAdminTab = 'overview';
+// HTMX tab switching logic with URL state management
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize tab from URL parameter
+    initializeTabFromURL();
+    
+    // Handle browser back/forward
+    window.addEventListener('popstate', function(event) {
+        initializeTabFromURL();
+    });
+    
+    // Handle tab button clicks and update active state
+    document.addEventListener('htmx:beforeRequest', function(event) {
+        // Check if this is a tab request
+        if (event.target.classList.contains('admin-tab-btn')) {
+            // Clear any notifications when switching tabs
+            clearNotificationParams();
+            hideNotificationMessages();
+            clearSettingsFeedback();
+            
+            // Update tab styling based on data-tab attribute
+            const targetTab = event.target.getAttribute('data-tab');
+            updateActiveTab(targetTab);
+        }
+    });
+});
 
-function showTab(tabName) {
-    console.log('Switching to admin tab:', tabName);
-    currentAdminTab = tabName;
+function initializeTabFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tab = urlParams.get('tab') || 'overview';
     
-    // Clear any query parameters for notifications when switching tabs
-    clearNotificationParams();
+    // Update active tab styling
+    updateActiveTab(tab);
     
-    // Hide any existing notifications immediately when switching tabs
-    hideNotificationMessages();
+    // Load the tab content
+    const baseUrl = '{{ base_url }}';
+    const tabUrl = `${baseUrl}/admin/tabs/${tab}`;
     
-    // Clear settings feedback div when switching tabs
-    clearSettingsFeedback();
-    
+    // Use HTMX to load the tab content
+    htmx.ajax('GET', tabUrl, '#admin-tab-content');
+}
+
+function updateActiveTab(activeTab) {
     // Update tab styling
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.classList.remove('border-primary-500', 'text-primary-600');
-        button.classList.add('border-transparent', 'text-gray-500');
+    document.querySelectorAll('.admin-tab-btn').forEach(button => {
+        const tabName = button.getAttribute('data-tab');
+        if (tabName === activeTab) {
+            button.classList.remove('border-transparent', 'text-gray-500');
+            button.classList.add('border-primary-500', 'text-primary-600');
+        } else {
+            button.classList.remove('border-primary-500', 'text-primary-600');
+            button.classList.add('border-transparent', 'text-gray-500');
+        }
     });
-    
-    const activeTab = document.getElementById(`tab-${tabName}`);
-    if (activeTab) {
-        activeTab.classList.remove('border-transparent', 'text-gray-500');
-        activeTab.classList.add('border-primary-500', 'text-primary-600');
-    }
-    
-    // Show/hide content
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.add('hidden');
-    });
-    
-    const activeContent = document.getElementById(`${tabName}-content`);
-    if (activeContent) {
-        activeContent.classList.remove('hidden');
-    }
 }
 
 function clearNotificationParams() {

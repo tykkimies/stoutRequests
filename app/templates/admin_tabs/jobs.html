@@ -1,0 +1,189 @@
+<!-- Jobs Tab Content -->
+<div class="space-y-6">
+    <!-- Job Status Overview -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-white overflow-hidden shadow rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Active Jobs</dt>
+                            <dd class="text-lg font-medium text-gray-900">{{ job_stats.active or 0 }}</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white overflow-hidden shadow rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Scheduled</dt>
+                            <dd class="text-lg font-medium text-gray-900">{{ job_stats.scheduled or 0 }}</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white overflow-hidden shadow rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                            <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Failed</dt>
+                            <dd class="text-lg font-medium text-gray-900">{{ job_stats.failed or 0 }}</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scheduled Jobs Configuration -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-medium text-gray-900">Scheduled Jobs Configuration</h3>
+            <p class="text-sm text-gray-500">Configure automatic background tasks for library synchronization and maintenance</p>
+        </div>
+        
+        <div class="p-6 space-y-6">
+            <!-- Library Sync Job -->
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="ml-4">
+                        <h4 class="text-sm font-medium text-gray-900">Plex Library Sync</h4>
+                        <p class="text-sm text-gray-500">Synchronize Plex library with request database</p>
+                        <p class="text-xs text-gray-400">Next run: {{ next_sync or "Not scheduled" }}</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <select id="sync-interval" class="text-sm border-gray-300 rounded-md">
+                        <option value="disabled" {{ 'selected' if sync_schedule == 'disabled' else '' }}>Disabled</option>
+                        <option value="hourly" {{ 'selected' if sync_schedule == 'hourly' else '' }}>Every Hour</option>
+                        <option value="4hours" {{ 'selected' if sync_schedule == '4hours' else '' }}>Every 4 Hours</option>
+                        <option value="daily" {{ 'selected' if sync_schedule == 'daily' else '' }}>Daily</option>
+                        <option value="weekly" {{ 'selected' if sync_schedule == 'weekly' else '' }}>Weekly</option>
+                    </select>
+                    <button hx-post="{{ base_url }}/admin/jobs/update-schedule" 
+                            hx-include="#sync-interval"
+                            hx-target="#sync-feedback"
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm">
+                        Update
+                    </button>
+                </div>
+            </div>
+            
+            <div id="sync-feedback"></div>
+
+            <!-- Request Cleanup Job -->
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
+                            <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="ml-4">
+                        <h4 class="text-sm font-medium text-gray-900">Request Cleanup</h4>
+                        <p class="text-sm text-gray-500">Clean up old completed/rejected requests</p>
+                        <p class="text-xs text-gray-400">Keep requests for: {{ cleanup_retention or "30 days" }}</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <select id="cleanup-retention" class="text-sm border-gray-300 rounded-md">
+                        <option value="disabled" {{ 'selected' if cleanup_schedule == 'disabled' else '' }}>Disabled</option>
+                        <option value="7days" {{ 'selected' if cleanup_retention == '7days' else '' }}>7 Days</option>
+                        <option value="30days" {{ 'selected' if cleanup_retention == '30days' else '' }}>30 Days</option>
+                        <option value="90days" {{ 'selected' if cleanup_retention == '90days' else '' }}>90 Days</option>
+                        <option value="1year" {{ 'selected' if cleanup_retention == '1year' else '' }}>1 Year</option>
+                    </select>
+                    <button hx-post="{{ base_url }}/admin/jobs/update-cleanup" 
+                            hx-include="#cleanup-retention"
+                            hx-target="#cleanup-feedback"
+                            class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded-md text-sm">
+                        Update
+                    </button>
+                </div>
+            </div>
+            
+            <div id="cleanup-feedback"></div>
+        </div>
+    </div>
+
+    <!-- Manual Job Actions -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Manual Actions</h3>
+        <p class="text-sm text-gray-500 mb-4">Run background jobs manually for testing or immediate execution</p>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <button hx-post="{{ base_url }}/admin/jobs/run/sync-library" 
+                    hx-target="#manual-job-feedback"
+                    class="bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                🔄 Sync Library
+            </button>
+            <button hx-post="{{ base_url }}/admin/jobs/run/cleanup-requests" 
+                    hx-target="#manual-job-feedback"
+                    class="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                🗑️ Cleanup Requests
+            </button>
+            <button hx-post="{{ base_url }}/admin/jobs/run/update-metadata" 
+                    hx-target="#manual-job-feedback"
+                    class="bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                📊 Update Metadata
+            </button>
+            <button hx-post="{{ base_url }}/admin/jobs/run/health-check" 
+                    hx-target="#manual-job-feedback"
+                    class="bg-green-50 hover:bg-green-100 text-green-700 px-4 py-3 rounded-lg text-sm font-medium transition-colors">
+                🔍 Health Check
+            </button>
+        </div>
+        
+        <div id="manual-job-feedback" class="mt-4"></div>
+    </div>
+
+    <!-- Recent Job History -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-medium text-gray-900">Recent Job History</h3>
+        </div>
+        
+        <div id="job-history" hx-get="{{ base_url }}/admin/jobs/history" hx-trigger="load">
+            <div class="flex justify-center py-12">
+                <div class="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+            </div>
+        </div>
+    </div>
+</div>

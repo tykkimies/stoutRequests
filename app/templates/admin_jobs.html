@@ -23,19 +23,19 @@
             {% else %}
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div class="bg-blue-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-blue-900">{{ sync_stats.get('total_items', 0) }}</div>
+                    <div class="text-2xl font-bold text-blue-900" data-stat="total-items">{{ sync_stats.get('total_items', 0) }}</div>
                     <div class="text-sm text-blue-700">Total Items</div>
                 </div>
                 <div class="bg-green-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-green-900">{{ sync_stats.get('movies', 0) }}</div>
+                    <div class="text-2xl font-bold text-green-900" data-stat="movies">{{ sync_stats.get('movies', 0) }}</div>
                     <div class="text-sm text-green-700">Movies</div>
                 </div>
                 <div class="bg-purple-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-purple-900">{{ sync_stats.get('tv_shows', 0) }}</div>
+                    <div class="text-2xl font-bold text-purple-900" data-stat="tv-shows">{{ sync_stats.get('tv_shows', 0) }}</div>
                     <div class="text-sm text-purple-700">TV Shows</div>
                 </div>
                 <div class="bg-gray-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-gray-900">
+                    <div class="text-2xl font-bold text-gray-900" data-stat="last-sync">
                         {% if sync_stats.get('sync_age_hours') %}
                             {% if sync_stats.sync_age_hours < 1 %}
                                 < 1h
@@ -88,7 +88,7 @@
             <!-- Jobs List -->
             <div class="space-y-4">
                 {% for job_key, job in jobs.items() %}
-                <div class="border border-gray-200 rounded-lg p-4">
+                <div class="border border-gray-200 rounded-lg p-4" data-job="{{ job_key }}">
                     <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center space-x-3">
                             <div class="flex-shrink-0">
@@ -142,9 +142,9 @@
                                     onclick="triggerLibrarySync()"
                                 >
                                     {% if job.running %}
-                                        <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                                            <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        <svg class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
                                         Running...
                                     {% else %}
@@ -181,11 +181,11 @@
                         </div>
                         <div>
                             <span class="font-medium text-gray-500">Last Run:</span>
-                            <span class="ml-1 text-gray-900">{{ job.last_run }}</span>
+                            <span class="ml-1 text-gray-900" data-field="last-run">{{ job.last_run }}</span>
                         </div>
                         <div>
                             <span class="font-medium text-gray-500">Next Run:</span>
-                            <span class="ml-1 text-gray-900">{{ job.next_run }}</span>
+                            <span class="ml-1 text-gray-900" data-field="next-run">{{ job.next_run }}</span>
                         </div>
                     </div>
                     
@@ -257,6 +257,85 @@
     <!-- Job Trigger Result Area -->
     <div id="job-trigger-result"></div>
 
+    <!-- Job Scheduling Configuration -->
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Job Scheduling Configuration</h3>
+            <p class="text-sm text-gray-600 mb-6">Configure automatic scheduling for background jobs</p>
+            
+            <div class="space-y-6">
+                <!-- Library Sync Scheduling -->
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                                <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-medium text-gray-900">Library Sync Schedule</h4>
+                                <p class="text-sm text-gray-500">Automatically sync Plex library</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <form hx-post="{{ base_url }}/admin/jobs/update-schedule" hx-target="#library-sync-feedback">
+                                <input type="hidden" name="job_name" value="library_sync">
+                                <select name="interval" class="text-sm border-gray-300 rounded-md">
+                                    <option value="disabled">Disabled</option>
+                                    <option value="15minutes">Every 15 Minutes</option>
+                                    <option value="30minutes">Every 30 Minutes</option>
+                                    <option value="hourly" selected>Every Hour</option>
+                                    <option value="4hours">Every 4 Hours</option>
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                </select>
+                                <button type="submit" class="ml-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm">
+                                    Update
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    <div id="library-sync-feedback"></div>
+                </div>
+                
+                <!-- Download Status Check Scheduling -->
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-medium text-gray-900">Download Status Check Schedule</h4>
+                                <p class="text-sm text-gray-500">Monitor Radarr/Sonarr download progress</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <form hx-post="{{ base_url }}/admin/jobs/update-schedule" hx-target="#download-status-feedback">
+                                <input type="hidden" name="job_name" value="download_status_check">
+                                <select name="interval" class="text-sm border-gray-300 rounded-md">
+                                    <option value="disabled">Disabled</option>
+                                    <option value="2minutes" selected>Every 2 Minutes</option>
+                                    <option value="5minutes">Every 5 Minutes</option>
+                                    <option value="15minutes">Every 15 Minutes</option>
+                                    <option value="30minutes">Every 30 Minutes</option>
+                                    <option value="hourly">Every Hour</option>
+                                </select>
+                                <button type="submit" class="ml-2 bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm">
+                                    Update
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    <div id="download-status-feedback"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- How It Works -->
     <div class="bg-white shadow rounded-lg">
         <div class="px-4 py-5 sm:p-6">
@@ -301,52 +380,371 @@
 </div>
 
 <script>
-// Auto-refresh job status every 10 seconds when on jobs tab (faster for better feedback)
-let jobStatusInterval;
+// Auto-refresh job status when on jobs tab
+// Use window.jobsTab namespace to avoid redeclaration issues
+window.jobsTab = window.jobsTab || {};
+if (!window.jobsTab.initialized) {
+    window.jobsTab.jobStatusInterval = null;
+    window.jobsTab.isJobsTabActive = false;
+    window.jobsTab.initialized = true;
+}
 
-function startJobStatusAutoRefresh() {
+window.jobsTab.startJobStatusAutoRefresh = function() {
     // Clear any existing interval
-    if (jobStatusInterval) {
-        clearInterval(jobStatusInterval);
+    if (window.jobsTab.jobStatusInterval) {
+        clearInterval(window.jobsTab.jobStatusInterval);
     }
     
-    // Set up new interval - more frequent updates when jobs are running
-    jobStatusInterval = setInterval(() => {
-        // Only refresh if we're still on the jobs tab
-        if (currentAdminTab === 'jobs') {
-            console.log('🔄 Auto-refreshing job status...');
-            htmx.ajax('GET', '{{ base_url }}/admin/jobs/content', '#jobs-frame');
-        } else {
-            // Clear interval if no longer on jobs tab
-            clearInterval(jobStatusInterval);
-        }
-    }, 10000); // 10 seconds for better feedback
-}
-
-function stopJobStatusAutoRefresh() {
-    if (jobStatusInterval) {
-        clearInterval(jobStatusInterval);
-        jobStatusInterval = null;
+    window.jobsTab.isJobsTabActive = true;
+    
+    // Check if any jobs are running to determine refresh frequency
+    function getRefreshInterval() {
+        const runningJobs = document.querySelectorAll('.inline-flex.items-center.px-2\\.5.py-0\\.5.rounded-full.text-xs.font-medium.bg-yellow-100.text-yellow-800');
+        // Much more conservative: 10 seconds if jobs running, 60 seconds otherwise
+        // This significantly reduces server load
+        return runningJobs.length > 0 ? 10000 : 60000;
     }
-}
+    
+    function refreshJobStatus() {
+        if (!window.jobsTab.isJobsTabActive) {
+            console.log('🛑 Stopping refresh - jobs tab no longer active');
+            return;
+        }
+        
+        // Double-check we're still on the jobs tab by checking URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentTab = urlParams.get('tab');
+        if (currentTab !== 'jobs') {
+            console.log('🛑 Stopping refresh - not on jobs tab anymore');
+            window.jobsTab.stopJobStatusAutoRefresh();
+            return;
+        }
+        
+        console.log('🔄 Auto-refreshing job status (selective update)...');
+        
+        // Fetch job status data without replacing the entire page
+        // Use window.location.origin to ensure we use the same protocol (HTTP/HTTPS)
+        fetch(window.location.origin + '{{ base_url }}/admin/jobs/status', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('✅ Job status data received:', data);
+                
+                // Update job status badges
+                updateJobStatusElements(data.jobs);
+                
+                // Update library stats if available
+                if (data.sync_stats) {
+                    updateLibraryStats(data.sync_stats);
+                }
+                
+                console.log('✅ Job status elements updated');
+            }
+            
+            // Restart the interval with appropriate timing
+            if (window.jobsTab.isJobsTabActive) {
+                const interval = getRefreshInterval();
+                
+                // If no jobs are running and interval is 60 seconds, stop auto-refresh completely
+                // This saves significant server resources when no background activity is happening
+                if (interval === 60000) {
+                    const runningJobs = document.querySelectorAll('.inline-flex.items-center.px-2\\.5.py-0\\.5.rounded-full.text-xs.font-medium.bg-yellow-100.text-yellow-800');
+                    if (runningJobs.length === 0) {
+                        console.log('✅ No jobs running - stopping auto-refresh to save resources');
+                        window.jobsTab.stopJobStatusAutoRefresh();
+                        return;
+                    }
+                }
+                
+                setTimeout(() => {
+                    if (window.jobsTab.isJobsTabActive) {
+                        refreshJobStatus();
+                    }
+                }, interval);
+            }
+        })
+        .catch((error) => {
+            console.error('❌ Error refreshing job status:', error);
+            
+            // Retry after much longer delay on error (30 seconds)
+            // This prevents hammering the server if it's having issues
+            if (window.jobsTab.isJobsTabActive) {
+                setTimeout(() => {
+                    if (window.jobsTab.isJobsTabActive) {
+                        refreshJobStatus();
+                    }
+                }, 30000);
+            }
+        });
+    }
+    
+    function updateJobStatusElements(jobs) {
+        // Update each job's status badge and details
+        Object.keys(jobs).forEach(jobKey => {
+            const job = jobs[jobKey];
+            
+            // Update status badge
+            const statusBadge = document.getElementById(`job-status-${jobKey}`);
+            if (statusBadge) {
+                if (job.running) {
+                    statusBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800';
+                    statusBadge.innerHTML = `
+                        <svg class="w-3 h-3 mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Running
+                    `;
+                } else {
+                    statusBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800';
+                    statusBadge.innerHTML = 'Idle';
+                }
+            }
+            
+            // Update job button
+            const button = document.getElementById(`job-button-${jobKey}`);
+            if (button) {
+                if (job.running) {
+                    button.disabled = true;
+                    button.innerHTML = `
+                        <svg class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Running...
+                    `;
+                } else {
+                    button.disabled = false;
+                    if (jobKey === 'library_sync') {
+                        button.innerHTML = '🔄 Sync Now';
+                    } else if (jobKey === 'download_status_check') {
+                        button.innerHTML = '📥 Check Now';
+                    }
+                }
+            }
+            
+            // Update last run time
+            const lastRunElement = document.querySelector(`[data-job="${jobKey}"] [data-field="last-run"]`);
+            if (lastRunElement) {
+                lastRunElement.textContent = job.last_run || 'Never';
+            }
+            
+            // Update next run time
+            const nextRunElement = document.querySelector(`[data-job="${jobKey}"] [data-field="next-run"]`);
+            if (nextRunElement) {
+                nextRunElement.textContent = job.next_run || 'Not scheduled';
+            }
+        });
+    }
+    
+    function updateLibraryStats(syncStats) {
+        // Update total items
+        const totalElement = document.querySelector('[data-stat="total-items"]');
+        if (totalElement) {
+            totalElement.textContent = syncStats.total_items || 0;
+        }
+        
+        // Update movies count
+        const moviesElement = document.querySelector('[data-stat="movies"]');
+        if (moviesElement) {
+            moviesElement.textContent = syncStats.movies || 0;
+        }
+        
+        // Update TV shows count
+        const tvElement = document.querySelector('[data-stat="tv-shows"]');
+        if (tvElement) {
+            tvElement.textContent = syncStats.tv_shows || 0;
+        }
+        
+        // Update last sync time
+        const lastSyncElement = document.querySelector('[data-stat="last-sync"]');
+        if (lastSyncElement) {
+            if (syncStats.sync_age_hours !== undefined) {
+                if (syncStats.sync_age_hours < 1) {
+                    lastSyncElement.textContent = '< 1h';
+                } else if (syncStats.sync_age_hours < 24) {
+                    lastSyncElement.textContent = Math.round(syncStats.sync_age_hours) + 'h';
+                } else {
+                    lastSyncElement.textContent = Math.round(syncStats.sync_age_hours / 24) + 'd';
+                }
+            } else {
+                lastSyncElement.textContent = 'Never';
+            }
+        }
+    }
+    
+    // Start the refresh cycle
+    setTimeout(refreshJobStatus, getRefreshInterval());
+};
 
-// Start auto-refresh when jobs content loads
+window.jobsTab.stopJobStatusAutoRefresh = function() {
+    window.jobsTab.isJobsTabActive = false;
+    if (window.jobsTab.jobStatusInterval) {
+        clearInterval(window.jobsTab.jobStatusInterval);
+        window.jobsTab.jobStatusInterval = null;
+    }
+    console.log('🛑 Stopped job status auto-refresh');
+};
+
+// Enhanced job status monitoring
+window.jobsTab.monitorJobCompletion = function() {
+    // After triggering a job, check status immediately then start monitoring
+    if (window.jobsTab.isJobsTabActive) {
+        console.log('🎯 Job triggered - starting monitoring');
+        window.jobsTab.stopJobStatusAutoRefresh();
+        
+        // Check status immediately
+        setTimeout(() => {
+            if (window.jobsTab.isJobsTabActive) {
+                window.jobsTab.checkJobStatusOnce();
+            }
+        }, 2000);
+        
+        // Then start regular monitoring only if jobs are actually running
+        setTimeout(() => {
+            if (window.jobsTab.isJobsTabActive) {
+                const runningJobs = document.querySelectorAll('.inline-flex.items-center.px-2\\.5.py-0\\.5.rounded-full.text-xs.font-medium.bg-yellow-100.text-yellow-800');
+                if (runningJobs.length > 0) {
+                    console.log('🔄 Jobs are running - starting auto-refresh monitoring');
+                    window.jobsTab.startJobStatusAutoRefresh();
+                } else {
+                    console.log('✅ No jobs running - skipping auto-refresh to save resources');
+                }
+            }
+        }, 5000);
+    }
+};
+
+// Single status check without starting continuous refresh
+window.jobsTab.checkJobStatusOnce = function() {
+    console.log('🔍 Single job status check...');
+    
+    fetch(window.location.origin + '{{ base_url }}/admin/jobs/status', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            updateJobStatusElements(data.jobs);
+            if (data.sync_stats) {
+                updateLibraryStats(data.sync_stats);
+            }
+            
+            // Check if any jobs are still running
+            const hasRunningJobs = Object.values(data.jobs).some(job => job.running);
+            if (hasRunningJobs) {
+                console.log('📊 Jobs still running - will continue monitoring if not already active');
+                // Only start monitoring if it's not already running
+                if (!window.jobsTab.isJobsTabActive || !window.jobsTab.jobStatusInterval) {
+                    window.jobsTab.startJobStatusAutoRefresh();
+                }
+            } else {
+                console.log('✅ All jobs idle - stopping continuous refresh to save resources');
+                window.jobsTab.stopJobStatusAutoRefresh();
+            }
+        }
+    })
+    .catch(error => {
+        console.error('❌ Error in single status check:', error);
+    });
+};
+
+// Integration with admin dashboard tab system
 document.addEventListener('DOMContentLoaded', function() {
-    if (typeof currentAdminTab !== 'undefined' && currentAdminTab === 'jobs') {
-        startJobStatusAutoRefresh();
+    // Check if we're on the jobs tab by looking at the URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentTab = urlParams.get('tab');
+    
+    if (currentTab === 'jobs') {
+        console.log('ℹ️ Jobs tab loaded - auto-refresh DISABLED to prevent site overload');
+        // window.jobsTab.startJobStatusAutoRefresh();  // DISABLED
     }
 });
 
-// Also start when switching to jobs tab (this will be called by the tab switch handler)
-if (typeof handleTabSwitch !== 'undefined') {
-    const originalHandleTabSwitch = handleTabSwitch;
-    handleTabSwitch = function(tabName) {
+// Listen for HTMX events to detect tab switches
+document.addEventListener('htmx:beforeRequest', function(event) {
+    // Check if this is a tab request for jobs
+    if (event.target.classList && event.target.classList.contains('admin-tab-btn')) {
+        const targetTab = event.target.getAttribute('data-tab');
+        
+        if (targetTab === 'jobs') {
+            console.log('ℹ️ Switching to jobs tab - auto-refresh DISABLED');
+            // Auto-refresh disabled to prevent site overload
+        } else if (window.jobsTab.isJobsTabActive) {
+            console.log('🛑 Switching away from jobs tab - stopping auto-refresh');
+            window.jobsTab.stopJobStatusAutoRefresh();
+        }
+    }
+});
+
+// Listen for page visibility changes to pause/resume refresh
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden && window.jobsTab.isJobsTabActive) {
+        console.log('🔇 Page hidden - pausing job auto-refresh');
+        window.jobsTab.stopJobStatusAutoRefresh();
+    } else if (!document.hidden && window.jobsTab && window.jobsTab.initialized) {
+        // Check if we should resume refresh when page becomes visible
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentTab = urlParams.get('tab');
+        if (currentTab === 'jobs') {
+            console.log('👁️ Page visible and on jobs tab - auto-refresh DISABLED');
+            // Auto-refresh disabled to prevent site overload
+        }
+    }
+});
+
+// Stop refresh when user navigates away
+window.addEventListener('beforeunload', function() {
+    if (window.jobsTab && window.jobsTab.isJobsTabActive) {
+        console.log('🚪 User navigating away - stopping auto-refresh');
+        window.jobsTab.stopJobStatusAutoRefresh();
+    }
+});
+
+// Listen for when jobs tab content is loaded
+document.addEventListener('htmx:afterSettle', function(event) {
+    // Check if jobs content was just loaded
+    if (event.target.id === 'admin-tab-content') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentTab = urlParams.get('tab');
+        
+        if (currentTab === 'jobs' && !window.jobsTab.isJobsTabActive) {
+            console.log('ℹ️ Jobs tab content loaded - auto-refresh DISABLED');
+            // Auto-refresh disabled to prevent site overload
+        }
+    }
+});
+
+// Enhanced handleTabSwitch integration for admin dashboard
+if (typeof window.handleTabSwitch === 'undefined') {
+    window.handleTabSwitch = function(tabName) {
+        if (tabName === 'jobs') {
+            console.log('ℹ️ handleTabSwitch: Jobs tab - auto-refresh DISABLED');
+            // Auto-refresh disabled to prevent site overload
+        } else if (window.jobsTab.isJobsTabActive) {
+            console.log('🛑 handleTabSwitch: Stopping jobs auto-refresh');
+            window.jobsTab.stopJobStatusAutoRefresh();
+        }
+    };
+} else {
+    // Extend existing handleTabSwitch function
+    const originalHandleTabSwitch = window.handleTabSwitch;
+    window.handleTabSwitch = function(tabName) {
         originalHandleTabSwitch(tabName);
         
         if (tabName === 'jobs') {
-            startJobStatusAutoRefresh();
-        } else {
-            stopJobStatusAutoRefresh();
+            console.log('ℹ️ handleTabSwitch: Jobs tab - auto-refresh DISABLED');
+            // Auto-refresh disabled to prevent site overload
+        } else if (window.jobsTab.isJobsTabActive) {
+            console.log('🛑 handleTabSwitch: Stopping jobs auto-refresh');
+            window.jobsTab.stopJobStatusAutoRefresh();
         }
     };
 }
@@ -375,9 +773,9 @@ function updateJobStatus(jobKey, isRunning) {
         if (isRunning) {
             button.disabled = true;
             button.innerHTML = `
-                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                    <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
                 Running...
             `;
@@ -400,9 +798,9 @@ async function triggerLibrarySync() {
         if (button) {
             button.disabled = true;
             button.innerHTML = `
-                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                    <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
                 Starting...
             `;
@@ -413,9 +811,9 @@ async function triggerLibrarySync() {
             resultDiv.innerHTML = `
                 <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
                     <div class="flex">
-                        <svg class="w-5 h-5 text-blue-400 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                            <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        <svg class="w-5 h-5 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                         <p class="ml-3 text-sm text-blue-700">Starting library sync...</p>
                     </div>
@@ -440,6 +838,9 @@ async function triggerLibrarySync() {
                 // Only update status to running AFTER we get confirmation from backend
                 console.log('✅ Library sync request successful - updating UI to running state');
                 updateJobStatus('library_sync', true);
+                
+                // Start enhanced monitoring for job completion
+                window.jobsTab.monitorJobCompletion();
                 
                 // Show success message
                 if (resultDiv) {
@@ -509,9 +910,9 @@ async function triggerDownloadStatusCheck() {
         if (button) {
             button.disabled = true;
             button.innerHTML = `
-                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                    <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                <svg class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
                 Starting...
             `;
@@ -522,9 +923,9 @@ async function triggerDownloadStatusCheck() {
             resultDiv.innerHTML = `
                 <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
                     <div class="flex">
-                        <svg class="w-5 h-5 text-blue-400 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                            <path fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        <svg class="w-5 h-5 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                         <p class="ml-3 text-sm text-blue-700">Starting download status check...</p>
                     </div>
@@ -549,6 +950,9 @@ async function triggerDownloadStatusCheck() {
                 // Only update status to running AFTER we get confirmation from backend
                 console.log('✅ Download status check request successful - updating UI to running state');
                 updateJobStatus('download_status_check', true);
+                
+                // Start enhanced monitoring for job completion
+                window.jobsTab.monitorJobCompletion();
                 
                 // Show success message
                 if (resultDiv) {

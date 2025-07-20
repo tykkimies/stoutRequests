@@ -2568,6 +2568,17 @@ async def media_detail(
                 tmdb_ids = [item['id'] for item in item_list]
                 plex_status_map = sync_service.check_items_status(tmdb_ids, media_type)
                 
+                # Batch check existing requests for all items to avoid N+1 queries
+                item_request_statement = select(MediaRequest).where(
+                    MediaRequest.tmdb_id.in_(tmdb_ids),
+                    MediaRequest.media_type == media_type,
+                    MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED])
+                )
+                existing_requests = session.exec(item_request_statement).all()
+                
+                # Create a lookup map for existing requests
+                request_map = {req.tmdb_id: req for req in existing_requests}
+                
                 for item in item_list:
                     item['media_type'] = media_type  # Ensure media type is set
                     
@@ -2575,13 +2586,8 @@ async def media_detail(
                     item_plex_status = plex_status_map.get(item['id'], 'available')
                     item['in_plex'] = item_plex_status == 'in_plex'
                     
-                    # Check for existing requests for similar/recommended items
-                    item_request_statement = select(MediaRequest).where(
-                        MediaRequest.tmdb_id == item['id'],
-                        MediaRequest.media_type == media_type,
-                        MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED])
-                    )
-                    item_existing_request = session.exec(item_request_statement).first()
+                    # Check for existing request from batch lookup
+                    item_existing_request = request_map.get(item['id'])
                     
                     # Set status for consistency with other templates
                     if item_plex_status == 'in_plex':

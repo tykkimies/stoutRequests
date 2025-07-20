@@ -1,0 +1,114 @@
+<!-- Users Tab Content -->
+<div class="bg-white shadow rounded-lg">
+    <div class="px-6 py-4 border-b border-gray-200">
+        <div class="flex justify-between items-center">
+            <h3 class="text-lg font-medium text-gray-900">User Management</h3>
+            <div class="space-x-2">
+                <button hx-post="{{ base_url }}/admin/import-friends" 
+                        hx-target="#import-friends-feedback" 
+                        hx-swap="innerHTML"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Import Plex Friends
+                </button>
+                <button onclick="showCreateLocalUser()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Create Local User
+                </button>
+                <button onclick="showCreateTestUser()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Create Test User
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Import Friends Feedback Area -->
+    <div id="import-friends-feedback"></div>
+    
+    <!-- Create Test User Form (hidden by default) -->
+    <div id="create-test-user-form" class="px-6 py-4 border-b border-gray-200 bg-gray-50 hidden">
+        <h4 class="text-md font-medium text-gray-900 mb-4">Create Test User</h4>
+        <form method="post" action="{{ base_url }}/admin/users/create-test" class="flex items-end space-x-4">
+            <div class="flex-1">
+                <label for="test-username" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                <input type="text" name="username" id="test-username" required 
+                       placeholder="testuser1" 
+                       class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+            </div>
+            <div class="flex items-center">
+                <input type="checkbox" name="is_admin" id="test-is-admin" 
+                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                <label for="test-is-admin" class="ml-2 text-sm text-gray-700">Admin User</label>
+            </div>
+            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                Create User
+            </button>
+            <button type="button" onclick="hideCreateTestUser()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                Cancel
+            </button>
+        </form>
+        <p class="text-xs text-gray-500 mt-2">Test users can be used to test different permission levels without Plex authentication.</p>
+    </div>
+    
+    <!-- Create Local User Form (hidden by default) -->
+    <div id="create-local-user-form" class="px-6 py-4 border-b border-gray-200 bg-purple-50 hidden">
+        <h4 class="text-md font-medium text-gray-900 mb-4">Create Local User</h4>
+        <form id="local-user-form" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="local-username" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                    <input type="text" name="username" id="local-username" required 
+                           placeholder="john.doe" 
+                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                </div>
+                <div>
+                    <label for="local-full-name" class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                    <input type="text" name="full_name" id="local-full-name" 
+                           placeholder="John Doe" 
+                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="local-email" class="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
+                    <input type="email" name="email" id="local-email" 
+                           placeholder="john.doe@example.com" 
+                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                </div>
+                <div>
+                    <label for="local-password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                    <input type="password" name="password" id="local-password" required 
+                           placeholder="Secure password" 
+                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm">
+                </div>
+            </div>
+            
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <input type="checkbox" name="is_admin" id="local-is-admin" 
+                           class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                    <label for="local-is-admin" class="ml-2 text-sm text-gray-700">Admin User</label>
+                </div>
+                
+                <div class="flex space-x-2">
+                    <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Create User
+                    </button>
+                    <button type="button" onclick="hideCreateLocalUser()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </form>
+        <p class="text-xs text-gray-500 mt-2">Local users can log in without a Plex account using their username and password.</p>
+        <div id="local-user-feedback" class="mt-4 hidden">
+            <!-- Feedback messages will appear here -->
+        </div>
+    </div>
+    
+    <!-- Users List -->
+    <div id="users-list" hx-get="{{ base_url }}/admin/users/list" hx-trigger="load">
+        <div class="flex justify-center py-12">
+            <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full"></div>
+        </div>
+    </div>
+</div>
