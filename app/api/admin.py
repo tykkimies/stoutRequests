@@ -12,7 +12,8 @@ from ..models.settings import Settings
 from ..models.role import Role, PermissionFlags
 from ..models.user_permissions import UserPermissions
 from ..models.media_request import RequestStatus
-from ..api.auth import get_current_admin_user, get_current_admin_user_flexible
+from ..api.auth import get_current_admin_user, get_current_admin_user_flexible, get_current_user_flexible
+from ..core.permission_decorators import require_permission, require_any_permission
 from ..services.settings_service import SettingsService
 from ..services.plex_service import PlexService
 from ..services.plex_sync_service import PlexSyncService
@@ -94,9 +95,10 @@ async def admin_dashboard(
 
 
 @router.post("/settings/update-general")
+@require_permission(PermissionFlags.ADMIN_MANAGE_SETTINGS)
 async def update_general_settings(
     request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
+    current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session),
     
     # App settings (truly global)
@@ -163,9 +165,10 @@ async def update_general_settings(
 
 
 @router.post("/settings/update-media")
+@require_permission(PermissionFlags.ADMIN_MANAGE_SETTINGS)
 async def update_media_settings(
     request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
+    current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session),
     
     # Plex settings
@@ -451,10 +454,11 @@ async def admin_users(
 
 
 @router.post("/users/{user_id}/toggle-admin")
+@require_permission(PermissionFlags.ADMIN_MANAGE_USERS)
 async def toggle_user_admin(
     request: Request,
     user_id: int,
-    current_user: User = Depends(get_current_admin_user_flexible),
+    current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
 ):
     """Toggle user admin status - supports both HTMX and API clients"""

@@ -11,6 +11,11 @@ from ..core.template_context import get_global_template_context
 from ..models.user import User
 from ..models.media_request import MediaRequest, MediaType, RequestStatus
 from ..api.auth import get_current_user_flexible, get_current_admin_user_flexible
+from ..core.permission_decorators import (
+    require_permission, require_any_permission, check_request_permissions, 
+    check_media_type_permission
+)
+from ..models.role import PermissionFlags
 from ..services.tmdb_service import TMDBService
 from ..services.radarr_service import RadarrService
 from ..services.sonarr_service import SonarrService
@@ -414,10 +419,11 @@ async def my_requests_legacy(
 
 
 @router.post("/{request_id}/approve")
+@require_permission(PermissionFlags.ADMIN_APPROVE_REQUESTS)
 async def approve_request(
     request_id: int,
     request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
+    current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
 ):
     """Approve a media request"""
@@ -534,10 +540,11 @@ async def approve_request(
 
 
 @router.post("/{request_id}/reject")
+@require_permission(PermissionFlags.ADMIN_APPROVE_REQUESTS)
 async def reject_request(
     request_id: int,
     request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
+    current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
 ):
     """Reject a media request"""
@@ -700,9 +707,17 @@ async def delete_request(
         if not media_request:
             raise HTTPException(status_code=404, detail="Request not found")
         
-        # Check permissions: admin or request owner
-        from ..core.permissions import is_user_admin
-        if not is_user_admin(current_user, session) and media_request.user_id != current_user.id:
+        # Check permissions: admin, delete permission, or request owner
+        permissions_service = PermissionsService(session)
+        
+        # Check if user can delete this request
+        can_delete = (
+            media_request.user_id == current_user.id or  # Owner can delete
+            permissions_service.has_permission(current_user.id, PermissionFlags.ADMIN_DELETE_REQUESTS) or  # Delete permission
+            permissions_service.has_permission(current_user.id, PermissionFlags.REQUEST_MANAGE_ALL)  # Manage all requests
+        )
+        
+        if not can_delete:
             raise HTTPException(status_code=403, detail="Not authorized to delete this request")
         
         # Store filter values before deletion for potential HTMX response
