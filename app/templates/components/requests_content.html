@@ -4,6 +4,7 @@
 <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
     {% for request in requests %}
     <div class="request-item bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer" 
+         id="request-card-{{ request.id }}"
          data-media-type="{{ request.media_type.value }}" 
          data-status="{{ request.status.value }}"
          onclick="openMediaInfo('{{ request.media_type.value }}', '{{ request.tmdb_id }}')">

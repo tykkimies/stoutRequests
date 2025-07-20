@@ -693,34 +693,64 @@ async def delete_request(
     session: Session = Depends(get_session)
 ):
     """Delete a media request (admin or request owner only)"""
-    statement = select(MediaRequest).where(MediaRequest.id == request_id)
-    media_request = session.exec(statement).first()
-    
-    if not media_request:
-        raise HTTPException(status_code=404, detail="Request not found")
-    
-    # Check permissions: admin or request owner
-    from ..core.permissions import is_user_admin
-    if not is_user_admin(current_user, session) and media_request.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this request")
-    
-    # Delete the request
-    session.delete(media_request)
-    session.commit()
-    
-    # Content negotiation - check if this is an HTMX request
-    if request.headers.get("HX-Request"):
+    try:
+        statement = select(MediaRequest).where(MediaRequest.id == request_id)
+        media_request = session.exec(statement).first()
+        
+        if not media_request:
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        # Check permissions: admin or request owner
+        from ..core.permissions import is_user_admin
+        if not is_user_admin(current_user, session) and media_request.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this request")
+        
+        # Store filter values before deletion for potential HTMX response
+        status_filter = request.query_params.get('status', 'all')
+        media_type_filter = request.query_params.get('media_type', 'all')
         hx_target = request.headers.get("HX-Target", "")
         
-        if hx_target in ["requests-content", "main-content"]:
-            # From requests list page - return updated content with current filters
-            status_filter = request.query_params.get('status', 'all')
-            media_type_filter = request.query_params.get('media_type', 'all')
-            
-            # Call unified_requests to get the updated content
-            return await unified_requests(request, status_filter, media_type_filter, current_user, session)
-    
-    return {"message": "Request deleted successfully"}
+        # Track if this was a pending request to update user count
+        was_pending = media_request.status == RequestStatus.PENDING
+        user_id = media_request.user_id
+        
+        # Delete the request
+        session.delete(media_request)
+        session.commit()
+        
+        # Decrement user request count if it was pending
+        if was_pending:
+            permissions_service = PermissionsService(session)
+            permissions_service.decrement_user_request_count(user_id)
+        
+        print(f"✅ Successfully deleted request {request_id}")
+        
+        # Content negotiation - check if this is an HTMX request
+        if request.headers.get("HX-Request"):
+            # Use out-of-band swaps for ALL HTMX targets to avoid reloading content
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(f'''
+                <div></div>
+                <div hx-swap-oob="delete:#request-card-{request_id}"></div>
+                <div hx-swap-oob="innerHTML:#success-message">
+                    <div class="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg z-50" 
+                         style="animation: fadeOut 3s forwards;">
+                        ✅ Request deleted successfully
+                    </div>
+                </div>
+            ''')
+        
+        return {"message": "Request deleted successfully"}
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (404, 403)
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting request {request_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete request: {str(e)}")
 
 
 @router.get("/{request_id}/status-update", response_class=HTMLResponse)

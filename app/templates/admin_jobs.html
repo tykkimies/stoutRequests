@@ -822,7 +822,7 @@ async function triggerLibrarySync() {
         }
         
         // Make the actual request (no HX-Request header so we get JSON)
-        const response = await fetch('{{ base_url }}/admin/jobs/trigger-library-sync', {
+        const response = await fetch(window.location.origin + '{{ base_url }}/admin/jobs/trigger-library-sync', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -934,7 +934,7 @@ async function triggerDownloadStatusCheck() {
         }
         
         // Make the actual request (no HX-Request header so we get JSON)
-        const response = await fetch('{{ base_url }}/admin/jobs/trigger-download-status', {
+        const response = await fetch(window.location.origin + '{{ base_url }}/admin/jobs/trigger-download-status', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

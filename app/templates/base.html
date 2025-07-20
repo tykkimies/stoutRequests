@@ -11,6 +11,21 @@
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
     
+    <!-- HTMX HTTPS Fix -->
+    <script>
+        // Fix HTMX mixed content issues by ensuring all HTMX requests use the current protocol
+        document.addEventListener('htmx:configRequest', function(evt) {
+            // Get the current URL and check if it starts with a relative path
+            let url = evt.detail.path;
+            
+            // If it's a relative URL starting with /newrequests (base_url), 
+            // convert it to an absolute URL with current protocol
+            if (url && url.startsWith('/newrequests')) {
+                evt.detail.path = window.location.origin + url;
+            }
+        });
+    </script>
+    
     <!-- Custom styles -->
     <style>
         .bg-gradient-dark {
@@ -113,6 +128,13 @@
         .ring-primary-500 { --tw-ring-color: rgb(var(--primary-500)); }
         .focus\:ring-primary-500:focus { --tw-ring-color: rgb(var(--primary-500)); }
         .focus\:border-primary-500:focus { border-color: rgb(var(--primary-500)); }
+        
+        /* Animations for success/error messages */
+        @keyframes fadeOut {
+            0% { opacity: 1; }
+            75% { opacity: 1; }
+            100% { opacity: 0; }
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen {% if current_user %}flex flex-col{% endif %} {% if site_theme and site_theme != 'default' %}theme-{{ site_theme }}{% endif %}">
