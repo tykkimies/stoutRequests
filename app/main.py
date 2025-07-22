@@ -2521,13 +2521,13 @@ async def media_detail(
         user_partial_requests = []
         
         if existing_requests:
-            # Check if there's a complete series request (no season_number specified)
-            complete_request = next((req for req in existing_requests if not req.is_season_request), None)
+            # Check if there's a complete series request (no season_number and no episode_number specified)
+            complete_request = next((req for req in existing_requests if not req.is_season_request and not req.is_episode_request), None)
             if complete_request:
                 has_complete_request = True
                 request_status = complete_request.status.value
             else:
-                # Only partial requests exist
+                # Only partial requests exist (season or episode requests)
                 has_partial_requests = True
                 # Get user's partial requests to show appropriate UI
                 user_partial_requests = [req for req in existing_requests if req.user_id == current_user.id] if current_user else []
@@ -2538,9 +2538,22 @@ async def media_detail(
         # For template context, use the first existing request or None
         existing_request = existing_requests[0] if existing_requests else None
         
-        # Add poster URL and status information
+        # Create detailed request status for template
+        requested_seasons = set()
+        requested_episodes = {}  # {season_number: [episode_numbers]}
+        for req in existing_requests:
+            if req.is_season_request and req.season_number:
+                requested_seasons.add(req.season_number)
+            elif req.is_episode_request and req.season_number and req.episode_number:
+                if req.season_number not in requested_episodes:
+                    requested_episodes[req.season_number] = []
+                requested_episodes[req.season_number].append(req.episode_number)
+        
+        # Add poster and backdrop URLs
         if media.get('poster_path'):
             media['poster_url'] = f"{tmdb_service.image_base_url}{media['poster_path']}"
+        if media.get('backdrop_path'):
+            media['backdrop_url'] = f"https://image.tmdb.org/t/p/w1920_and_h800_multi_faces{media['backdrop_path']}"
         
         # Add status information to the main media object
         media['in_plex'] = is_in_plex
@@ -2569,6 +2582,52 @@ async def media_detail(
             similar = tmdb_service.get_tv_similar(media_id)
             recommendations = tmdb_service.get_tv_recommendations(media_id)
             credits = tmdb_service.get_tv_credits(media_id)
+            
+            # Fetch detailed episode information for each season
+            if media.get('seasons'):
+                for season in media['seasons']:
+                    # Only fetch details for seasons with episodes (skip specials if episode count is 0)
+                    if season.get('episode_count', 0) > 0:
+                        try:
+                            season_details = tmdb_service.get_tv_season_details(media_id, season['season_number'])
+                            if season_details and season_details.get('episodes'):
+                                # Replace the basic episode count with detailed episode data
+                                season['episodes'] = season_details['episodes']
+                                # Add formatted air dates for easier template use
+                                for episode in season['episodes']:
+                                    if episode.get('air_date'):
+                                        try:
+                                            from datetime import datetime
+                                            air_date = datetime.strptime(episode['air_date'], '%Y-%m-%d')
+                                            episode['formatted_air_date'] = air_date.strftime('%b %d, %Y')
+                                        except ValueError:
+                                            episode['formatted_air_date'] = episode['air_date']
+                                    else:
+                                        episode['formatted_air_date'] = 'TBA'
+                        except Exception as e:
+                            print(f"Could not fetch season {season['season_number']} details: {e}")
+                            # Keep basic episode list if detailed fetch fails
+                            season['episodes'] = None
+            
+            # Get episode availability data from Plex
+            episode_availability = sync_service.get_tv_episode_availability(media_id)
+            media['episode_availability'] = episode_availability
+            
+            # Add availability info to each season and episode
+            if media.get('seasons') and episode_availability.get('seasons'):
+                for season in media['seasons']:
+                    season_num = season['season_number']
+                    plex_season_data = episode_availability['seasons'].get(season_num, {})
+                    
+                    # Mark if season is available in Plex
+                    season['available_in_plex'] = season_num in episode_availability['summary']['available_season_numbers']
+                    
+                    # Add availability to individual episodes
+                    if season.get('episodes') and plex_season_data.get('episodes'):
+                        available_episodes = {ep['episode_number']: ep for ep in plex_season_data['episodes']}
+                        for episode in season['episodes']:
+                            ep_num = episode['episode_number']
+                            episode['available_in_plex'] = ep_num in available_episodes
         
         # Add Plex availability status to similar and recommended items using fast lookup
         for item_list in [similar.get('results', []) if similar else [], recommendations.get('results', []) if recommendations else []]:
@@ -2615,10 +2674,34 @@ async def media_detail(
         from .core.permissions import is_user_admin
         user_is_admin = is_user_admin(current_user, session)
         
+        # Get user permissions for request capabilities
+        from .services.permissions_service import PermissionsService
+        permissions_service = PermissionsService(session)
+        
+        # Create user permissions object with boolean attributes for template
+        class UserPermissionsTemplate:
+            def __init__(self, permissions_service, user_id):
+                self.can_request_movies = permissions_service.can_request_media_type(user_id, 'movie') if user_id else False
+                self.can_request_tv = permissions_service.can_request_media_type(user_id, 'tv') if user_id else False
+                self.can_request_4k = permissions_service.can_request_4k(user_id) if user_id else False
+                # Add admin navigation permissions needed by base template
+                self.can_manage_settings = permissions_service.has_permission(user_id, 'admin_manage_settings') if user_id else False
+                self.can_manage_users = permissions_service.has_permission(user_id, 'admin_manage_users') if user_id else False
+                self.can_approve_requests = permissions_service.has_permission(user_id, 'request_approve') if user_id else False
+                self.can_library_sync = permissions_service.has_permission(user_id, 'admin_library_sync') if user_id else False
+        
+        user_permissions = UserPermissionsTemplate(permissions_service, current_user.id) if current_user else None
+        
+        # Get base URL for templates
+        from .services.settings_service import SettingsService
+        base_url = SettingsService.get_base_url(session)
+        
         context = {
             "request": request,
             "current_user": current_user,
             "user_is_admin": user_is_admin,
+            "user_permissions": user_permissions,
+            "base_url": base_url,
             "media": media,
             "media_type": media_type,
             "is_in_plex": is_in_plex,
@@ -2628,6 +2711,8 @@ async def media_detail(
             "has_complete_request": has_complete_request,
             "has_partial_requests": has_partial_requests,
             "user_partial_requests": user_partial_requests,
+            "requested_seasons": requested_seasons,
+            "requested_episodes": requested_episodes,
             "similar": similar.get('results', [])[:12] if similar else [],
             "recommendations": recommendations.get('results', [])[:12] if recommendations else [],
             "cast": credits.get('cast', [])[:10] if credits else [],

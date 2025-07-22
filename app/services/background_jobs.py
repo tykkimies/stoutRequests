@@ -9,7 +9,7 @@ import time
 from ..services.plex_sync_service import PlexSyncService
 from ..core.database import get_session
 
-
+# tracker:task("Add accessibility to modal")
 class BackgroundJobManager:
     """
     Simple background job manager for handling async tasks like library sync.

@@ -27,7 +27,9 @@ class MediaRequest(SQLModel, table=True):
     release_date: Optional[str] = None
     status: RequestStatus = Field(default=RequestStatus.PENDING)
     season_number: Optional[int] = None  # For TV shows
+    episode_number: Optional[int] = None  # For specific episode requests
     is_season_request: bool = Field(default=False)  # True if requesting specific season
+    is_episode_request: bool = Field(default=False)  # True if requesting specific episode
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
     approved_at: Optional[datetime] = None

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Request, Form, HTTPException
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlmodel import Session, select
 from typing import Optional
 from datetime import datetime
@@ -2194,6 +2194,7 @@ async def list_radarr_instances(
         port = settings.get("port", "Unknown")
         use_ssl = settings.get("use_ssl", False)
         protocol = "HTTPS" if use_ssl else "HTTP"
+        enable_integration = settings.get('enable_integration', True)
         
         instances_html += f'''
             <div class="p-4 border-b border-gray-200 last:border-b-0">
@@ -2213,6 +2214,15 @@ async def list_radarr_instances(
                         <div class="mt-1 text-xs text-gray-400">
                             Created: {instance.created_at.strftime("%Y-%m-%d %H:%M") if instance.created_at else "Unknown"}
                             {f' • Last tested: {instance.last_tested_at.strftime("%Y-%m-%d %H:%M")}' if instance.last_tested_at else ''}
+                        </div>
+                        <div class="mt-2 flex items-center">
+                            <span class="text-xs text-gray-600 mr-2">Integration:</span>
+                            <button type="button"
+                                    onclick="toggleServiceIntegration({instance.id}, 'radarr', this)"
+                                    data-enabled="{'true' if enable_integration else 'false'}"
+                                    class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500 focus:ring-offset-1 {'bg-blue-600' if enable_integration else 'bg-gray-300'}">
+                                <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform {'translate-x-3.5' if enable_integration else 'translate-x-0.5'}"></span>
+                            </button>
                         </div>
                     </div>
                     <div class="flex items-center space-x-2">
@@ -2285,7 +2295,47 @@ async def edit_radarr_form(
         minimum_availability = settings.get("minimum_availability", "inCinemas")
         monitored = settings.get("monitored", True)
         search_for_movie = settings.get("search_for_movie", True)
+        enable_scan = settings.get("enable_scan", True)
+        enable_automatic_search = settings.get("enable_automatic_search", True)
+        enable_integration = settings.get("enable_integration", True)
         tags = settings.get("tags", [])
+        
+        # Try to fetch current quality profiles and root folders from Radarr
+        quality_profiles_html = '<option value="">Select quality profile...</option>'
+        root_folders_html = '<option value="">Select root folder...</option>'
+        
+        try:
+            from ..services.radarr_service import RadarrService
+            radarr_service = RadarrService(session)
+            
+            # Set the service to use this specific instance
+            radarr_service.instance = instance
+            radarr_service.base_url = instance.url
+            radarr_service.api_key = instance.api_key
+            radarr_service.headers = {
+                'X-Api-Key': instance.api_key,
+                'Content-Type': 'application/json'
+            } if instance.api_key else {}
+            
+            # Fetch quality profiles
+            profiles = await radarr_service.get_quality_profiles()
+            for profile in profiles:
+                selected = 'selected' if str(profile.get('id')) == str(quality_profile_id) else ''
+                quality_profiles_html += f'<option value="{profile.get("id")}" {selected}>{profile.get("name", "Unknown")}</option>'
+            
+            # Fetch root folders  
+            folders = await radarr_service.get_root_folders()
+            for folder in folders:
+                selected = 'selected' if folder.get('path') == root_folder_path else ''
+                root_folders_html += f'<option value="{folder.get("path")}" {selected}>{folder.get("path")}</option>'
+                
+        except Exception as e:
+            print(f"Could not fetch Radarr data for edit form: {e}")
+            # Fallback to showing saved values if service is unreachable
+            if quality_profile_id:
+                quality_profiles_html += f'<option value="{quality_profile_id}" selected>Profile ID {quality_profile_id} (Saved)</option>'
+            if root_folder_path:
+                root_folders_html += f'<option value="{root_folder_path}" selected>{root_folder_path} (Saved)</option>'
         
         return HTMLResponse(f'''
             <div>
@@ -2383,8 +2433,7 @@ async def edit_radarr_form(
                                     <label for="radarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
                                     <select name="radarr_quality_profile_id" id="radarr_quality_profile_id" 
                                             class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                        <option value="">Select quality profile...</option>
-                                        {f'<option value="{quality_profile_id}" selected>Profile ID {quality_profile_id}</option>' if quality_profile_id else ''}
+                                        {quality_profiles_html}
                                     </select>
                                 </div>
                                 
@@ -2392,8 +2441,7 @@ async def edit_radarr_form(
                                     <label for="radarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
                                     <select name="radarr_root_folder_path" id="radarr_root_folder_path" 
                                             class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                                        <option value="">Select root folder...</option>
-                                        {f'<option value="{root_folder_path}" selected>{root_folder_path}</option>' if root_folder_path else ''}
+                                        {root_folders_html}
                                     </select>
                                 </div>
                                 
@@ -2418,20 +2466,41 @@ async def edit_radarr_form(
                                 </div>
                             </div>
                             
-                            <!-- Monitoring Options -->
-                            <div class="space-y-3">
+                            <!-- Automation Options -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
                                 <div class="flex items-center">
-                                    <input type="checkbox" name="monitored" id="monitored" 
-                                           {"checked" if monitored else ""}
+                                    <input type="checkbox" name="is_default" id="is_default" 
                                            class="h-4 w-4 text-orange-600 border-gray-300 rounded">
-                                    <label for="monitored" class="ml-2 text-sm text-gray-700">Monitor movies by default</label>
+                                    <label for="is_default" class="ml-2 text-sm text-gray-700">
+                                        Default instance for movie requests
+                                    </label>
                                 </div>
                                 
                                 <div class="flex items-center">
-                                    <input type="checkbox" name="search_for_movie" id="search_for_movie" 
-                                           {"checked" if search_for_movie else ""}
+                                    <input type="checkbox" name="enable_scan" id="enable_scan" 
+                                           {"checked" if enable_scan else ""}
                                            class="h-4 w-4 text-orange-600 border-gray-300 rounded">
-                                    <label for="search_for_movie" class="ml-2 text-sm text-gray-700">Search for movies upon adding</label>
+                                    <label for="enable_scan" class="ml-2 text-sm text-gray-700">
+                                        Enable library scanning
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" 
+                                           {"checked" if enable_automatic_search else ""}
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="enable_automatic_search" class="ml-2 text-sm text-gray-700">
+                                        Enable automatic search on approval
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center mt-3">
+                                    <input type="checkbox" name="enable_integration" id="enable_integration" 
+                                           {"checked" if enable_integration else ""}
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="enable_integration" class="ml-2 text-sm text-gray-700">
+                                        Enable automatic integration (send approved requests to Radarr)
+                                    </label>
                                 </div>
                             </div>
                         </div>
@@ -2513,14 +2582,33 @@ async def update_radarr_instance(
         instance.url = radarr_url
         instance.api_key = radarr_api_key
         
-        # Update settings
+        # Update settings - extract all form data with correct field names
+        quality_profile_id = form_data.get("radarr_quality_profile_id", "").strip()
+        root_folder_path = form_data.get("radarr_root_folder_path", "").strip()
+        minimum_availability = form_data.get("minimum_availability", "inCinemas").strip()
+        tags = form_data.get("tags", "").strip()
+        monitored = form_data.get("monitored") == "on"
+        search_for_movie = form_data.get("search_for_movie") == "on"
+        enable_scan = form_data.get("enable_scan") == "on"
+        enable_automatic_search = form_data.get("enable_automatic_search") == "on"
+        enable_integration = form_data.get("enable_integration") == "on"
+        
         from ..models.service_instance import RADARR_DEFAULT_SETTINGS
         settings = RADARR_DEFAULT_SETTINGS.copy()
         settings.update({
             "hostname": radarr_hostname,
             "port": int(radarr_port),
             "use_ssl": use_ssl,
-            "base_url": radarr_base_url
+            "base_url": radarr_base_url,
+            "quality_profile_id": int(quality_profile_id) if quality_profile_id else None,
+            "root_folder_path": root_folder_path if root_folder_path else None,
+            "minimum_availability": minimum_availability,
+            "tags": [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else [],
+            "monitored": monitored,
+            "search_for_movie": search_for_movie,
+            "enable_scan": enable_scan,
+            "enable_automatic_search": enable_automatic_search,
+            "enable_integration": enable_integration
         })
         instance.set_settings(settings)
         
@@ -2554,6 +2642,54 @@ async def update_radarr_instance(
                 <p class="text-red-808 text-sm">✗ Error updating instance: {str(e)}</p>
             </div>
         ''')
+
+
+@router.patch("/services/radarr/{instance_id}/update")
+async def patch_radarr_integration(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Update Radarr integration setting"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.RADARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Radarr instance not found"}
+            )
+        
+        # Parse JSON body
+        body = await request.json()
+        enable_integration = body.get('enable_integration', True)
+        
+        # Update settings
+        settings = instance.get_settings()
+        settings['enable_integration'] = enable_integration
+        instance.set_settings(settings)
+        
+        # Save to database
+        session.add(instance)
+        session.commit()
+        
+        return JSONResponse({"success": True, "enable_integration": enable_integration})
+        
+    except Exception as e:
+        print(f"Error updating Radarr integration: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
 
 
 @router.get("/services/radarr/add", response_class=HTMLResponse)
@@ -2712,10 +2848,20 @@ async def add_radarr_form(
                             </div>
                             
                             <div class="flex items-center">
-                                <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" checked
+                                <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" 
+                                       checked
                                        class="h-4 w-4 text-orange-600 border-gray-300 rounded">
                                 <label for="enable_automatic_search" class="ml-2 text-sm text-gray-700">
                                     Enable automatic search on approval
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center mt-3">
+                                <input type="checkbox" name="enable_integration" id="enable_integration" 
+                                       checked
+                                       class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                <label for="enable_integration" class="ml-2 text-sm text-gray-700">
+                                    Enable automatic integration (send approved requests to Radarr)
                                 </label>
                             </div>
                         </div>
@@ -2937,6 +3083,7 @@ async def create_radarr_instance(
         tags = form_data.get("tags", "").strip()
         monitored = form_data.get("monitored") == "on"
         search_for_movie = form_data.get("search_for_movie") == "on"
+        enable_integration = form_data.get("enable_integration") == "on"
         
         # Validation
         if not radarr_name or not radarr_hostname or not radarr_port or not radarr_api_key:
@@ -2967,7 +3114,8 @@ async def create_radarr_instance(
             "monitored": monitored,
             "search_for_movie": search_for_movie,
             "enable_scan": True,
-            "enable_automatic_search": True
+            "enable_automatic_search": True,
+            "enable_integration": enable_integration
         })
         
         # Create the instance
@@ -3211,9 +3359,12 @@ async def create_sonarr_instance(
         sonarr_root_folder_path = form_data.get("sonarr_root_folder_path", "").strip()
         minimum_availability = form_data.get("minimum_availability", "inCinemas").strip()
         tags = form_data.get("tags", "").strip()
-        monitored = form_data.get("monitored") == "on"
-        season_folder = form_data.get("season_folder") == "on"
-        search_for_missing = form_data.get("search_for_missing_episodes") == "on"
+        external_url = form_data.get("external_url", "").strip()
+        enable_scan = form_data.get("enable_scan") == "on"
+        enable_automatic_search = form_data.get("enable_automatic_search") == "on"
+        enable_integration = form_data.get("enable_integration") == "on"
+        enable_season_folders = form_data.get("enable_season_folders") == "on"
+        anime_standard_format = form_data.get("anime_standard_format") == "on"
         
         # Validation
         if not sonarr_name or not sonarr_hostname or not sonarr_port or not sonarr_api_key:
@@ -3242,11 +3393,12 @@ async def create_sonarr_instance(
             "root_folder_path": sonarr_root_folder_path or None,
             "minimum_availability": minimum_availability,
             "tags": [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else [],
-            "monitored": monitored,
-            "season_folder": season_folder,
-            "search_for_missing_episodes": search_for_missing,
-            "enable_scan": True,
-            "enable_automatic_search": True
+            "external_url": external_url,
+            "enable_scan": enable_scan,
+            "enable_automatic_search": enable_automatic_search,
+            "enable_integration": enable_integration,
+            "season_folder": enable_season_folders,
+            "anime_standard_format": anime_standard_format
         })
         
         # Create the instance
@@ -3447,6 +3599,7 @@ async def list_sonarr_instances(
         port = settings.get("port", "Unknown")
         use_ssl = settings.get("use_ssl", False)
         protocol = "HTTPS" if use_ssl else "HTTP"
+        enable_integration = settings.get('enable_integration', True)
         
         instances_html += f'''
             <div class="p-4 border-b border-gray-200 last:border-b-0">
@@ -3466,6 +3619,15 @@ async def list_sonarr_instances(
                         <div class="mt-1 text-xs text-gray-400">
                             Created: {instance.created_at.strftime("%Y-%m-%d %H:%M") if instance.created_at else "Unknown"}
                             {f' • Last tested: {instance.last_tested_at.strftime("%Y-%m-%d %H:%M")}' if instance.last_tested_at else ''}
+                        </div>
+                        <div class="mt-2 flex items-center">
+                            <span class="text-xs text-gray-600 mr-2">Integration:</span>
+                            <button type="button"
+                                    onclick="toggleServiceIntegration({instance.id}, 'sonarr', this)"
+                                    data-enabled="{'true' if enable_integration else 'false'}"
+                                    class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500 focus:ring-offset-1 {'bg-blue-600' if enable_integration else 'bg-gray-300'}">
+                                <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform {'translate-x-3.5' if enable_integration else 'translate-x-0.5'}"></span>
+                            </button>
                         </div>
                     </div>
                     <div class="flex items-center space-x-2">
@@ -3639,7 +3801,47 @@ async def edit_sonarr_form(
         monitored = settings.get("monitored", True)
         season_folder = settings.get("season_folder", True)
         search_for_missing = settings.get("search_for_missing_episodes", True)
+        enable_scan = settings.get("enable_scan", True)
+        enable_automatic_search = settings.get("enable_automatic_search", True)
+        enable_integration = settings.get("enable_integration", True)
         tags = settings.get("tags", [])
+        
+        # Try to fetch current quality profiles and root folders from Sonarr
+        quality_profiles_html = '<option value="">Select quality profile...</option>'
+        root_folders_html = '<option value="">Select root folder...</option>'
+        
+        try:
+            from ..services.sonarr_service import SonarrService
+            sonarr_service = SonarrService(session)
+            
+            # Set the service to use this specific instance
+            sonarr_service.instance = instance
+            sonarr_service.base_url = instance.url
+            sonarr_service.api_key = instance.api_key
+            sonarr_service.headers = {
+                'X-Api-Key': instance.api_key,
+                'Content-Type': 'application/json'
+            } if instance.api_key else {}
+            
+            # Fetch quality profiles
+            profiles = await sonarr_service.get_quality_profiles()
+            for profile in profiles:
+                selected = 'selected' if str(profile.get('id')) == str(quality_profile_id) else ''
+                quality_profiles_html += f'<option value="{profile.get("id")}" {selected}>{profile.get("name", "Unknown")}</option>'
+            
+            # Fetch root folders  
+            folders = await sonarr_service.get_root_folders()
+            for folder in folders:
+                selected = 'selected' if folder.get('path') == root_folder_path else ''
+                root_folders_html += f'<option value="{folder.get("path")}" {selected}>{folder.get("path")}</option>'
+                
+        except Exception as e:
+            print(f"Could not fetch Sonarr data for edit form: {e}")
+            # Fallback to showing saved values if service is unreachable
+            if quality_profile_id:
+                quality_profiles_html += f'<option value="{quality_profile_id}" selected>Profile ID {quality_profile_id} (Saved)</option>'
+            if root_folder_path:
+                root_folders_html += f'<option value="{root_folder_path}" selected>{root_folder_path} (Saved)</option>'
         
         return HTMLResponse(f'''
             <div>
@@ -3737,8 +3939,7 @@ async def edit_sonarr_form(
                                     <label for="sonarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
                                     <select name="sonarr_quality_profile_id" id="sonarr_quality_profile_id" 
                                             class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
-                                        <option value="">Select quality profile...</option>
-                                        {f'<option value="{quality_profile_id}" selected>Profile ID {quality_profile_id}</option>' if quality_profile_id else ''}
+                                        {quality_profiles_html}
                                     </select>
                                 </div>
                                 
@@ -3755,8 +3956,7 @@ async def edit_sonarr_form(
                                     <label for="sonarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
                                     <select name="sonarr_root_folder_path" id="sonarr_root_folder_path" 
                                             class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
-                                        <option value="">Select root folder...</option>
-                                        {f'<option value="{root_folder_path}" selected>{root_folder_path}</option>' if root_folder_path else ''}
+                                        {root_folders_html}
                                     </select>
                                 </div>
                                 
@@ -3770,27 +3970,63 @@ async def edit_sonarr_form(
                                 </div>
                             </div>
                             
-                            <!-- Monitoring Options -->
-                            <div class="space-y-3">
-                                <div class="flex items-center">
-                                    <input type="checkbox" name="monitored" id="monitored" 
-                                           {"checked" if monitored else ""}
-                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
-                                    <label for="monitored" class="ml-2 text-sm text-gray-700">Monitor series by default</label>
+                            <!-- Advanced Settings (match add form exactly) -->
+                            <div class="border-t pt-6">
+                                <h5 class="text-md font-medium text-gray-900 mb-4">Advanced Settings</h5>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_scan" id="enable_scan" 
+                                               {"checked" if enable_scan else ""}
+                                               class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                        <label for="enable_scan" class="ml-2 text-sm text-gray-700">
+                                            Enable library scanning
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" 
+                                               {"checked" if enable_automatic_search else ""}
+                                               class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                        <label for="enable_automatic_search" class="ml-2 text-sm text-gray-700">
+                                            Enable automatic search on approval
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_integration" id="enable_integration" 
+                                               {"checked" if enable_integration else ""}
+                                               class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                        <label for="enable_integration" class="ml-2 text-sm text-gray-700">
+                                            Enable automatic integration (send approved requests to Sonarr)
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_season_folders" id="enable_season_folders" 
+                                               {"checked" if season_folder else ""}
+                                               class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                        <label for="enable_season_folders" class="ml-2 text-sm text-gray-700">
+                                            Enable season folders
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="anime_standard_format" id="anime_standard_format"
+                                               {"checked" if settings.get('anime_standard_format', False) else ""}
+                                               class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                        <label for="anime_standard_format" class="ml-2 text-sm text-gray-700">
+                                            Use anime standard format
+                                        </label>
+                                    </div>
                                 </div>
                                 
-                                <div class="flex items-center">
-                                    <input type="checkbox" name="season_folder" id="season_folder" 
-                                           {"checked" if season_folder else ""}
-                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
-                                    <label for="season_folder" class="ml-2 text-sm text-gray-700">Use season folders</label>
-                                </div>
-                                
-                                <div class="flex items-center">
-                                    <input type="checkbox" name="search_for_missing_episodes" id="search_for_missing_episodes" 
-                                           {"checked" if search_for_missing else ""}
-                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
-                                    <label for="search_for_missing_episodes" class="ml-2 text-sm text-gray-700">Search for missing episodes</label>
+                                <div class="mt-4">
+                                    <label for="external_url" class="block text-sm font-medium text-gray-700">External URL</label>
+                                    <input type="url" name="external_url" id="external_url" 
+                                           value="{settings.get('external_url', '')}"
+                                           placeholder="https://sonarr.yourdomain.com (optional)"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                                    <p class="mt-1 text-xs text-gray-500">Public URL for external access</p>
                                 </div>
                             </div>
                         </div>
@@ -3872,14 +4108,35 @@ async def update_sonarr_instance(
         instance.url = sonarr_url
         instance.api_key = sonarr_api_key
         
-        # Update settings
+        # Update settings - extract all form data with correct field names
+        quality_profile_id = form_data.get("sonarr_quality_profile_id", "").strip()
+        root_folder_path = form_data.get("sonarr_root_folder_path", "").strip()
+        language_profile_id = form_data.get("sonarr_language_profile_id", "1").strip()
+        tags = form_data.get("tags", "").strip()
+        external_url = form_data.get("external_url", "").strip()
+        enable_scan = form_data.get("enable_scan") == "on"
+        enable_automatic_search = form_data.get("enable_automatic_search") == "on"
+        enable_integration = form_data.get("enable_integration") == "on"
+        enable_season_folders = form_data.get("enable_season_folders") == "on"
+        anime_standard_format = form_data.get("anime_standard_format") == "on"
+        
         from ..models.service_instance import SONARR_DEFAULT_SETTINGS
         settings = SONARR_DEFAULT_SETTINGS.copy()
         settings.update({
             "hostname": sonarr_hostname,
             "port": int(sonarr_port),
             "use_ssl": use_ssl,
-            "base_url": sonarr_base_url
+            "base_url": sonarr_base_url,
+            "quality_profile_id": int(quality_profile_id) if quality_profile_id else None,
+            "root_folder_path": root_folder_path if root_folder_path else None,
+            "language_profile_id": int(language_profile_id) if language_profile_id else 1,
+            "tags": [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else [],
+            "external_url": external_url,
+            "enable_scan": enable_scan,
+            "enable_automatic_search": enable_automatic_search,
+            "enable_integration": enable_integration,
+            "season_folder": enable_season_folders,
+            "anime_standard_format": anime_standard_format
         })
         instance.set_settings(settings)
         
@@ -3913,6 +4170,54 @@ async def update_sonarr_instance(
                 <p class="text-red-800 text-sm">✗ Error updating instance: {str(e)}</p>
             </div>
         ''')
+
+
+@router.patch("/services/sonarr/{instance_id}/update")
+async def patch_sonarr_integration(
+    instance_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Update Sonarr integration setting"""
+    try:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance, ServiceType
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(
+            ServiceInstance.id == instance_id,
+            ServiceInstance.service_type == ServiceType.SONARR
+        )
+        instance = session.exec(statement).first()
+        
+        if not instance:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Sonarr instance not found"}
+            )
+        
+        # Parse JSON body
+        body = await request.json()
+        enable_integration = body.get('enable_integration', True)
+        
+        # Update settings
+        settings = instance.get_settings()
+        settings['enable_integration'] = enable_integration
+        instance.set_settings(settings)
+        
+        # Save to database
+        session.add(instance)
+        session.commit()
+        
+        return JSONResponse({"success": True, "enable_integration": enable_integration})
+        
+    except Exception as e:
+        print(f"Error updating Sonarr integration: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
 
 
 @router.get("/services/sonarr/add", response_class=HTMLResponse)
@@ -4076,10 +4381,20 @@ async def add_sonarr_form(
                         </div>
                         
                         <div class="flex items-center">
-                            <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" checked
+                            <input type="checkbox" name="enable_automatic_search" id="enable_automatic_search" 
+                                   checked
                                    class="h-4 w-4 text-purple-600 border-gray-300 rounded">
                             <label for="enable_automatic_search" class="ml-2 text-sm text-gray-700">
                                 Enable automatic search on approval
+                            </label>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <input type="checkbox" name="enable_integration" id="enable_integration" 
+                                   checked
+                                   class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                            <label for="enable_integration" class="ml-2 text-sm text-gray-700">
+                                Enable automatic integration (send approved requests to Sonarr)
                             </label>
                         </div>
                         

@@ -229,4 +229,65 @@ function toggleSonarrAdvancedSettings() {
         }
     }
 }
+
+// Toggle service integration on/off
+async function toggleServiceIntegration(instanceId, serviceType, button) {
+    const currentEnabled = button.dataset.enabled === 'true';
+    const newEnabled = !currentEnabled;
+    
+    try {
+        // Update button immediately for feedback
+        button.dataset.enabled = newEnabled.toString();
+        if (newEnabled) {
+            button.classList.remove('bg-gray-300');
+            button.classList.add('bg-blue-600');
+            button.querySelector('span').classList.remove('translate-x-0.5');
+            button.querySelector('span').classList.add('translate-x-3.5');
+        } else {
+            button.classList.remove('bg-blue-600');
+            button.classList.add('bg-gray-300');
+            button.querySelector('span').classList.remove('translate-x-3.5');
+            button.querySelector('span').classList.add('translate-x-0.5');
+        }
+        
+        // Get current base URL
+        const baseUrl = '{{ base_url }}' || '';
+        
+        // Send update to server
+        const response = await fetch(`${baseUrl}/admin/services/${serviceType}/${instanceId}/update`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                enable_integration: newEnabled
+            })
+        });
+        
+        if (response.ok) {
+            // Show success message
+            const status = newEnabled ? 'enabled' : 'disabled';
+            console.log(`Integration ${status} for ${serviceType} instance ${instanceId}`);
+        } else {
+            throw new Error('Server error');
+        }
+        
+    } catch (error) {
+        // Revert button state on error
+        button.dataset.enabled = currentEnabled.toString();
+        if (currentEnabled) {
+            button.classList.remove('bg-gray-300');
+            button.classList.add('bg-blue-600');
+            button.querySelector('span').classList.remove('translate-x-0.5');
+            button.querySelector('span').classList.add('translate-x-3.5');
+        } else {
+            button.classList.remove('bg-blue-600');
+            button.classList.add('bg-gray-300');
+            button.querySelector('span').classList.remove('translate-x-3.5');
+            button.querySelector('span').classList.add('translate-x-0.5');
+        }
+        console.error('Error toggling service integration:', error);
+        alert('Error updating service integration setting. Please try again.');
+    }
+}
 </script>

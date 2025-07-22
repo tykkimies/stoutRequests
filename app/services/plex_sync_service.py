@@ -817,6 +817,60 @@ class PlexSyncService:
             # Fallback to 'available' for all items
             return {tmdb_id: 'available' for tmdb_id in tmdb_ids}
     
+    def get_tv_episode_availability(self, tmdb_id: int) -> Dict[str, any]:
+        """
+        Get detailed episode availability data for a TV show.
+        Returns dict with season-by-season and episode-by-episode availability.
+        """
+        try:
+            from sqlmodel import select
+            
+            # Get all available episodes from Plex
+            episodes_query = select(PlexTVItem).where(
+                PlexTVItem.show_tmdb_id == tmdb_id,
+                PlexTVItem.episode_number.isnot(None)  # Only episodes, not seasons
+            )
+            available_episodes = self.session.exec(episodes_query).all()
+            
+            # Get all available seasons from Plex
+            seasons_query = select(PlexTVItem).where(
+                PlexTVItem.show_tmdb_id == tmdb_id,
+                PlexTVItem.episode_number.is_(None),  # Only seasons, not episodes
+                PlexTVItem.season_number > 0  # Exclude specials
+            )
+            available_seasons = self.session.exec(seasons_query).all()
+            
+            # Organize data by season
+            availability_data = {
+                'seasons': {},
+                'summary': {
+                    'total_available_seasons': len(available_seasons),
+                    'total_available_episodes': len(available_episodes),
+                    'available_season_numbers': [s.season_number for s in available_seasons]
+                }
+            }
+            
+            # Group episodes by season
+            for episode in available_episodes:
+                season_num = episode.season_number
+                if season_num not in availability_data['seasons']:
+                    availability_data['seasons'][season_num] = {
+                        'season_available': season_num in availability_data['summary']['available_season_numbers'],
+                        'episodes': []
+                    }
+                
+                availability_data['seasons'][season_num]['episodes'].append({
+                    'episode_number': episode.episode_number,
+                    'episode_title': episode.episode_title,
+                    'available': True
+                })
+            
+            return availability_data
+            
+        except Exception as e:
+            print(f"❌ Error getting TV episode availability: {e}")
+            return {'seasons': {}, 'summary': {}}
+
     def _check_tv_show_completion(self, tmdb_id: int) -> Dict[str, any]:
         """
         Check if a TV show is complete in Plex by comparing against TMDB data.

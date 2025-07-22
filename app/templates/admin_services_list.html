@@ -94,6 +94,20 @@
                         </button>
                     </div>
                     
+                    <!-- Enable Integration Toggle -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="text-xs font-medium text-gray-700">Enable Integration</div>
+                            <div class="text-xs text-gray-500">Send approved requests to this service</div>
+                        </div>
+                        <button type="button"
+                                onclick="toggleAutomationSetting({{ instance.id }}, 'enable_integration', this.dataset.enabled === 'false')"
+                                data-enabled="{{ 'true' if settings.get('enable_integration', True) else 'false' }}"
+                                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 {% if settings.get('enable_integration', True) %}bg-blue-600{% else %}bg-gray-200{% endif %}">
+                            <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform {% if settings.get('enable_integration', True) %}translate-x-5{% else %}translate-x-1{% endif %}"></span>
+                        </button>
+                    </div>
+                    
                     <!-- Enable Automatic Search Toggle -->
                     <!-- DEBUG: enable_automatic_search = {{ settings.get('enable_automatic_search') }} -->
                     <div class="flex items-center justify-between">
@@ -375,8 +389,6 @@ async function editServiceInstance(instanceId) {
         const settings = instance.settings || {};
         if (settings.base_url) {
             document.getElementById('edit-service-base-url').value = settings.base_url;
-            // Also populate the advanced base URL field
-            document.getElementById('edit-service-base-url-advanced').value = settings.base_url;
         }
         
         // Show appropriate service-specific settings
@@ -393,8 +405,9 @@ async function editServiceInstance(instanceId) {
                 document.getElementById('edit-radarr-minimum-availability').value = settings.minimum_availability;
             }
             
-            // Automation settings
+            // Automation settings - use default true for undefined values 
             document.getElementById('edit-radarr-enable-scan').checked = settings.enable_scan !== false;
+            document.getElementById('edit-radarr-enable-integration').checked = settings.enable_integration !== false;
             document.getElementById('edit-radarr-enable-automatic-search').checked = settings.enable_automatic_search !== false;
             document.getElementById('edit-radarr-monitored').checked = settings.monitored !== false;
         } else if (instance.service_type === 'sonarr') {
@@ -408,8 +421,9 @@ async function editServiceInstance(instanceId) {
                 document.getElementById('edit-sonarr-minimum-availability').value = settings.minimum_availability;
             }
             
-            // Automation settings
+            // Automation settings - use default true for undefined values
             document.getElementById('edit-sonarr-enable-scan').checked = settings.enable_scan !== false;
+            document.getElementById('edit-sonarr-enable-integration').checked = settings.enable_integration !== false;
             document.getElementById('edit-sonarr-enable-automatic-search').checked = settings.enable_automatic_search !== false;
             document.getElementById('edit-sonarr-monitored').checked = settings.monitored !== false;
             document.getElementById('edit-sonarr-season-folder').checked = settings.season_folder !== false;
@@ -525,6 +539,7 @@ async function toggleAutomationSetting(instanceId, settingName, newValue) {
         const updateResult = await updateResponse.json();
         
         const settingDisplayNames = {
+            'enable_integration': 'Integration',
             'enable_scan': 'Enable Scan',
             'enable_automatic_search': 'Auto Search',
             'monitored': 'Monitor Default'

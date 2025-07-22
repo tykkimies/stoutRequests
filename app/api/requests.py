@@ -66,7 +66,13 @@ async def integrate_with_services(media_request: MediaRequest, session: Session)
                 print(f"⚠️ Radarr not configured, skipping integration for movie request {media_request.id}")
                 return None
             
+            # Check if integration is disabled
+            if radarr.instance and not radarr.instance.get_settings().get('enable_integration', True):
+                print(f"⚠️ Radarr integration disabled, skipping integration for movie request {media_request.id}")
+                return None
+            
             print(f"🎬 Sending movie '{media_request.title}' (TMDB: {media_request.tmdb_id}) to Radarr...")
+            print(f"🔍 Radarr service instance settings available: {radarr.instance.get_settings() if radarr.instance else 'No instance'}")
             
             # Add a timeout to prevent hanging
             try:
@@ -100,7 +106,32 @@ async def integrate_with_services(media_request: MediaRequest, session: Session)
                 print(f"⚠️ Sonarr not configured, skipping integration for TV request {media_request.id}")
                 return None
             
+            # Check if integration is disabled
+            if sonarr.instance and not sonarr.instance.get_settings().get('enable_integration', True):
+                print(f"⚠️ Sonarr integration disabled, skipping integration for TV request {media_request.id}")
+                return None
+            
             print(f"📺 Sending TV series '{media_request.title}' (TMDB: {media_request.tmdb_id}) to Sonarr...")
+            print(f"🔍 Sonarr service instance settings available: {sonarr.instance.get_settings() if sonarr.instance else 'No instance'}")
+            
+            # Determine monitoring based on request type
+            monitor_type = 'all'
+            season_numbers = None
+            episode_numbers = None
+            
+            if media_request.is_episode_request and media_request.season_number and media_request.episode_number:
+                # This is an episode-specific request
+                monitor_type = 'specificEpisodes'
+                season_numbers = [media_request.season_number]
+                episode_numbers = {media_request.season_number: [media_request.episode_number]}
+                print(f"📺 Episode-specific request: monitoring S{media_request.season_number:02d}E{media_request.episode_number:02d}")
+            elif media_request.is_season_request and media_request.season_number:
+                # This is a season-specific request
+                monitor_type = 'specificSeasons'
+                season_numbers = [media_request.season_number]
+                print(f"📺 Season-specific request: monitoring season {media_request.season_number}")
+            else:
+                print(f"📺 Complete series request: monitoring all seasons")
             
             # Add a timeout to prevent hanging
             try:
@@ -108,7 +139,9 @@ async def integrate_with_services(media_request: MediaRequest, session: Session)
                     sonarr.add_series(
                         tmdb_id=media_request.tmdb_id,
                         user_id=media_request.user_id,
-                        monitor_type='all'  # Default to monitoring all episodes
+                        monitor_type=monitor_type,
+                        season_numbers=season_numbers,
+                        episode_numbers=episode_numbers
                     ),
                     timeout=30.0
                 )
@@ -142,8 +175,10 @@ async def create_request(
     overview: str = Form(""),
     poster_path: str = Form(""),
     release_date: str = Form(""),
-    request_type: str = Form(""),  # For TV shows: complete, season, episode
+    request_type: str = Form(""),  # For TV shows: complete, season, episode, granular
     season_number: Optional[int] = Form(None),  # For season-specific requests
+    selected_seasons: Optional[str] = Form(None),  # JSON string for granular requests
+    selected_episodes: Optional[str] = Form(None),  # JSON string for granular requests  
     request_source: str = Form("main"),  # "main" for main media, "similar_recommended" for cards
     current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
@@ -231,6 +266,209 @@ async def create_request(
 
     # Note: Removed slow Radarr/Sonarr checks during request creation
 
+    # Handle granular TV requests
+    granular_data = None
+    if media_type == 'tv' and request_type == 'granular':
+        try:
+            import json
+            granular_data = {
+                'selected_seasons': json.loads(selected_seasons) if selected_seasons else [],
+                'selected_episodes': json.loads(selected_episodes) if selected_episodes else {}
+            }
+            print(f"🔍 [GRANULAR] Processing granular request for TMDB: {tmdb_id}")
+            print(f"🔍 [GRANULAR] Raw data - selected_seasons: {selected_seasons}")
+            print(f"🔍 [GRANULAR] Raw data - selected_episodes: {selected_episodes}")
+            print(f"🔍 [GRANULAR] Parsed data: {granular_data}")
+            print(f"🔍 [GRANULAR] User: {current_user.username} (ID: {current_user.id})")
+            print(f"🔍 [GRANULAR] Auto-approve enabled: {permissions_service.should_auto_approve(current_user.id, media_type)}")
+            
+            # Process granular requests (seasons and episodes)
+            created_requests = []
+            
+            # Process selected seasons
+            if granular_data['selected_seasons']:
+                for season_num in granular_data['selected_seasons']:
+                    season_num = int(season_num)
+                    
+                    # Check if this season is already requested
+                    existing_season_req = session.exec(select(MediaRequest).where(
+                        MediaRequest.tmdb_id == tmdb_id,
+                        MediaRequest.media_type == MediaType.TV,
+                        MediaRequest.user_id == current_user.id,
+                        MediaRequest.season_number == season_num,
+                        MediaRequest.is_season_request == True
+                    )).first()
+                    
+                    if existing_season_req:
+                        continue  # Skip already requested seasons
+                    
+                    # Create season request
+                    season_request = MediaRequest(
+                        user_id=current_user.id,
+                        tmdb_id=tmdb_id,
+                        media_type=MediaType.TV,
+                        title=f"{title} - Season {season_num}",
+                        overview=overview,
+                        poster_path=poster_path,
+                        release_date=release_date,
+                        season_number=season_num,
+                        is_season_request=True,
+                        status=RequestStatus.APPROVED if permissions_service.should_auto_approve(current_user.id, media_type) else RequestStatus.PENDING,
+                        approved_by=current_user.id if permissions_service.should_auto_approve(current_user.id, media_type) else None,
+                        approved_at=datetime.utcnow() if permissions_service.should_auto_approve(current_user.id, media_type) else None
+                    )
+                    session.add(season_request)
+                    created_requests.append(season_request)
+                    print(f"🔍 [GRANULAR] Created season request: S{season_num} - Status: {season_request.status.value}")
+            
+            # Process selected episodes
+            if granular_data['selected_episodes']:
+                for season_num_str, episode_numbers in granular_data['selected_episodes'].items():
+                    season_num = int(season_num_str)
+                    
+                    for episode_num in episode_numbers:
+                        episode_num = int(episode_num)
+                        
+                        # Check if this episode is already requested
+                        existing_episode_req = session.exec(select(MediaRequest).where(
+                            MediaRequest.tmdb_id == tmdb_id,
+                            MediaRequest.media_type == MediaType.TV,
+                            MediaRequest.user_id == current_user.id,
+                            MediaRequest.season_number == season_num,
+                            MediaRequest.episode_number == episode_num,
+                            MediaRequest.is_episode_request == True
+                        )).first()
+                        
+                        if existing_episode_req:
+                            continue  # Skip already requested episodes
+                        
+                        # Create episode request
+                        episode_request = MediaRequest(
+                            user_id=current_user.id,
+                            tmdb_id=tmdb_id,
+                            media_type=MediaType.TV,
+                            title=f"{title} - S{season_num:02d}E{episode_num:02d}",
+                            overview=overview,
+                            poster_path=poster_path,
+                            release_date=release_date,
+                            season_number=season_num,
+                            episode_number=episode_num,
+                            is_episode_request=True,
+                            status=RequestStatus.APPROVED if permissions_service.should_auto_approve(current_user.id, media_type) else RequestStatus.PENDING,
+                            approved_by=current_user.id if permissions_service.should_auto_approve(current_user.id, media_type) else None,
+                            approved_at=datetime.utcnow() if permissions_service.should_auto_approve(current_user.id, media_type) else None
+                        )
+                        session.add(episode_request)
+                        created_requests.append(episode_request)
+                        print(f"🔍 [GRANULAR] Created episode request: S{season_num:02d}E{episode_num:02d} - Status: {episode_request.status.value}")
+            
+            # Commit all requests
+            if created_requests:
+                session.commit()
+                
+                # For approved requests, integrate with services ONCE with consolidated data
+                approved_requests = [r for r in created_requests if r.status == RequestStatus.APPROVED]
+                print(f"🔍 [GRANULAR] Total created requests: {len(created_requests)}")
+                print(f"🔍 [GRANULAR] Approved requests: {len(approved_requests)}")
+                
+                if approved_requests:
+                    # Coordinate Sonarr integration - send one consolidated request
+                    season_numbers = set()
+                    episode_numbers = {}
+                    
+                    for req in approved_requests:
+                        if req.is_season_request and req.season_number:
+                            season_numbers.add(req.season_number)
+                            print(f"🔍 [GRANULAR] Added season {req.season_number} to Sonarr request")
+                        elif req.is_episode_request and req.season_number and req.episode_number:
+                            if req.season_number not in episode_numbers:
+                                episode_numbers[req.season_number] = []
+                            episode_numbers[req.season_number].append(req.episode_number)
+                            print(f"🔍 [GRANULAR] Added episode S{req.season_number:02d}E{req.episode_number:02d} to Sonarr request")
+                    
+                    print(f"🔍 [GRANULAR] Final consolidated data - Seasons: {list(season_numbers)}, Episodes: {episode_numbers}")
+                    
+                    # Send consolidated request to Sonarr
+                    if season_numbers or episode_numbers:
+                        from ..services.sonarr_service import SonarrService
+                        sonarr = SonarrService(session)
+                        
+                        print(f"🔍 [GRANULAR] Sonarr service - URL: {sonarr.base_url}, API Key: {'***' + (sonarr.api_key[-4:] if sonarr.api_key else 'None')}")
+                        
+                        if sonarr.base_url and sonarr.api_key:
+                            print(f"📺 [GRANULAR] Sending consolidated granular request to Sonarr for TMDB: {tmdb_id}")
+                            print(f"🔍 [GRANULAR] Seasons: {list(season_numbers)}, Episodes: {episode_numbers}")
+                            
+                            try:
+                                # Determine monitoring type
+                                if episode_numbers and not season_numbers:
+                                    monitor_type = 'specificEpisodes'
+                                    season_nums = list(episode_numbers.keys())
+                                    print(f"🔍 [GRANULAR] Monitor type: specificEpisodes, seasons: {season_nums}")
+                                elif season_numbers and not episode_numbers:
+                                    monitor_type = 'specificSeasons' 
+                                    season_nums = list(season_numbers)
+                                    print(f"🔍 [GRANULAR] Monitor type: specificSeasons, seasons: {season_nums}")
+                                else:
+                                    # Mixed request - episodes take precedence
+                                    monitor_type = 'specificEpisodes'
+                                    season_nums = list(set(list(season_numbers) + list(episode_numbers.keys())))
+                                    print(f"🔍 [GRANULAR] Monitor type: specificEpisodes (mixed), seasons: {season_nums}")
+                                
+                                print(f"🔍 [GRANULAR] Calling sonarr.add_series with monitor_type={monitor_type}")
+                                result = await sonarr.add_series(
+                                    tmdb_id=tmdb_id,
+                                    user_id=current_user.id,
+                                    monitor_type=monitor_type,
+                                    season_numbers=season_nums,
+                                    episode_numbers=episode_numbers if episode_numbers else None
+                                )
+                                
+                                if result:
+                                    print(f"✅ [GRANULAR] Consolidated granular request integrated with Sonarr: {result.get('title')}")
+                                else:
+                                    print(f"❌ [GRANULAR] Failed to send consolidated granular request to Sonarr")
+                            except Exception as e:
+                                print(f"❌ [GRANULAR] Error sending consolidated request to Sonarr: {e}")
+                                import traceback
+                                traceback.print_exc()
+                        else:
+                            print(f"⚠️ [GRANULAR] Sonarr not configured, skipping integration for granular requests")
+                    else:
+                        print(f"⚠️ [GRANULAR] No approved seasons or episodes to send to Sonarr")
+                
+                # Count different types of requests
+                season_requests = [r for r in created_requests if r.is_season_request]
+                episode_requests = [r for r in created_requests if r.is_episode_request]
+                
+                # Build success message
+                parts = []
+                if season_requests:
+                    parts.append(f"{len(season_requests)} season{'s' if len(season_requests) != 1 else ''}")
+                if episode_requests:
+                    parts.append(f"{len(episode_requests)} episode{'s' if len(episode_requests) != 1 else ''}")
+                
+                if parts:
+                    message = f"Requested {' and '.join(parts)}!"
+                    return HTMLResponse(f'''<div class="inline-flex items-center px-3 py-2 border border-green-300 text-sm leading-4 font-medium rounded-md text-green-700 bg-green-50">
+                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                        </svg>
+                        {message}
+                    </div>''')
+            
+            # No new requests were created
+            return HTMLResponse('''<div class="inline-flex items-center px-3 py-2 border border-yellow-300 text-sm leading-4 font-medium rounded-md text-yellow-700 bg-yellow-50">
+                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                </svg>
+                All selected content already requested
+            </div>''')
+            
+        except Exception as e:
+            print(f"❌ Error processing granular request: {e}")
+            # Fall back to regular request processing
+
     # Determine initial status based on auto-approval
     initial_status = RequestStatus.PENDING
     approved_by = None
@@ -265,18 +503,16 @@ async def create_request(
         permissions_service.increment_user_request_count(current_user.id)
     
     # 🎬 NEW: Automatic Service Integration for Auto-Approved Requests
-    integration_message = ""
     if initial_status == RequestStatus.APPROVED:
         integration_result = await integrate_with_services(new_request, session)
         if integration_result:
-            integration_message = f" and sent to {integration_result['service']}"
             print(f"✅ Auto-approved request {new_request.id} integrated with {integration_result['service']}")
         else:
             print(f"⚠️ Auto-approved request {new_request.id} could not be integrated (services may not be configured)")
 
     # Return appropriate message based on initial status
     if initial_status == RequestStatus.APPROVED:
-        message = f"Auto-approved{integration_message}!"
+        message = "Auto-approved!"
         color_class = "blue"
     else:
         message = "Requested!"
@@ -559,11 +795,9 @@ async def approve_request(
     
     # 🎬 NEW: Automatic Service Integration
     # Send approved request to Radarr/Sonarr if services are configured
-    integration_message = ""
     if was_pending:  # Only integrate newly approved requests, not already approved ones
         integration_result = await integrate_with_services(media_request, session)
         if integration_result:
-            integration_message = f" and sent to {integration_result['service']}"
             print(f"✅ Successfully integrated request {request_id} with {integration_result['service']}")
         else:
             print(f"⚠️ Could not integrate request {request_id} with services (may not be configured)")
@@ -657,7 +891,7 @@ async def approve_request(
             ''')
     else:
         # Regular API response
-        return {"message": f"Request approved{integration_message}"}
+        return {"message": "Request approved"}
 
 
 @router.post("/{request_id}/reject")

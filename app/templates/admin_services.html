@@ -193,6 +193,15 @@
                                     </div>
                                     
                                     <div class="flex items-center">
+                                        <input type="checkbox" name="enable_integration" id="edit-radarr-enable-integration" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-radarr-enable-integration" class="ml-2 text-sm text-gray-700">
+                                            Enable Integration
+                                            <span class="text-xs text-gray-500 block">Send approved requests to this service</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
                                         <input type="checkbox" name="enable_automatic_search" id="edit-radarr-enable-automatic-search" checked 
                                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
                                         <label for="edit-radarr-enable-automatic-search" class="ml-2 text-sm text-gray-700">
@@ -252,6 +261,15 @@
                                         <label for="edit-sonarr-enable-scan" class="ml-2 text-sm text-gray-700">
                                             Enable Scan
                                             <span class="text-xs text-gray-500 block">Automatically refresh metadata and check for files</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_integration" id="edit-sonarr-enable-integration" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="edit-sonarr-enable-integration" class="ml-2 text-sm text-gray-700">
+                                            Enable Integration
+                                            <span class="text-xs text-gray-500 block">Send approved requests to this service</span>
                                         </label>
                                     </div>
                                     
@@ -458,6 +476,15 @@
                                     </div>
                                     
                                     <div class="flex items-center">
+                                        <input type="checkbox" name="enable_integration" id="radarr-enable-integration" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="radarr-enable-integration" class="ml-2 text-sm text-gray-700">
+                                            Enable Integration
+                                            <span class="text-xs text-gray-500 block">Send approved requests to this service</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
                                         <input type="checkbox" name="enable_automatic_search" id="radarr-enable-automatic-search" checked 
                                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
                                         <label for="radarr-enable-automatic-search" class="ml-2 text-sm text-gray-700">
@@ -517,6 +544,15 @@
                                         <label for="sonarr-enable-scan" class="ml-2 text-sm text-gray-700">
                                             Enable Scan
                                             <span class="text-xs text-gray-500 block">Automatically refresh metadata and check for files</span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="enable_integration" id="sonarr-enable-integration" checked 
+                                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                        <label for="sonarr-enable-integration" class="ml-2 text-sm text-gray-700">
+                                            Enable Integration
+                                            <span class="text-xs text-gray-500 block">Send approved requests to this service</span>
                                         </label>
                                     </div>
                                     
@@ -824,15 +860,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Automation settings - read from specific add modal checkboxes
                 const enableScanChecked = document.getElementById('radarr-enable-scan').checked;
+                const enableIntegrationChecked = document.getElementById('radarr-enable-integration').checked;
                 const enableAutoSearchChecked = document.getElementById('radarr-enable-automatic-search').checked;
                 const monitoredChecked = document.getElementById('radarr-monitored').checked;
                 
                 console.log('DEBUG: Radarr automation checkbox states:', {
                     enable_scan: enableScanChecked,
+                    enable_integration: enableIntegrationChecked,
                     enable_automatic_search: enableAutoSearchChecked,
                     monitored: monitoredChecked
                 });
                 serviceData.settings.enable_scan = enableScanChecked;
+                serviceData.settings.enable_integration = enableIntegrationChecked;
                 serviceData.settings.enable_automatic_search = enableAutoSearchChecked;
                 serviceData.settings.monitored = monitoredChecked;
             } else if (serviceData.service_type === 'sonarr') {
@@ -843,17 +882,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Automation settings - read from specific add modal checkboxes
                 const enableScanChecked = document.getElementById('sonarr-enable-scan').checked;
+                const enableIntegrationChecked = document.getElementById('sonarr-enable-integration').checked;
                 const enableAutoSearchChecked = document.getElementById('sonarr-enable-automatic-search').checked;
                 const monitoredChecked = document.getElementById('sonarr-monitored').checked;
                 const seasonFolderChecked = document.getElementById('sonarr-season-folder').checked;
                 
                 console.log('DEBUG: Sonarr automation checkbox states:', {
                     enable_scan: enableScanChecked,
+                    enable_integration: enableIntegrationChecked,
                     enable_automatic_search: enableAutoSearchChecked,
                     monitored: monitoredChecked,
                     season_folder: seasonFolderChecked
                 });
                 serviceData.settings.enable_scan = enableScanChecked;
+                serviceData.settings.enable_integration = enableIntegrationChecked;
                 serviceData.settings.enable_automatic_search = enableAutoSearchChecked;
                 serviceData.settings.monitored = monitoredChecked;
                 serviceData.settings.season_folder = seasonFolderChecked;
@@ -1224,6 +1266,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Automation settings
                 serviceData.settings.enable_scan = formData.get('enable_scan') === 'on';
+                serviceData.settings.enable_integration = formData.get('enable_integration') === 'on';
                 serviceData.settings.enable_automatic_search = formData.get('enable_automatic_search') === 'on';
                 serviceData.settings.monitored = formData.get('monitored') === 'on';
             } else if (serviceType === 'sonarr') {
@@ -1234,6 +1277,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Automation settings
                 serviceData.settings.enable_scan = formData.get('enable_scan') === 'on';
+                serviceData.settings.enable_integration = formData.get('enable_integration') === 'on';
                 serviceData.settings.enable_automatic_search = formData.get('enable_automatic_search') === 'on';
                 serviceData.settings.monitored = formData.get('monitored') === 'on';
                 serviceData.settings.season_folder = formData.get('season_folder') === 'on';

@@ -241,7 +241,8 @@ RADARR_DEFAULT_SETTINGS = {
     "monitored": True,
     "search_for_movie": True,  # Enable Automatic Search
     "enable_scan": True,  # Enable Scan - refreshes metadata and checks for files
-    "enable_automatic_search": True  # Enable Automatic Search for new releases
+    "enable_automatic_search": True,  # Enable Automatic Search for new releases
+    "enable_integration": True  # Enable automatic integration when requests are approved
 }
 
 SONARR_DEFAULT_SETTINGS = {
@@ -263,5 +264,6 @@ SONARR_DEFAULT_SETTINGS = {
     "season_folder": True,
     "search_for_missing_episodes": True,  # Enable Automatic Search
     "enable_scan": True,  # Enable Scan - refreshes metadata and checks for files
-    "enable_automatic_search": True  # Enable Automatic Search for new releases
+    "enable_automatic_search": True,  # Enable Automatic Search for new releases
+    "enable_integration": True  # Enable automatic integration when requests are approved
 }

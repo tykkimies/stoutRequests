@@ -160,8 +160,11 @@ class RadarrService:
                 print(f"⚠️ Movie already exists in Radarr with ID: {existing_movie.get('id')}")
                 return existing_movie  # Return existing movie data instead of failing
             
+            print(f"🔍 Initial quality_profile_id parameter: {quality_profile_id}")
+            
             # Get default settings if not provided
             if not quality_profile_id:
+                print("🔍 No quality profile provided, checking user permissions...")
                 # First try user permissions
                 if user_id:
                     from ..models.user_permissions import UserPermissions
@@ -170,14 +173,19 @@ class RadarrService:
                     user_perms = self.session.exec(user_perms_stmt).first()
                     if user_perms and user_perms.movie_quality_profile_id:
                         quality_profile_id = user_perms.movie_quality_profile_id
+                        print(f"🔍 Using user permission quality profile: {quality_profile_id}")
                 
                 # Then try service instance settings
                 if not quality_profile_id and self.instance:
+                    print("🔍 Checking service instance settings...")
                     settings = self.instance.get_settings()
                     quality_profile_id = settings.get('quality_profile_id')
+                    print(f"🔍 Service instance quality profile setting: {quality_profile_id}")
+                    print(f"🔍 All service instance settings: {settings}")
                 
                 # Finally fallback to first available
                 if not quality_profile_id:
+                    print("🔍 No configured quality profile found, using default...")
                     profiles = await self.get_quality_profiles()
                     if profiles:
                         quality_profile_id = profiles[0]['id']
@@ -185,15 +193,22 @@ class RadarrService:
                     else:
                         print("❌ No quality profiles available in Radarr")
                         return None
+            else:
+                print(f"🔍 Using provided quality profile: {quality_profile_id}")
+            
+            print(f"🔍 Initial root_folder_path parameter: {root_folder_path}")
             
             if not root_folder_path:
+                print("🔍 No root folder provided, checking service instance settings...")
                 # Try service instance settings first
                 if self.instance:
                     settings = self.instance.get_settings()
                     root_folder_path = settings.get('root_folder_path')
+                    print(f"🔍 Service instance root folder setting: {root_folder_path}")
                 
                 # Fallback to first available
                 if not root_folder_path:
+                    print("🔍 No configured root folder found, using default...")
                     folders = await self.get_root_folders()
                     if folders:
                         root_folder_path = folders[0]['path']
@@ -201,12 +216,16 @@ class RadarrService:
                     else:
                         print("❌ No root folders available in Radarr")
                         return None
+            else:
+                print(f"🔍 Using provided root folder: {root_folder_path}")
             
             # Get additional settings from service instance
             settings = self.instance.get_settings() if self.instance else {}
             minimum_availability = settings.get('minimum_availability', 'released')
             monitored = settings.get('monitored', True)
             search_for_movie = settings.get('search_for_movie', True)
+            print(f"🔍 Radarr search_for_movie setting: {search_for_movie}")
+            print(f"🔍 All Radarr settings: {settings}")
             
             # Prepare movie data for adding - ensure required fields are present
             add_data = {
@@ -238,6 +257,7 @@ class RadarrService:
             if tags:
                 add_data['tags'] = tags
             
+            print(f"🔍 Final quality profile ID being sent to Radarr: {quality_profile_id}")
             print(f"🔍 Radarr payload for '{movie_data['title']}': {add_data}")
             
             async with httpx.AsyncClient(follow_redirects=True) as client:
