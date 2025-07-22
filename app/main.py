@@ -1646,12 +1646,20 @@ def get_default_categories():
             'order': 2
         },
         {
+            'id': 'recommended-for-you',
+            'title': '✨ Recommended for You',
+            'type': 'recommendations',
+            'sort': 'personalized',
+            'color': 'pink',
+            'order': 3
+        },
+        {
             'id': 'trending-movies',
             'title': '🔥 Trending Movies', 
             'type': 'movie',
             'sort': 'trending',
             'color': 'red',
-            'order': 3
+            'order': 4
         },
         {
             'id': 'popular-movies',
@@ -1659,7 +1667,7 @@ def get_default_categories():
             'type': 'movie', 
             'sort': 'popular',
             'color': 'yellow',
-            'order': 4
+            'order': 5
         },
         {
             'id': 'trending-tv',
@@ -1667,7 +1675,7 @@ def get_default_categories():
             'type': 'tv',
             'sort': 'trending', 
             'color': 'purple',
-            'order': 5
+            'order': 6
         },
         {
             'id': 'popular-tv',
@@ -1675,7 +1683,7 @@ def get_default_categories():
             'type': 'tv',
             'sort': 'popular',
             'color': 'indigo', 
-            'order': 6
+            'order': 7
         },
         # Additional categories that users can enable
         {
@@ -1684,7 +1692,7 @@ def get_default_categories():
             'type': 'movie',
             'sort': 'top_rated',
             'color': 'orange',
-            'order': 7
+            'order': 8
         },
         {
             'id': 'upcoming-movies',
@@ -1692,7 +1700,7 @@ def get_default_categories():
             'type': 'movie',
             'sort': 'upcoming',
             'color': 'blue',
-            'order': 8
+            'order': 9
         },
         {
             'id': 'top-rated-tv',
@@ -1700,7 +1708,7 @@ def get_default_categories():
             'type': 'tv',
             'sort': 'top_rated',
             'color': 'emerald',
-            'order': 9
+            'order': 10
         }
     ]
 
@@ -1730,9 +1738,9 @@ def get_user_categories(user_id: int, session: Session):
             # Use user's custom order
             category['order'] = user_pref.display_order
         else:
-            # For default categories (first 6), show by default
-            # For additional categories (7+), hide by default unless user explicitly enabled
-            if category['order'] > 6:
+            # For default categories (first 7), show by default
+            # For additional categories (8+), hide by default unless user explicitly enabled
+            if category['order'] > 7:
                 continue
         
         customized_categories.append(category)
@@ -1855,8 +1863,8 @@ async def category_settings_page(
             category['user_visible'] = user_pref.is_visible
             category['user_order'] = user_pref.display_order
         else:
-            # Default visibility (first 6 categories visible, rest hidden)
-            category['user_visible'] = category['order'] <= 6
+            # Default visibility (first 7 categories visible, rest hidden)
+            category['user_visible'] = category['order'] <= 7
             category['user_order'] = category['order']
     
     return create_template_response(
@@ -1894,7 +1902,7 @@ async def quick_add_categories(
         user_pref = prefs_dict.get(cat_id)
         
         # If user has preference and it's hidden, or no preference and it's an additional category
-        is_hidden = (user_pref and not user_pref.is_visible) or (not user_pref and category['order'] > 6)
+        is_hidden = (user_pref and not user_pref.is_visible) or (not user_pref and category['order'] > 7)
         
         if is_hidden:
             available_categories.append(category)
@@ -1929,7 +1937,7 @@ async def quick_enable_category(
     # Find the highest current order
     stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
     user_prefs = session.exec(stmt).all()
-    max_order = max([pref.display_order for pref in user_prefs] + [6])  # Default categories go up to 6
+    max_order = max([pref.display_order for pref in user_prefs] + [7])  # Default categories go up to 7
     
     # Check if preference exists
     stmt = select(UserCategoryPreferences).where(
@@ -1998,8 +2006,8 @@ async def categories_customize_mode(
             category['user_visible'] = user_pref.is_visible
             category['user_order'] = user_pref.display_order
         else:
-            # Default visibility (first 6 categories visible, rest hidden)
-            category['user_visible'] = category['order'] <= 6
+            # Default visibility (first 7 categories visible, rest hidden)
+            category['user_visible'] = category['order'] <= 7
             category['user_order'] = category['order']
         
         if category['user_visible']:
@@ -2127,7 +2135,7 @@ async def add_single_category(
     # Find the highest current order
     stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
     user_prefs = session.exec(stmt).all()
-    max_order = max([pref.display_order for pref in user_prefs] + [6])  # Default categories go up to 6
+    max_order = max([pref.display_order for pref in user_prefs] + [7])  # Default categories go up to 7
     
     # Check if preference exists
     stmt = select(UserCategoryPreferences).where(
@@ -2685,10 +2693,22 @@ async def media_detail(
                 self.can_request_tv = permissions_service.can_request_media_type(user_id, 'tv') if user_id else False
                 self.can_request_4k = permissions_service.can_request_4k(user_id) if user_id else False
                 # Add admin navigation permissions needed by base template
-                self.can_manage_settings = permissions_service.has_permission(user_id, 'admin_manage_settings') if user_id else False
-                self.can_manage_users = permissions_service.has_permission(user_id, 'admin_manage_users') if user_id else False
-                self.can_approve_requests = permissions_service.has_permission(user_id, 'request_approve') if user_id else False
-                self.can_library_sync = permissions_service.has_permission(user_id, 'admin_library_sync') if user_id else False
+                # Import PermissionFlags to use correct constants
+                from .models.role import PermissionFlags
+                
+                # Add error handling for permission checks to prevent 500 errors for Plex users
+                try:
+                    self.can_manage_settings = permissions_service.has_permission(user_id, PermissionFlags.ADMIN_MANAGE_SETTINGS) if user_id else False
+                    self.can_manage_users = permissions_service.has_permission(user_id, PermissionFlags.ADMIN_MANAGE_USERS) if user_id else False
+                    self.can_approve_requests = permissions_service.has_permission(user_id, PermissionFlags.ADMIN_APPROVE_REQUESTS) if user_id else False
+                    self.can_library_sync = permissions_service.has_permission(user_id, PermissionFlags.ADMIN_LIBRARY_SYNC) if user_id else False
+                except Exception as e:
+                    print(f"⚠️ Error checking admin permissions for user {user_id}: {e}")
+                    # Default to False for all admin permissions if error occurs
+                    self.can_manage_settings = False
+                    self.can_manage_users = False
+                    self.can_approve_requests = False
+                    self.can_library_sync = False
         
         user_permissions = UserPermissionsTemplate(permissions_service, current_user.id) if current_user else None
         

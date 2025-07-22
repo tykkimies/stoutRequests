@@ -118,6 +118,10 @@
                     </svg>
                     Media Type Permissions
                 </h5>
+                <p class="text-xs text-gray-600 mb-3">
+                    ⚡ Check boxes to <strong>explicitly grant</strong> permissions beyond the user's role. 
+                    Leave unchecked to <strong>inherit from role</strong> ({{ user_role.display_name if user_role else 'No Role' }}).
+                </p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="space-y-3">
                         <div class="flex items-center">
@@ -126,7 +130,7 @@
                                 name="can_request_movies" 
                                 id="can_request_movies"
                                 value="true"
-                                {% if user_permissions and user_permissions.can_request_movies %}checked{% endif %}
+                                {% if template_effective_permissions.can_request_movies %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
                             <label for="can_request_movies" class="ml-2 text-sm text-gray-700 flex items-center">
@@ -143,7 +147,7 @@
                                 name="can_request_tv" 
                                 id="can_request_tv"
                                 value="true"
-                                {% if user_permissions and user_permissions.can_request_tv %}checked{% endif %}
+                                {% if template_effective_permissions.can_request_tv %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
                             <label for="can_request_tv" class="ml-2 text-sm text-gray-700 flex items-center">
@@ -162,7 +166,7 @@
                                 name="can_request_4k" 
                                 id="can_request_4k"
                                 value="true"
-                                {% if user_permissions and user_permissions.can_request_4k %}checked{% endif %}
+                                {% if template_effective_permissions.can_request_4k %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
                             <label for="can_request_4k" class="ml-2 text-sm text-gray-700 flex items-center">
@@ -210,7 +214,7 @@
                                 type="checkbox" 
                                 name="auto_approve" 
                                 id="auto_approve"
-                                {% if user_permissions and user_permissions.auto_approve_enabled %}checked{% endif %}
+                                {% if template_effective_permissions.auto_approve_enabled %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
                             <label for="auto_approve" class="ml-2 text-sm text-gray-700 flex items-center">

@@ -666,10 +666,17 @@ async def users_list(
             status_text = "Active" if user.is_active else "Inactive"
             
             # Get role info using helper function
-            user_display = get_user_display_info(user, session)
-            role_text = user_display["role_text"]
-            role_color = user_display["role_color"]
-            is_server_owner = user_display.get("is_server_owner", False)
+            try:
+                user_display = get_user_display_info(user, session)
+                role_text = user_display["role_text"]
+                role_color = user_display["role_color"] 
+                is_server_owner = user_display.get("is_server_owner", False)
+            except Exception as role_error:
+                print(f"❌ Error getting display info for user {user.username} (ID: {user.id}): {role_error}")
+                # Fallback values
+                role_text = "Unknown"
+                role_color = "gray"
+                is_server_owner = False
             
             # Format join date safely
             join_date = user.created_at.strftime('%Y-%m-%d') if user.created_at else 'Unknown'
@@ -680,8 +687,11 @@ async def users_list(
             is_test_user = plex_id is not None and plex_id < 0
             
             # Escape HTML special characters in user data
-            username = str(user.username).replace('<', '&lt;').replace('>', '&gt;')
-            full_name = str(user.full_name or user.username).replace('<', '&lt;').replace('>', '&gt;')
+            username = str(user.username or '').replace('<', '&lt;').replace('>', '&gt;')
+            full_name = str(user.full_name or user.username or 'Unknown User').replace('<', '&lt;').replace('>', '&gt;')
+            
+            # Safe username initial - handle empty usernames
+            username_initial = username[0].upper() if username else '?'
             
             html_content += f"""
                 <tr>
@@ -689,7 +699,7 @@ async def users_list(
                         <div class="flex items-center">
                             <div class="flex-shrink-0 h-10 w-10">
                                 <div class="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
-                                    <span class="text-sm font-medium text-gray-700">{username[0].upper()}</span>
+                                    <span class="text-sm font-medium text-gray-700">{username_initial}</span>
                                 </div>
                             </div>
                             <div class="ml-4">
@@ -788,7 +798,9 @@ async def users_list(
                 </tr>
         """
         except Exception as e:
-            print(f"Error processing user {getattr(user, 'username', 'unknown')}: {e}")
+            print(f"❌ Error processing user {getattr(user, 'username', 'unknown')} (ID: {getattr(user, 'id', 'unknown')}): {e}")
+            import traceback
+            print(f"❌ Full traceback: {traceback.format_exc()}")
             # Skip this user and continue with the rest
             continue
     
@@ -1136,10 +1148,41 @@ async def get_user_permissions_page(
     # Get all available roles
     roles = permissions_service.get_all_roles()
     
-    # Get user's current permissions
+    # Get user's current permissions  
     user_permissions = permissions_service.get_user_permissions(user_id)
     user_role = permissions_service.get_user_role(user_id)
     effective_permissions = permissions_service.get_user_effective_permissions(user_id)
+    
+    print(f"🔍 LOADING PERMISSIONS MODAL for user_id: {user_id}")
+    print(f"🔍 User permissions found: {user_permissions is not None}")
+    if user_permissions:
+        print(f"🔍 Role ID: {user_permissions.role_id}")
+        print(f"🔍 Auto-approve: {user_permissions.auto_approve_enabled}")
+        print(f"🔍 Movies: {user_permissions.can_request_movies}")
+        print(f"🔍 TV: {user_permissions.can_request_tv}")
+        print(f"🔍 4K: {user_permissions.can_request_4k}")
+        print(f"🔍 Updated at: {user_permissions.updated_at}")
+    else:
+        print("🔍 No user permissions found - will create defaults")
+    
+    print(f"🔍 User role: {user_role.display_name if user_role else 'None'}")
+    print(f"🔍 Effective permissions object: {type(effective_permissions)}")
+    print(f"🔍 Effective permissions: {effective_permissions}")
+    
+    # Test specific effective permissions for the checkboxes
+    can_movies_effective = permissions_service.can_request_media_type(user_id, 'movie')
+    can_tv_effective = permissions_service.can_request_media_type(user_id, 'tv')
+    can_4k_effective = permissions_service.can_request_4k(user_id)
+    print(f"🔍 Effective - Movies: {can_movies_effective}, TV: {can_tv_effective}, 4K: {can_4k_effective}")
+    
+    # Create a custom effective permissions object for the template
+    template_effective_permissions = {
+        'can_request_movies': can_movies_effective,
+        'can_request_tv': can_tv_effective,
+        'can_request_4k': can_4k_effective,
+        'auto_approve_enabled': user_permissions.auto_approve_enabled if user_permissions else False
+    }
+    print(f"🔍 Template effective permissions: {template_effective_permissions}")
     
     # Get all permission flags with descriptions
     all_permissions = PermissionFlags.get_all_permissions()
@@ -1158,6 +1201,7 @@ async def get_user_permissions_page(
                 "user_role": user_role,
                 "roles": roles,
                 "effective_permissions": effective_permissions,
+                "template_effective_permissions": template_effective_permissions,
                 "all_permissions": all_permissions,
                 "base_url": base_url
             }
@@ -1316,11 +1360,11 @@ class UserPermissionsUpdate(BaseModel):
     role_id: Optional[int] = None
     max_requests: Optional[int] = None
     auto_approve: bool = False
-    can_request_movies: bool = False
-    can_request_tv: bool = False
-    can_request_4k: bool = False
-    can_view_other_users_requests: bool = False
-    can_see_requester_username: bool = False
+    can_request_movies: Optional[bool] = None  # None = inherit from role
+    can_request_tv: Optional[bool] = None
+    can_request_4k: Optional[bool] = None
+    can_view_other_users_requests: Optional[bool] = None
+    can_see_requester_username: Optional[bool] = None
 
 
 @router.post("/users/{user_id}/permissions/save")
@@ -1333,13 +1377,17 @@ async def save_user_permissions(
 ):
     """Save all user permissions in one go (accepts JSON)"""
     try:
-        print(f"🔍 SAVE PERMISSIONS ENDPOINT HIT!")
+        print(f"🔍 SAVE PERMISSIONS ENDPOINT HIT for user_id: {user_id}")
         print(f"🔍 Request method: {request.method}")
-        print(f"🔍 Request URL: {request.url}")
-        print(f"🔍 Request headers: {dict(request.headers)}")
-        print(f"🔍 HX-Request header: {request.headers.get('HX-Request')}")
         print(f"🔍 Content-Type: {request.headers.get('Content-Type')}")
-        print(f"🔍 JSON data: {permissions_data}")
+        print(f"🔍 Permissions data: {permissions_data}")
+        print(f"🔍 Role ID to assign: {permissions_data.role_id}")
+        print(f"🔍 Auto-approve: {permissions_data.auto_approve}")
+        print(f"🔍 Can request movies: {permissions_data.can_request_movies} (None=inherit, True=allow, False=deny)")
+        print(f"🔍 Can request TV: {permissions_data.can_request_tv} (None=inherit, True=allow, False=deny)")
+        print(f"🔍 Can request 4K: {permissions_data.can_request_4k} (None=inherit, True=allow, False=deny)")
+        print(f"🔍 Custom permissions - view others: {permissions_data.can_view_other_users_requests}")
+        print(f"🔍 Custom permissions - see usernames: {permissions_data.can_see_requester_username}")
         
         # Get the user
         statement = select(User).where(User.id == user_id)
@@ -1348,30 +1396,68 @@ async def save_user_permissions(
         if not user:
             return {"success": False, "message": "User not found"}
         
-        # Initialize permissions service
+        # Get existing user permissions (don't auto-create to avoid transaction conflicts)
+        from ..models.user_permissions import UserPermissions
+        statement = select(UserPermissions).where(UserPermissions.user_id == user_id)
+        user_permissions = session.exec(statement).first()
+        
+        # Get permissions service and user role for override calculations
         permissions_service = PermissionsService(session)
+        user_role = permissions_service.get_user_role(user_id)
+        
+        print(f"🔍 Found existing permissions: {user_permissions is not None}")
+        if user_permissions:
+            print(f"🔍 Current values BEFORE update:")
+            print(f"🔍   Role ID: {user_permissions.role_id}")
+            print(f"🔍   Movies: {user_permissions.can_request_movies}")
+            print(f"🔍   TV: {user_permissions.can_request_tv}")
+            print(f"🔍   4K: {user_permissions.can_request_4k}")
+            print(f"🔍   Auto-approve: {user_permissions.auto_approve_enabled}")
+        
+        # Create new permissions if none exist
+        if not user_permissions:
+            print(f"🔍 Creating new UserPermissions record for user_id: {user_id}")
+            user_permissions = UserPermissions(user_id=user_id)
+        else:
+            print(f"🔍 Updating existing UserPermissions record for user_id: {user_id}")
         
         # Assign role if provided
         if permissions_data.role_id:
-            success = permissions_service.assign_role(user_id, permissions_data.role_id)
-            if not success:
-                return {"success": False, "message": "Failed to assign role"}
-        
-        # Get or create user permissions
-        user_permissions = permissions_service.get_user_permissions(user_id)
-        if not user_permissions:
-            from ..models.user_permissions import UserPermissions
-            user_permissions = UserPermissions(user_id=user_id)
-            session.add(user_permissions)
+            user_permissions.role_id = permissions_data.role_id
         
         # Update permissions based on JSON data
         if permissions_data.max_requests is not None:
             user_permissions.max_requests = permissions_data.max_requests
         user_permissions.auto_approve_enabled = permissions_data.auto_approve
-        # Always save the boolean values to override role permissions
-        user_permissions.can_request_movies = permissions_data.can_request_movies
-        user_permissions.can_request_tv = permissions_data.can_request_tv
-        user_permissions.can_request_4k = permissions_data.can_request_4k
+        
+        # Calculate permission overrides based on desired effective permissions vs role permissions
+        role_permissions = user_role.get_permissions() if user_role else {}
+        from ..models.role import PermissionFlags
+        
+        # For each permission, determine if we need an override
+        def calculate_override(desired_effective: bool, role_permission_key: str):
+            role_allows = role_permissions.get(role_permission_key, False)
+            if desired_effective == role_allows:
+                # Desired matches role - no override needed
+                return None
+            else:
+                # Desired differs from role - need explicit override
+                return desired_effective
+        
+        user_permissions.can_request_movies = calculate_override(
+            permissions_data.can_request_movies, PermissionFlags.REQUEST_MOVIES
+        )
+        user_permissions.can_request_tv = calculate_override(
+            permissions_data.can_request_tv, PermissionFlags.REQUEST_TV
+        )
+        user_permissions.can_request_4k = calculate_override(
+            permissions_data.can_request_4k, PermissionFlags.REQUEST_4K
+        )
+        
+        print(f"🔍 Calculated overrides:")
+        print(f"🔍   Movies: desired={permissions_data.can_request_movies}, role={role_permissions.get(PermissionFlags.REQUEST_MOVIES, False)}, override={user_permissions.can_request_movies}")
+        print(f"🔍   TV: desired={permissions_data.can_request_tv}, role={role_permissions.get(PermissionFlags.REQUEST_TV, False)}, override={user_permissions.can_request_tv}")
+        print(f"🔍   4K: desired={permissions_data.can_request_4k}, role={role_permissions.get(PermissionFlags.REQUEST_4K, False)}, override={user_permissions.can_request_4k}")
         
         # Handle new permission fields via custom_permissions JSON
         custom_perms = user_permissions.get_custom_permissions()
@@ -1381,9 +1467,45 @@ async def save_user_permissions(
         
         user_permissions.updated_at = datetime.utcnow()
         
-        # Save changes
-        session.add(user_permissions)
-        session.commit()
+        print(f"🔍 Values being saved:")
+        print(f"🔍   Role ID: {user_permissions.role_id}")
+        print(f"🔍   Movies: {user_permissions.can_request_movies}")
+        print(f"🔍   TV: {user_permissions.can_request_tv}")
+        print(f"🔍   4K: {user_permissions.can_request_4k}")
+        print(f"🔍   Auto-approve: {user_permissions.auto_approve_enabled}")
+        print(f"🔍   Updated at: {user_permissions.updated_at}")
+        
+        print(f"🔍 About to save with merge() and commit()...")
+        
+        # Save changes - use merge for existing records to handle primary key properly
+        try:
+            saved_permissions = session.merge(user_permissions)  # Use merge instead of add for existing records
+            print(f"🔍 Merge completed successfully")
+            
+            session.commit()
+            print(f"🔍 Commit completed successfully")
+            
+            print(f"✅ Successfully saved permissions for user {user.username}")
+            print(f"✅ Final values - Role ID: {saved_permissions.role_id}, Auto-approve: {saved_permissions.auto_approve_enabled}")
+            print(f"✅ Movies: {saved_permissions.can_request_movies}, TV: {saved_permissions.can_request_tv}, 4K: {saved_permissions.can_request_4k}")
+        except Exception as save_error:
+            print(f"❌ ERROR during save: {save_error}")
+            session.rollback()
+            raise save_error
+        
+        # Verify the data was actually saved by re-querying
+        verification_statement = select(UserPermissions).where(UserPermissions.user_id == user_id)
+        verification_perms = session.exec(verification_statement).first()
+        if verification_perms:
+            print(f"✅ VERIFICATION - Data persisted in database:")
+            print(f"✅ VERIFICATION - Role ID: {verification_perms.role_id}")
+            print(f"✅ VERIFICATION - Auto-approve: {verification_perms.auto_approve_enabled}")
+            print(f"✅ VERIFICATION - Movies: {verification_perms.can_request_movies}")
+            print(f"✅ VERIFICATION - TV: {verification_perms.can_request_tv}")
+            print(f"✅ VERIFICATION - 4K: {verification_perms.can_request_4k}")
+            print(f"✅ VERIFICATION - Updated at: {verification_perms.updated_at}")
+        else:
+            print("❌ VERIFICATION FAILED - No permissions found after save!")
         
         return {
             "success": True, 

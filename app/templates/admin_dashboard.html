@@ -645,8 +645,13 @@ function savePermissions(userId) {
     const saveBtn = document.getElementById('save-btn');
     const saveText = document.getElementById('save-text');
     
+    console.log('🔍 Form element found:', form);
+    console.log('🔍 Save button found:', saveBtn);
+    
     if (!form) {
         console.error('🔍 Form not found!');
+        console.log('🔍 Available elements with permissions-form id:', document.getElementById('permissions-form'));
+        console.log('🔍 All forms on page:', document.forms);
         return;
     }
     
@@ -656,8 +661,36 @@ function savePermissions(userId) {
     
     // Get form data
     const formData = new FormData(form);
+    const rawData = Object.fromEntries(formData);
     
-    console.log('🔍 Form data:', Object.fromEntries(formData));
+    console.log('🔍 Raw form data:', rawData);
+    
+    // Debug specific checkbox states
+    const moviesCheckbox = document.getElementById('can_request_movies');
+    const tvCheckbox = document.getElementById('can_request_tv');
+    const fourKCheckbox = document.getElementById('can_request_4k');
+    
+    console.log('🔍 Checkbox elements found:');
+    console.log('🔍   Movies checkbox:', moviesCheckbox, 'checked:', moviesCheckbox?.checked);
+    console.log('🔍   TV checkbox:', tvCheckbox, 'checked:', tvCheckbox?.checked);
+    console.log('🔍   4K checkbox:', fourKCheckbox, 'checked:', fourKCheckbox?.checked);
+    
+    // Convert form data to proper JSON format for UserPermissionsUpdate model
+    const jsonData = {
+        role_id: rawData.role_id ? parseInt(rawData.role_id) : null,
+        max_requests: rawData.max_requests ? parseInt(rawData.max_requests) : null,
+        auto_approve: rawData.auto_approve === 'on',
+        // For permission checkboxes: send the desired effective permission
+        // Backend will calculate the correct override (true/false/null) based on role
+        // Note: checkboxes with value="true" send 'true' when checked, not 'on'
+        can_request_movies: rawData.can_request_movies === 'true',
+        can_request_tv: rawData.can_request_tv === 'true',
+        can_request_4k: rawData.can_request_4k === 'true',
+        can_view_other_users_requests: rawData.can_view_other_users_requests === 'true',
+        can_see_requester_username: rawData.can_see_requester_username === 'true'
+    };
+    
+    console.log('🔍 Converted JSON data:', jsonData);
     
     // Prevent any default form submission
     form.addEventListener('submit', function(e) {
@@ -665,15 +698,22 @@ function savePermissions(userId) {
         return false;
     });
     
-    // Make HTMX request manually
-    htmx.ajax('POST', '{{ base_url }}/admin/users/' + userId + '/permissions/save', {
-        values: Object.fromEntries(formData),
+    // Make HTMX request manually with JSON body
+    fetch('{{ base_url }}/admin/users/' + userId + '/permissions/save', {
+        method: 'POST',
         headers: {
-            'HX-Request': 'true'
+            'Content-Type': 'application/json',
+            'HX-Request': 'true',
+            'X-Skip-Global-Toast': 'true'
         },
-        swap: 'none'  // Don't swap any content into the page
-    }).then(() => {
-        console.log('🔍 HTMX request completed successfully');
+        body: JSON.stringify(jsonData)
+    }).then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    }).then(data => {
+        console.log('🔍 Request completed successfully:', data);
         // Close modal using existing function
         hidePermissionsModal();
         
@@ -699,15 +739,17 @@ function savePermissions(userId) {
             console.error('🔍 document.body not available for toast');
         }
     }).catch((error) => {
-        console.error('🔍 HTMX request failed:', error);
+        console.error('🔍 Request failed:', error);
         // Reset button state
         saveBtn.disabled = false;
         saveText.textContent = 'Save All Changes';
         
-        // Show error toast - use our own simple toast to avoid showToast issues
+        // Show error toast with more specific message
         const toast = document.createElement('div');
         toast.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded shadow-lg z-50';
-        toast.textContent = 'Failed to save permissions!';
+        toast.textContent = error.message.includes('422') 
+            ? 'Invalid data format - check form values!' 
+            : 'Failed to save permissions!';
         if (document.body) {
             document.body.appendChild(toast);
             setTimeout(() => {

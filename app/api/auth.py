@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from typing import Optional
 import uuid
 from datetime import timedelta
@@ -359,8 +359,17 @@ async def plex_verify(request: Request, pin_id: str = Form(...), session: Sessio
     # If not found by plex_id, try by username (in case plex_id changed)
     if not existing_user:
         print(f"🔍 Plex_id not found, trying username: {user_info['username']}")
+        # Try case-sensitive match first
         username_statement = select(User).where(User.username == user_info['username'])
         existing_user = session.exec(username_statement).first()
+        
+        # If still not found, try case-insensitive match
+        if not existing_user:
+            print(f"🔍 Case-sensitive username not found, trying case-insensitive match")
+            case_insensitive_statement = select(User).where(func.lower(User.username) == func.lower(user_info['username']))
+            existing_user = session.exec(case_insensitive_statement).first()
+            if existing_user:
+                print(f"✅ Found user by case-insensitive username: {existing_user.username}")
         
         if existing_user:
             print(f"✅ Found user by username, updating plex_id: {existing_user.username}")

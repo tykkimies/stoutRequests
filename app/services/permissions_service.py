@@ -80,12 +80,12 @@ class PermissionsService:
         
         session.commit()
     
-    def get_user_permissions(self, user_id: int) -> Optional[UserPermissions]:
-        """Get user permissions, creating default if not exists"""
+    def get_user_permissions(self, user_id: int, auto_create: bool = True) -> Optional[UserPermissions]:
+        """Get user permissions, optionally creating default if not exists"""
         statement = select(UserPermissions).where(UserPermissions.user_id == user_id)
         user_perms = self.session.exec(statement).first()
         
-        if not user_perms:
+        if not user_perms and auto_create:
             # Create default permissions for user
             user_perms = self.create_default_user_permissions(user_id)
         
@@ -105,7 +105,7 @@ class PermissionsService:
         statement = select(Role).where(Role.is_default == True)
         return self.session.exec(statement).first()
     
-    def create_default_user_permissions(self, user_id: int) -> UserPermissions:
+    def create_default_user_permissions(self, user_id: int, commit: bool = True) -> UserPermissions:
         """Create default permissions for a user"""
         default_role = self.get_default_role()
         
@@ -116,7 +116,8 @@ class PermissionsService:
         )
         
         self.session.add(user_perms)
-        self.session.commit()
+        if commit:
+            self.session.commit()
         return user_perms
     
     def has_permission(self, user_id: int, permission: str) -> bool:
@@ -267,7 +268,7 @@ class PermissionsService:
         
         self.session.commit()
     
-    def assign_role(self, user_id: int, role_id: int) -> bool:
+    def assign_role(self, user_id: int, role_id: int, commit: bool = True) -> bool:
         """Assign a role to a user"""
         try:
             user_perms = self.get_user_permissions(user_id)
@@ -275,7 +276,8 @@ class PermissionsService:
                 user_perms.role_id = role_id
                 user_perms.updated_at = datetime.utcnow()
                 self.session.add(user_perms)
-                self.session.commit()
+                if commit:
+                    self.session.commit()
                 return True
             return False
         except Exception:

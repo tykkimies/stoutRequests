@@ -277,6 +277,12 @@
         // Enhanced HTMX event handling for better UX
         document.addEventListener('htmx:afterRequest', function(event) {
             const response = event.detail.xhr;
+            const headers = event.detail.requestConfig.headers || {};
+            
+            // Skip if request has X-Skip-Global-Toast header
+            if (headers['X-Skip-Global-Toast'] === 'true') {
+                return;
+            }
             
             // Only show success toast for POST/PUT/DELETE operations (not GET requests)
             const method = event.detail.requestConfig.verb.toLowerCase();
