@@ -677,10 +677,12 @@ async def discover_page(
         print(f"🔍 DISCOVER DEBUG - Content sources received: {content_sources}")
         print(f"🔍 DISCOVER DEBUG - Use discover endpoint: {use_discover_endpoint}")
         print(f"🔍 DISCOVER DEBUG - Media type: {media_type}")
-        print(f"🔍 DISCOVER DEBUG - Genres: {genres}")
+        print(f"🔍 DISCOVER DEBUG - Genres: {genres} -> {genre_filter}")
         print(f"🔍 DISCOVER DEBUG - Rating filter: {rating_filter}")
         print(f"🔍 DISCOVER DEBUG - Year range: {year_from_filter} to {year_to_filter}")
         print(f"🔍 DISCOVER DEBUG - Studios filter: movie={movie_studios_filter}, tv_networks={tv_networks_filter}, tv_companies={tv_companies_filter}")
+        print(f"🔍 DISCOVER DEBUG - Streaming filter: {streaming_filter}")
+        print(f"🔍 DISCOVER DEBUG - Has any filters: {has_any_filters}")
         
         all_results = []
         total_pages = 1
@@ -829,8 +831,9 @@ async def discover_page(
                     total_pages = max(total_pages, source_results.get('total_pages', 1))
                     total_results += source_results.get('total_results', 0)
         
-        # Sort combined results by vote_average * popularity for better mixing
-        all_results.sort(key=lambda x: (x.get('vote_average', 0) * 0.3 + x.get('popularity', 0) * 0.7), reverse=True)
+        # Sort combined results by popularity only for consistency with TMDB discover endpoint
+        # CRITICAL FIX: Use same sorting as TMDB discover (popularity.desc) to prevent reordering
+        all_results.sort(key=lambda x: x.get('popularity', 0), reverse=True)
         
         # For discover endpoint, return all results from current TMDB page (no artificial pagination)
         # TMDB handles the real pagination with 20 results per page
@@ -841,6 +844,19 @@ async def discover_page(
         }
         
         print(f"🔍 DISCOVER RESULTS - Page {page}: {len(all_results)} results, Total Pages: {total_pages}, Total Results: {total_results}")
+        
+        # CRITICAL DEBUG: Log first few results to help track filter consistency issues
+        if all_results:
+            print(f"🎯 DISCOVER RESULTS - First 5 items:")
+            for i, item in enumerate(all_results[:5]):
+                title = item.get('title') or item.get('name', 'Unknown')
+                media_type = item.get('media_type', 'unknown')
+                item_id = item.get('id')
+                popularity = item.get('popularity', 0)
+                genres = item.get('genre_ids', [])
+                print(f"      {i+1}. {title} ({media_type}) - ID: {item_id} - Pop: {popularity:.1f} - Genres: {genres}")
+        else:
+            print(f"🔍 DISCOVER RESULTS - No results returned")
         
         # Initialize results dictionary structure for content negotiation
         results = {
@@ -3043,8 +3059,9 @@ async def discover_category_expanded(
                     item['media_type'] = 'tv'
                     all_results.append(item)
                 
-                # Sort by vote_average * vote_count for popularity
-                all_results.sort(key=lambda x: x.get('vote_average', 0) * x.get('vote_count', 0), reverse=True)
+                # Sort by popularity for consistency with TMDB discover endpoint
+                # CRITICAL FIX: Use same sorting as TMDB discover (popularity.desc) to prevent reordering
+                all_results.sort(key=lambda x: x.get('popularity', 0), reverse=True)
                 
                 limited_results = all_results[:limit]
                 has_more = len(all_results) >= limit or movie_results.get('total_pages', 1) > page or tv_results.get('total_pages', 1) > page
