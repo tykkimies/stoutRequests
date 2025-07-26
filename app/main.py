@@ -17,7 +17,7 @@ from .api.admin import router as admin_router
 from .api.setup import router as setup_router
 from .api.services import router as services_router
 from app.api import setup
-from .models import User, UserCategoryPreferences
+from .models import User, UserCategoryPreferences, UserCustomCategory
 from .services.plex_sync_service import PlexSyncService
 from .services.permissions_service import PermissionsService
 
@@ -363,7 +363,11 @@ async def filter_database_category(
     limit: int,
     current_user,
     session,
-    tmdb_service
+    tmdb_service,
+    year_from: str = "",
+    year_to: str = "",
+    studios: list[str] = None,
+    streaming: list[str] = None
 ):
     """Filter database categories (recent requests, recently added) by TMDB criteria"""
     from .services.settings_service import SettingsService
@@ -493,16 +497,32 @@ async def filter_database_category(
                     "request": request,
                     "results": paginated_results,
                     "current_user": current_user,
+                    "category": {
+                        "type": media_type,
+                        "sort": f"{db_category_type}_{db_category_sort}",
+                        "title": f"Filtered {db_category_type.title()} {db_category_sort.replace('_', ' ').title()}"
+                    },
                     "category_type": media_type,
                     "category_sort": f"{db_category_type}_{db_category_sort}_filtered",
                     "category_title": f"Filtered {db_category_type.title()} {db_category_sort.replace('_', ' ').title()}",
                     "page": page,
+                    "current_page": page,
                     "total_pages": total_pages,
                     "total_results": total_results,
+                    "has_more": total_pages > page,
+                    # Pass ALL current filter values for infinite scroll (database categories need these too)
                     "current_rating_min": rating_min,
+                    "current_rating_source": rating_source,
                     "current_media_type": media_type,
                     "current_content_sources": [],
-                    "current_genres": genres
+                    "current_genres": genres,
+                    "current_year_from": year_from,  # Pass actual filter values for infinite scroll
+                    "current_year_to": year_to,
+                    "current_studios": studios or [],  # Pass actual filter values for infinite scroll
+                    "current_streaming": streaming or [],  # Pass actual filter values for infinite scroll
+                    # Database category specific parameters for infinite scroll
+                    "current_db_category_type": db_category_type,
+                    "current_db_category_sort": db_category_sort
                 }
             )
         elif hx_target == "results-grid":
@@ -545,6 +565,8 @@ async def discover_page(
     genres: list[str] = Query(default=[]),
     rating_source: str = "",
     rating_min: str = "",
+    year_from: str = "",
+    year_to: str = "",
     studios: list[str] = Query(default=[]),
     streaming: list[str] = Query(default=[]),
     page: int = 1,
@@ -573,23 +595,83 @@ async def discover_page(
             return await filter_database_category(
                 request, db_category_type, db_category_sort, media_type, 
                 genres, rating_source, rating_min, page, limit,
-                current_user, session, tmdb_service
+                current_user, session, tmdb_service,
+                year_from, year_to, studios, streaming
             )
         # Convert genres list to comma-separated string for TMDB
         genre_filter = ",".join(genres) if genres else None
         
-        # Convert rating to TMDB format
+        # Convert rating to TMDB format (only TMDB ratings are supported by TMDB API)
         rating_filter = None
-        if rating_source == "tmdb" and rating_min:
-            rating_filter = float(rating_min)
+        if rating_min:
+            if rating_source == "tmdb" or not rating_source:  # Default to TMDB if no source specified
+                rating_filter = float(rating_min)
+            elif rating_source == "imdb":
+                # IMDb uses 0-10 scale like TMDB, so we can use the same value
+                # Note: This filters by TMDB rating, not actual IMDb rating
+                rating_filter = float(rating_min)
+            elif rating_source == "rotten_tomatoes":
+                # Convert RT 0-100 scale to TMDB 0-10 scale as approximation
+                # Note: This filters by TMDB rating, not actual RT rating
+                rating_filter = float(rating_min) / 10.0
+        
+        # Process year range filters
+        year_from_filter = None
+        year_to_filter = None
+        if year_from and year_from.isdigit():
+            year_from_filter = int(year_from)
+        if year_to and year_to.isdigit():
+            year_to_filter = int(year_to)
         
         # Convert streaming providers to comma-separated string for TMDB
         streaming_filter = ",".join(streaming) if streaming else None
         
+        # Handle studio filtering - need different logic for movies vs TV shows
+        # For movies: use with_companies
+        # For TV shows: use with_networks for actual networks, with_companies for production companies
+        movie_studios_filter = ",".join(studios) if studios else None
+        tv_networks_filter = None
+        tv_companies_filter = None
+        
+        if studios:
+            # Separate networks from production companies for TV filtering
+            networks = []  # Actual TV networks
+            companies = []  # Production companies that also work for TV
+            
+            for studio_id in studios:
+                # Known TV networks (use with_networks for TV)
+                if studio_id in ["213", "49", "2739", "1024", "384", "16", "67", "174", "2"]:  # Netflix, HBO, Disney+, Amazon, HBO Max, CBS, FOX, Warner Bros TV, Disney
+                    networks.append(studio_id)
+                    companies.append(studio_id)  # Also check as company for some content
+                # Known production companies (use with_companies for both movies and TV)
+                elif studio_id in ["420", "2", "174", "33", "5", "4"]:  # Marvel, Disney, Warner Bros, Universal, Columbia, Paramount
+                    companies.append(studio_id)
+                    # For Marvel specifically, also check common Marvel TV networks
+                    if studio_id == "420":  # Marvel Studios
+                        # Add Disney+ and ABC as they often distribute Marvel TV content
+                        networks.extend(["2739", "2"])  # Disney+, Disney
+                else:
+                    # Default: treat as both
+                    networks.append(studio_id)
+                    companies.append(studio_id)
+            
+            tv_networks_filter = ",".join(set(networks)) if networks else None
+            tv_companies_filter = ",".join(set(companies)) if companies else None
+        
+        print(f"🔍 STUDIO FILTER DEBUG: movie_studios={movie_studios_filter}, tv_networks={tv_networks_filter}, tv_companies={tv_companies_filter}")
+        
         # Check if we should use pure TMDB discover endpoint instead of content sources
+        # Use discover endpoint when no content sources OR when filters are applied (filters take priority)
+        has_any_filters = bool(
+            genre_filter or rating_filter or streaming_filter or 
+            year_from_filter or year_to_filter or 
+            movie_studios_filter or tv_networks_filter or tv_companies_filter
+        )
+        
         use_discover_endpoint = (
             not content_sources or  # No sources selected
-            len(content_sources) == 0
+            len(content_sources) == 0 or  # Empty sources list
+            has_any_filters  # Filters applied - prioritize discover endpoint for accuracy
         )
         
         print(f"🔍 DISCOVER DEBUG - Content sources received: {content_sources}")
@@ -597,6 +679,8 @@ async def discover_page(
         print(f"🔍 DISCOVER DEBUG - Media type: {media_type}")
         print(f"🔍 DISCOVER DEBUG - Genres: {genres}")
         print(f"🔍 DISCOVER DEBUG - Rating filter: {rating_filter}")
+        print(f"🔍 DISCOVER DEBUG - Year range: {year_from_filter} to {year_to_filter}")
+        print(f"🔍 DISCOVER DEBUG - Studios filter: movie={movie_studios_filter}, tv_networks={tv_networks_filter}, tv_companies={tv_companies_filter}")
         
         all_results = []
         total_pages = 1
@@ -617,14 +701,23 @@ async def discover_page(
                             with_genres=genre_filter,
                             vote_average_gte=rating_filter,
                             with_watch_providers=streaming_filter,
+                            with_companies=movie_studios_filter,
+                            primary_release_date_gte=year_from_filter,
+                            primary_release_date_lte=year_to_filter,
                         )
                     else:  # tv
+                        # For TV shows, try both networks and companies to catch all content
+                        # TMDB discover/tv supports both with_networks and with_companies
                         discover_results = tmdb_service.discover_tv(
                             page=page,
                             sort_by="popularity.desc",  # Sort by popularity but search all content
                             with_genres=genre_filter,
                             vote_average_gte=rating_filter,
                             with_watch_providers=streaming_filter,
+                            with_networks=tv_networks_filter,
+                            with_companies=tv_companies_filter,
+                            first_air_date_gte=year_from_filter,
+                            first_air_date_lte=year_to_filter,
                         )
                     
                     # Add media_type and source info to all items
@@ -647,71 +740,54 @@ async def discover_page(
             print(f"🔍 Using traditional content sources: {content_sources}")
             
             # Helper function to fetch from a specific content source
-            # Use the same methods as /discover/category for consistency
+            # Use the unified category system for consistency with /discover/category
             def fetch_from_source(source, target_media_type):
                 try:
-                    # If any filters are applied (genres, rating, streaming), use discover endpoint for consistency
-                    has_filters = bool(genre_filter or rating_filter or streaming_filter)
+                    # Use unified category system for all sources
+                    # This ensures consistency between horizontal scroll and expanded views
+                    # CRITICAL FIX: Added debug logging and proper date parameter mapping
+                    print(f"🔍 INFINITE SCROLL DEBUG - Calling get_category_content for {target_media_type}, source={source}")
+                    print(f"🔍 INFINITE SCROLL DEBUG - Year filters: {year_from_filter} to {year_to_filter}")
+                    print(f"🔍 INFINITE SCROLL DEBUG - Will map to {'primary_release_date' if target_media_type == 'movie' else 'first_air_date'}")
                     
-                    if source == "trending":
-                        if has_filters:
-                            # Use discover endpoint with trending sort when filters are applied
-                            if target_media_type == "movie":
-                                return tmdb_service.discover_movies(
-                                    page=page, sort_by="popularity.desc",  # Closest to trending
-                                    with_genres=genre_filter, vote_average_gte=rating_filter,
-                                    with_watch_providers=streaming_filter
-                                )
-                            else:
-                                return tmdb_service.discover_tv(
-                                    page=page, sort_by="popularity.desc",  # Closest to trending
-                                    with_genres=genre_filter, vote_average_gte=rating_filter,
-                                    with_watch_providers=streaming_filter
-                                )
-                        else:
-                            # No filters, use trending endpoint for consistency with View All
-                            return tmdb_service.get_trending(target_media_type, page)
-                    elif source == "popular":
-                        if has_filters:
-                            # Use discover endpoint with popularity sort when filters are applied
-                            if target_media_type == "movie":
-                                return tmdb_service.discover_movies(
-                                    page=page, sort_by="popularity.desc",
-                                    with_genres=genre_filter, vote_average_gte=rating_filter,
-                                    with_watch_providers=streaming_filter
-                                )
-                            else:
-                                return tmdb_service.discover_tv(
-                                    page=page, sort_by="popularity.desc",
-                                    with_genres=genre_filter, vote_average_gte=rating_filter,
-                                    with_watch_providers=streaming_filter
-                                )
-                        else:
-                            # No filters, use popular endpoint for consistency with View All
-                            return tmdb_service.get_popular(target_media_type, page)
-                    elif source == "top_rated":
-                        if has_filters:
-                            # Use discover endpoint with rating sort when filters are applied
-                            if target_media_type == "movie":
-                                return tmdb_service.discover_movies(
-                                    page=page, sort_by="vote_average.desc",
-                                    with_genres=genre_filter, vote_average_gte=rating_filter,
-                                    with_watch_providers=streaming_filter
-                                )
-                            else:
-                                return tmdb_service.discover_tv(
-                                    page=page, sort_by="vote_average.desc",
-                                    with_genres=genre_filter, vote_average_gte=rating_filter,
-                                    with_watch_providers=streaming_filter
-                                )
-                        else:
-                            # No filters, use top_rated endpoint for consistency with View All
-                            return tmdb_service.get_top_rated(target_media_type, page)
-                    elif source == "upcoming" and target_media_type == "movie":
-                        return tmdb_service.get_upcoming_movies(page)
-                    elif source == "now_playing" and target_media_type == "movie":
-                        return tmdb_service.get_now_playing_movies(page)
-                    else:
+                    return tmdb_service.get_category_content(
+                        media_type=target_media_type,
+                        category=source,
+                        page=page,
+                        with_genres=genre_filter,
+                        vote_average_gte=rating_filter,
+                        with_companies=tv_companies_filter if target_media_type == "tv" else movie_studios_filter,
+                        with_networks=tv_networks_filter if target_media_type == "tv" else None,
+                        with_watch_providers=streaming_filter,
+                        primary_release_date_gte=year_from_filter if target_media_type == "movie" else None,
+                        primary_release_date_lte=year_to_filter if target_media_type == "movie" else None,
+                        first_air_date_gte=year_from_filter if target_media_type == "tv" else None,
+                        first_air_date_lte=year_to_filter if target_media_type == "tv" else None
+                    )
+                except ValueError as ve:
+                    # Category not found in unified system - fallback for unsupported categories
+                    print(f"Category '{source}' not found in unified system for {target_media_type}, falling back to popular: {ve}")
+                    try:
+                        # CRITICAL FIX: Added proper date parameter mapping for fallback
+                        print(f"🔍 INFINITE SCROLL FALLBACK - Using popular for {target_media_type}")
+                        print(f"🔍 INFINITE SCROLL FALLBACK - Year filters: {year_from_filter} to {year_to_filter}")
+                        
+                        return tmdb_service.get_category_content(
+                            media_type=target_media_type,
+                            category="popular",
+                            page=page,
+                            with_genres=genre_filter,
+                            vote_average_gte=rating_filter,
+                            with_companies=tv_companies_filter if target_media_type == "tv" else movie_studios_filter,
+                            with_networks=tv_networks_filter if target_media_type == "tv" else None,
+                            with_watch_providers=streaming_filter,
+                            primary_release_date_gte=year_from_filter if target_media_type == "movie" else None,
+                            primary_release_date_lte=year_to_filter if target_media_type == "movie" else None,
+                            first_air_date_gte=year_from_filter if target_media_type == "tv" else None,
+                            first_air_date_lte=year_to_filter if target_media_type == "tv" else None
+                        )
+                    except Exception as fallback_error:
+                        print(f"Error in fallback to popular: {fallback_error}")
                         return {"results": [], "total_pages": 1, "total_results": 0}
                 except Exception as e:
                     print(f"Error fetching from {source}: {e}")
@@ -766,33 +842,17 @@ async def discover_page(
         
         print(f"🔍 DISCOVER RESULTS - Page {page}: {len(all_results)} results, Total Pages: {total_pages}, Total Results: {total_results}")
         
+        # Initialize results dictionary structure for content negotiation
+        results = {
+            "results": all_results,
+            "total_pages": total_pages,
+            "total_results": total_results
+        }
+        
         # Note: Genre and TMDB rating filtering is now handled server-side via discover endpoints
         # Only apply client-side filtering for cases where server-side filtering isn't available
         
-        # Filter by rating if specified and not handled server-side
-        if rating_source and rating_min and results.get('results') and rating_source != 'tmdb':
-            min_rating = float(rating_min)
-            filtered_results = []
-            
-            for item in results['results']:
-                should_include = False
-                
-                if rating_source == 'imdb':
-                    # For IMDb, we would need to fetch external IDs and ratings
-                    # For now, fallback to TMDB rating as approximation
-                    tmdb_rating = item.get('vote_average', 0)
-                    should_include = tmdb_rating >= min_rating
-                elif rating_source == 'rt':
-                    # For Rotten Tomatoes, we would need external API integration
-                    # For now, convert TMDB 0-10 to RT 0-100 scale as approximation
-                    tmdb_rating = item.get('vote_average', 0)
-                    rt_approximation = tmdb_rating * 10  # Convert 0-10 to 0-100
-                    should_include = rt_approximation >= min_rating
-                
-                if should_include:
-                    filtered_results.append(item)
-            
-            results['results'] = filtered_results
+        # Rating filtering is now handled server-side via TMDB discover API for all rating sources
         
         # Filter by studios if specified (using production companies from TMDB)
         if studios and results.get('results'):
@@ -900,16 +960,29 @@ async def discover_page(
                         "request": request, 
                         "results": results.get('results', []),
                         "current_user": current_user,
+                        "category": {
+                            "type": media_type,
+                            "sort": content_sources[0] if content_sources else 'popular',
+                            "title": f"Filtered {media_type.title()}s"
+                        },
                         "category_type": media_type,
                         "category_sort": content_sources[0] if content_sources else 'popular',
                         "category_title": f"Filtered {media_type.title()}s",
                         "page": page,
+                        "current_page": page,
                         "total_pages": results.get('total_pages', 1),
                         "total_results": results.get('total_results', 0),
+                        "has_more": results.get('total_pages', 1) > page,
+                        # Pass ALL current filter values for infinite scroll
                         "current_rating_min": rating_min,
+                        "current_rating_source": rating_source,
                         "current_media_type": media_type,
                         "current_content_sources": content_sources,
-                        "current_genres": genres
+                        "current_genres": genres,
+                        "current_year_from": year_from,
+                        "current_year_to": year_to,
+                        "current_studios": studios,
+                        "current_streaming": streaming
                     }
                 )
             elif hx_target == "#main-content-area":
@@ -983,6 +1056,7 @@ async def discover_page(
         
     except Exception as e:
         print(f"Error in discover: {e}")
+        from fastapi.responses import HTMLResponse
         return HTMLResponse(f'<div class="text-center py-8 text-red-600">Error loading content: {str(e)}</div>')
 
 
@@ -1143,19 +1217,39 @@ async def discover_category(
             else:
                 template_name = "category_horizontal.html"
             
-            return create_template_response(
-                template_name,
-                {
-                    "request": request, 
-                    "results": recently_added,
-                    "current_user": current_user,
-                    "media_type": "mixed",  # Mixed content type
-                    "sort_by": sort,
-                    "has_more": has_more,
-                    "next_offset": offset + limit,
-                    "current_offset": offset
+            context = {
+                "request": request, 
+                "results": recently_added,
+                "current_user": current_user,
+                "media_type": "mixed",  # Mixed content type
+                "sort_by": sort,
+                "has_more": has_more,
+                "next_offset": offset + limit,
+                "current_offset": offset,
+                "base_url": base_url
+            }
+            
+            # Add category object for expanded view
+            if view == "expanded":
+                context["category"] = {
+                    "type": type,
+                    "sort": sort,
+                    "title": f"{sort.replace('_', ' ').title()} {type.title()}"
                 }
-            )
+                context["current_page"] = page
+                # Add empty filter values for infinite scroll compatibility
+                context.update({
+                    "current_content_sources": [],
+                    "current_genres": [],
+                    "current_rating_min": "",
+                    "current_rating_source": "",
+                    "current_year_from": "",
+                    "current_year_to": "",
+                    "current_studios": [],
+                    "current_streaming": []
+                })
+            
+            return create_template_response(template_name, context)
         
         # Handle Recent Requests from database
         elif type == "requests" and sort == "recent":
@@ -1487,13 +1581,229 @@ async def discover_category(
                 else:
                     template_name = "category_horizontal.html"
                 
+                context = {
+                    "request": request, 
+                    "results": all_results,
+                    "current_user": current_user,
+                    "media_type": "mixed",  # Mixed content type
+                    "sort_by": sort,
+                    "has_more": has_more,
+                    "next_offset": offset + limit,
+                    "current_offset": offset,
+                    "base_url": base_url
+                }
+                
+                # Add category object for expanded view
+                if view == "expanded":
+                    context["category"] = {
+                        "type": type,
+                        "sort": sort,
+                        "title": f"{sort.replace('_', ' ').title()} {type.title()}"
+                    }
+                    context["current_page"] = page
+                    # Add empty filter values for infinite scroll compatibility
+                    context.update({
+                        "current_content_sources": [],
+                        "current_genres": [],
+                        "current_rating_min": "",
+                        "current_rating_source": "",
+                        "current_year_from": "",
+                        "current_year_to": "",
+                        "current_studios": [],
+                        "current_streaming": []
+                    })
+                
+                return create_template_response(template_name, context)
+                
+            except Exception as rec_error:
+                print(f"❌ Error generating personalized recommendations: {rec_error}")
+                import traceback
+                traceback.print_exc()
+                return HTMLResponse('<div class="text-center py-8 text-red-600">Error loading personalized recommendations</div>')
+        
+        # Handle custom user categories
+        elif type.startswith("custom_") or (type == "custom" and sort == "user_defined"):
+            print(f"🎯 Fetching custom category for user: {current_user.username}")
+            
+            try:
+                # Parse custom category ID - it comes in the type parameter as "custom_123"
+                if type.startswith("custom_"):
+                    custom_id = type.replace("custom_", "")
+                elif type == "custom" and sort == "user_defined":
+                    # Fallback: look for custom category ID in other parameters
+                    # This shouldn't happen with current implementation but handle it gracefully
+                    return HTMLResponse('<div class="text-center py-8 text-red-600">Custom category ID missing</div>')
+                else:
+                    return HTMLResponse('<div class="text-center py-8 text-red-600">Invalid custom category format</div>')
+                
+                if not custom_id.isdigit():
+                    print(f"❌ Invalid custom category ID: '{custom_id}'")
+                    return HTMLResponse('<div class="text-center py-8 text-red-600">Invalid custom category ID</div>')
+                
+                print(f"🔍 Loading custom category ID: {custom_id}")
+                
+                # Load custom category from database
+                stmt = select(UserCustomCategory).where(
+                    UserCustomCategory.id == int(custom_id),
+                    UserCustomCategory.user_id == current_user.id,
+                    UserCustomCategory.is_active == True
+                )
+                custom_category = session.exec(stmt).first()
+                
+                if not custom_category:
+                    print(f"❌ Custom category not found for ID: {custom_id}")
+                    return HTMLResponse('<div class="text-center py-8 text-red-600">Custom category not found</div>')
+                
+                print(f"✅ Found custom category: {custom_category.name}")
+                
+                # Apply custom filters using TMDB discover API
+                filters = custom_category.to_category_dict()['filters']
+                
+                # Determine media type for API calls
+                custom_media_type = filters.get('media_type', 'movie')
+                if custom_media_type == 'mixed':
+                    custom_media_type = 'movie'  # Default to movies for mixed
+                
+                print(f"🔍 Custom category filters: {filters}")
+                
+                # Build filter parameters for TMDB discover
+                genre_filter = ",".join(filters.get('genres', [])) if filters.get('genres') else None
+                rating_filter = float(filters.get('rating_min')) if filters.get('rating_min') else None
+                year_from = int(filters.get('year_from')) if filters.get('year_from') else None
+                year_to = int(filters.get('year_to')) if filters.get('year_to') else None
+                
+                # Studios filter (companies for movies, networks for TV)
+                studios_filter = ",".join(filters.get('studios', [])) if filters.get('studios') else None
+                streaming_filter = ",".join(filters.get('streaming', [])) if filters.get('streaming') else None
+                
+                # Handle content sources or use discover with filters
+                content_sources = filters.get('content_sources', [])
+                if content_sources:
+                    # Use specific content source endpoints with filters
+                    all_results = []
+                    for source in content_sources:
+                        try:
+                            if source == "trending":
+                                if custom_media_type == "movie":
+                                    source_results = tmdb_service.discover_movies(
+                                        page=page, sort_by="popularity.desc",
+                                        with_genres=genre_filter, vote_average_gte=rating_filter,
+                                        with_companies=studios_filter, with_watch_providers=streaming_filter,
+                                        primary_release_date_gte=year_from, primary_release_date_lte=year_to
+                                    )
+                                else:
+                                    source_results = tmdb_service.discover_tv(
+                                        page=page, sort_by="popularity.desc",
+                                        with_genres=genre_filter, vote_average_gte=rating_filter,
+                                        with_networks=studios_filter, with_watch_providers=streaming_filter,
+                                        first_air_date_gte=year_from, first_air_date_lte=year_to
+                                    )
+                            elif source == "popular":
+                                if custom_media_type == "movie":
+                                    source_results = tmdb_service.discover_movies(
+                                        page=page, sort_by="popularity.desc",
+                                        with_genres=genre_filter, vote_average_gte=rating_filter,
+                                        with_companies=studios_filter, with_watch_providers=streaming_filter,
+                                        primary_release_date_gte=year_from, primary_release_date_lte=year_to
+                                    )
+                                else:
+                                    source_results = tmdb_service.discover_tv(
+                                        page=page, sort_by="popularity.desc",
+                                        with_genres=genre_filter, vote_average_gte=rating_filter,
+                                        with_networks=studios_filter, with_watch_providers=streaming_filter,
+                                        first_air_date_gte=year_from, first_air_date_lte=year_to
+                                    )
+                            elif source == "top_rated":
+                                if custom_media_type == "movie":
+                                    source_results = tmdb_service.discover_movies(
+                                        page=page, sort_by="vote_average.desc",
+                                        with_genres=genre_filter, vote_average_gte=rating_filter,
+                                        with_companies=studios_filter, with_watch_providers=streaming_filter,
+                                        primary_release_date_gte=year_from, primary_release_date_lte=year_to
+                                    )
+                                else:
+                                    source_results = tmdb_service.discover_tv(
+                                        page=page, sort_by="vote_average.desc",
+                                        with_genres=genre_filter, vote_average_gte=rating_filter,
+                                        with_networks=studios_filter, with_watch_providers=streaming_filter,
+                                        first_air_date_gte=year_from, first_air_date_lte=year_to
+                                    )
+                            else:
+                                continue
+                            
+                            all_results.extend(source_results.get('results', []))
+                        except Exception as e:
+                            print(f"Error fetching from {source} for custom category: {e}")
+                            continue
+                    
+                    # Remove duplicates based on ID
+                    seen_ids = set()
+                    unique_results = []
+                    for item in all_results:
+                        if item['id'] not in seen_ids:
+                            seen_ids.add(item['id'])
+                            unique_results.append(item)
+                    
+                    limited_results = unique_results[:limit]
+                    has_more = len(unique_results) > limit
+                    
+                else:
+                    # Use discover API with just filters
+                    if custom_media_type == "movie":
+                        discover_results = tmdb_service.discover_movies(
+                            page=page, sort_by="popularity.desc",
+                            with_genres=genre_filter, vote_average_gte=rating_filter,
+                            with_companies=studios_filter, with_watch_providers=streaming_filter,
+                            primary_release_date_gte=year_from, primary_release_date_lte=year_to
+                        )
+                    else:
+                        discover_results = tmdb_service.discover_tv(
+                            page=page, sort_by="popularity.desc",
+                            with_genres=genre_filter, vote_average_gte=rating_filter,
+                            with_networks=studios_filter, with_watch_providers=streaming_filter,
+                            first_air_date_gte=year_from, first_air_date_lte=year_to
+                        )
+                    
+                    limited_results = discover_results.get('results', [])[:limit]
+                    has_more = discover_results.get('total_pages', 1) > page
+                
+                # Add status information
+                try:
+                    sync_service = PlexSyncService(session)
+                    tmdb_ids = [item['id'] for item in limited_results]
+                    status_map = sync_service.check_items_status(tmdb_ids, custom_media_type)
+                    
+                    for item in limited_results:
+                        item['media_type'] = custom_media_type
+                        status = status_map.get(item['id'], 'available')
+                        item['status'] = status
+                        item['in_plex'] = status == 'in_plex'
+                        item["base_url"] = base_url
+                except Exception as status_error:
+                    print(f"Warning: Status check failed for custom category: {status_error}")
+                    for item in limited_results:
+                        item['media_type'] = custom_media_type
+                        item['status'] = 'available'
+                        item['in_plex'] = False
+                        item["base_url"] = base_url
+                
+                # Return results using same template structure as other categories
+                if view == "expanded":
+                    template_name = "components/expanded_results.html"
+                else:
+                    template_name = "category_horizontal.html"
+                
                 return create_template_response(
                     template_name,
                     {
-                        "request": request, 
-                        "results": all_results,
+                        "request": request,
                         "current_user": current_user,
-                        "media_type": "mixed",  # Mixed content type
+                        "results": limited_results,
+                        "category": {
+                            "type": type,
+                            "sort": sort,
+                            "title": custom_category.name if 'custom_category' in locals() else "Custom Category"
+                        },
                         "sort_by": sort,
                         "has_more": has_more,
                         "next_offset": offset + limit,
@@ -1501,11 +1811,11 @@ async def discover_category(
                     }
                 )
                 
-            except Exception as rec_error:
-                print(f"❌ Error generating personalized recommendations: {rec_error}")
+            except Exception as custom_error:
+                print(f"❌ Error loading custom category: {custom_error}")
                 import traceback
                 traceback.print_exc()
-                return HTMLResponse('<div class="text-center py-8 text-red-600">Error loading personalized recommendations</div>')
+                return HTMLResponse('<div class="text-center py-8 text-red-600">Error loading custom category</div>')
         
         # Handle TMDB categories with enhanced pagination
         # TMDB provides 20 items per page, we need to fetch multiple pages if needed
@@ -1528,18 +1838,12 @@ async def discover_category(
         
         for page_num in range(start_page, min(end_page + 1, 26)):  # TMDB usually limits to 25 pages (500 results)
             try:
-                if sort == "trending":
-                    page_results = tmdb_service.get_trending(type, page_num)
-                elif sort == "popular":
-                    page_results = tmdb_service.get_popular(type, page_num)
-                elif sort == "top_rated":
-                    page_results = tmdb_service.get_top_rated(type, page_num)
-                elif sort == "upcoming" and type == "movie":
-                    page_results = tmdb_service.get_upcoming_movies(page_num)
-                elif sort == "now_playing" and type == "movie":
-                    page_results = tmdb_service.get_now_playing_movies(page_num)
-                else:
-                    page_results = tmdb_service.get_popular(type, page_num)
+                # Use unified category system for consistency with expanded views
+                page_results = tmdb_service.get_category_content(
+                    media_type=type,
+                    category=sort,
+                    page=page_num
+                )
                 
                 page_items = page_results.get('results', [])
                 all_results.extend(page_items)
@@ -1605,24 +1909,45 @@ async def discover_category(
         else:
             template_name = "category_horizontal.html"
         
-        return create_template_response(
-            template_name,
-            {
-                "request": request, 
-                "results": limited_results,
-                "current_user": current_user,
-                "media_type": type,
-                "sort_by": sort,
-                "page": page,
-                "total_pages": total_pages,
-                "has_more": has_more,
-                "next_offset": offset + limit,
-                "current_offset": offset
+        context = {
+            "request": request, 
+            "results": limited_results,
+            "current_user": current_user,
+            "media_type": type,
+            "sort_by": sort,
+            "page": page,
+            "total_pages": total_pages,
+            "has_more": has_more,
+            "next_offset": offset + limit,
+            "current_offset": offset,
+            "base_url": base_url
+        }
+        
+        # Add category object for expanded view
+        if view == "expanded":
+            context["category"] = {
+                "type": type,
+                "sort": sort,
+                "title": f"{sort.replace('_', ' ').title()} {type.title()}"
             }
-        )
+            context["current_page"] = page
+            # Add empty filter values for infinite scroll compatibility
+            context.update({
+                "current_content_sources": [],
+                "current_genres": [],
+                "current_rating_min": "",
+                "current_rating_source": "",
+                "current_year_from": "",
+                "current_year_to": "",
+                "current_studios": [],
+                "current_streaming": []
+            })
+        
+        return create_template_response(template_name, context)
         
     except Exception as e:
         print(f"Error in discover category: {e}")
+        from fastapi.responses import HTMLResponse
         return HTMLResponse(f'<div class="text-center py-8 text-red-600">Error loading content: {str(e)}</div>')
 
 
@@ -1635,7 +1960,8 @@ def get_default_categories():
             'type': 'plex',
             'sort': 'recently_added',
             'color': 'green',
-            'order': 1
+            'order': 1,
+            'limit': 40
         },
         {
             'id': 'recent-requests', 
@@ -1643,7 +1969,8 @@ def get_default_categories():
             'type': 'requests',
             'sort': 'recent',
             'color': 'purple',
-            'order': 2
+            'order': 2,
+            'limit': 20
         },
         {
             'id': 'recommended-for-you',
@@ -1651,7 +1978,8 @@ def get_default_categories():
             'type': 'recommendations',
             'sort': 'personalized',
             'color': 'pink',
-            'order': 3
+            'order': 3,
+            'limit': 20
         },
         {
             'id': 'trending-movies',
@@ -1659,7 +1987,8 @@ def get_default_categories():
             'type': 'movie',
             'sort': 'trending',
             'color': 'red',
-            'order': 4
+            'order': 4,
+            'limit': 20
         },
         {
             'id': 'popular-movies',
@@ -1667,7 +1996,8 @@ def get_default_categories():
             'type': 'movie', 
             'sort': 'popular',
             'color': 'yellow',
-            'order': 5
+            'order': 5,
+            'limit': 20
         },
         {
             'id': 'trending-tv',
@@ -1675,7 +2005,8 @@ def get_default_categories():
             'type': 'tv',
             'sort': 'trending', 
             'color': 'purple',
-            'order': 6
+            'order': 6,
+            'limit': 20
         },
         {
             'id': 'popular-tv',
@@ -1683,7 +2014,8 @@ def get_default_categories():
             'type': 'tv',
             'sort': 'popular',
             'color': 'indigo', 
-            'order': 7
+            'order': 7,
+            'limit': 20
         },
         # Additional categories that users can enable
         {
@@ -1692,7 +2024,8 @@ def get_default_categories():
             'type': 'movie',
             'sort': 'top_rated',
             'color': 'orange',
-            'order': 8
+            'order': 8,
+            'limit': 20
         },
         {
             'id': 'upcoming-movies',
@@ -1700,7 +2033,8 @@ def get_default_categories():
             'type': 'movie',
             'sort': 'upcoming',
             'color': 'blue',
-            'order': 9
+            'order': 9,
+            'limit': 20
         },
         {
             'id': 'top-rated-tv',
@@ -1708,7 +2042,8 @@ def get_default_categories():
             'type': 'tv',
             'sort': 'top_rated',
             'color': 'emerald',
-            'order': 10
+            'order': 10,
+            'limit': 20
         }
     ]
 
@@ -1744,6 +2079,17 @@ def get_user_categories(user_id: int, session: Session):
                 continue
         
         customized_categories.append(category)
+    
+    # Get user's custom categories
+    custom_stmt = select(UserCustomCategory).where(
+        UserCustomCategory.user_id == user_id,
+        UserCustomCategory.is_active == True
+    ).order_by(UserCustomCategory.display_order)
+    custom_categories = session.exec(custom_stmt).all()
+    
+    # Convert custom categories to category dict format
+    for custom_cat in custom_categories:
+        customized_categories.append(custom_cat.to_category_dict())
     
     # Sort by display order
     customized_categories.sort(key=lambda x: x['order'])
@@ -1986,7 +2332,7 @@ async def categories_customize_mode(
     if not current_user:
         return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to customize categories.</div>')
     
-    # Get all available categories
+    # Get all built-in categories
     all_categories = get_default_categories()
     
     # Get user's current preferences
@@ -1994,10 +2340,15 @@ async def categories_customize_mode(
     user_prefs = session.exec(stmt).all()
     prefs_dict = {pref.category_id: pref for pref in user_prefs}
     
+    # Get user's custom categories
+    custom_stmt = select(UserCustomCategory).where(UserCustomCategory.user_id == current_user.id)
+    custom_categories = session.exec(custom_stmt).all()
+    
     # Separate visible and hidden categories
     visible_categories = []
     hidden_categories = []
     
+    # Process built-in categories
     for category in all_categories:
         cat_id = category['id']
         user_pref = prefs_dict.get(cat_id)
@@ -2010,10 +2361,28 @@ async def categories_customize_mode(
             category['user_visible'] = category['order'] <= 7
             category['user_order'] = category['order']
         
+        # Mark as built-in category
+        category['is_custom'] = False
+        
         if category['user_visible']:
             visible_categories.append(category)
         else:
             hidden_categories.append(category)
+    
+    # Add custom categories to visible list (they're always visible in customize mode for deletion)
+    for custom_cat in custom_categories:
+        custom_category = {
+            'id': f'custom_{custom_cat.id}',
+            'title': custom_cat.name,
+            'type': 'custom',
+            'sort': 'custom',
+            'color': 'purple',  # Default color for custom categories
+            'user_visible': True,
+            'user_order': 1000 + custom_cat.id,  # Put custom categories at the end
+            'is_custom': True,
+            'custom_id': custom_cat.id  # Store the actual custom category ID for deletion
+        }
+        visible_categories.append(custom_category)
     
     # Sort visible categories by user order
     visible_categories.sort(key=lambda x: x['user_order'])
@@ -2028,6 +2397,38 @@ async def categories_customize_mode(
         }
     )
 
+
+@app.delete("/discover/custom-category/{custom_category_id}")
+async def delete_custom_category(
+    custom_category_id: int,
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Delete a user's custom category"""
+    if not current_user:
+        return {"success": False, "message": "Authentication required"}
+    
+    try:
+        # Find the custom category
+        stmt = select(UserCustomCategory).where(
+            UserCustomCategory.id == custom_category_id,
+            UserCustomCategory.user_id == current_user.id
+        )
+        custom_category = session.exec(stmt).first()
+        
+        if not custom_category:
+            return {"success": False, "message": "Custom category not found"}
+        
+        # Delete the custom category
+        session.delete(custom_category)
+        session.commit()
+        
+        return {"success": True, "message": f"Custom category '{custom_category.name}' deleted successfully"}
+        
+    except Exception as e:
+        session.rollback()
+        print(f"Error deleting custom category: {e}")
+        return {"success": False, "message": "Failed to delete custom category"}
 
 @app.post("/discover/categories/save-customizations", response_class=HTMLResponse)
 async def save_category_customizations(
@@ -2217,6 +2618,96 @@ async def add_single_category(
         )
 
 
+@app.post("/discover/categories/save-custom", response_class=HTMLResponse)
+async def save_custom_category(
+    request: Request,
+    current_user: User | None = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Save user's current filters as a custom category"""
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Please log in to save categories.</div>')
+    
+    # Get form data
+    form = await request.form()
+    category_name = form.get("category_name", "").strip()
+    color = form.get("color", "purple")
+    
+    if not category_name:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Category name is required.</div>')
+    
+    # Validate category name length
+    if len(category_name) > 50:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">Category name too long (max 50 characters).</div>')
+    
+    # Check if user already has a category with this name
+    stmt = select(UserCustomCategory).where(
+        UserCustomCategory.user_id == current_user.id,
+        UserCustomCategory.name == category_name,
+        UserCustomCategory.is_active == True
+    )
+    existing_category = session.exec(stmt).first()
+    
+    if existing_category:
+        return HTMLResponse('<div class="text-center py-4 text-red-600">You already have a category with this name.</div>')
+    
+    # Get the highest display order for user's categories
+    stmt = select(UserCustomCategory).where(
+        UserCustomCategory.user_id == current_user.id,
+        UserCustomCategory.is_active == True
+    )
+    custom_categories = session.exec(stmt).all()
+    max_order = max([cat.display_order for cat in custom_categories] + [999])
+    
+    # Also check user's default category preferences
+    stmt = select(UserCategoryPreferences).where(UserCategoryPreferences.user_id == current_user.id)
+    user_prefs = session.exec(stmt).all()
+    max_default_order = max([pref.display_order for pref in user_prefs] + [7])
+    
+    # Set new category order after all existing categories
+    new_order = max(max_order, max_default_order) + 1
+    
+    # Extract filter parameters from form
+    media_type = form.get("media_type")
+    content_sources = form.getlist("content_sources")
+    genres = form.getlist("genres")
+    rating_source = form.get("rating_source")
+    rating_min = form.get("rating_min")
+    year_from = form.get("year_from")
+    year_to = form.get("year_to")
+    studios = form.getlist("studios")
+    streaming = form.getlist("streaming")
+    
+    # Convert lists to comma-separated strings
+    content_sources_str = ",".join(content_sources) if content_sources else None
+    genres_str = ",".join(genres) if genres else None
+    studios_str = ",".join(studios) if studios else None
+    streaming_str = ",".join(streaming) if streaming else None
+    
+    # Create new custom category
+    custom_category = UserCustomCategory(
+        user_id=current_user.id,
+        name=category_name,
+        media_type=media_type if media_type != "mixed" else None,
+        content_sources=content_sources_str,
+        genres=genres_str,
+        rating_source=rating_source,
+        rating_min=rating_min,
+        year_from=year_from,
+        year_to=year_to,
+        studios=studios_str,
+        streaming=streaming_str,
+        color=color,
+        display_order=new_order
+    )
+    
+    session.add(custom_category)
+    session.commit()
+    
+    # Return success response
+    return HTMLResponse('<div class="text-center py-4 text-green-600">Category saved successfully!</div>')
+
+
 @app.get("/discover/category/expanded", response_class=HTMLResponse)
 async def discover_category_expanded(
     request: Request,
@@ -2226,22 +2717,481 @@ async def discover_category_expanded(
     genres: list[str] = Query(default=[]),
     rating_source: str = "",
     rating_min: str = "",
+    year_from: str = "",
+    year_to: str = "",
+    studios: list[str] = Query(default=[]),
+    streaming: list[str] = Query(default=[]),
     page: int = 1,
     limit: int = 40,
+    # Parameters for database categories
+    db_category_type: str = Query(default="", description="Type for database categories (plex, requests, recommendations)"),
+    db_category_sort: str = Query(default="", description="Sort for database categories (recently_added, recent, personalized)"),
+    # Parameter for custom categories
+    custom_category_id: str = Query(default="", description="ID for custom user categories"),
     current_user: User | None = Depends(get_current_user_optional),
     session: Session = Depends(get_session)
 ):
-    """Get expanded category view with infinite scroll"""
+    """Get expanded category view with infinite scroll - NOW WITH FILTER SUPPORT"""
     if not current_user:
         return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
     
     # Debug: Print the parameters being received
     print(f"🔍 CATEGORY EXPANDED DEBUG: type='{type}', sort='{sort}', page={page}")
+    print(f"🔍 FILTERS RECEIVED: genres={genres}, rating={rating_min}, years={year_from}-{year_to}, studios={studios}, streaming={streaming}")
     
-    # For expanded content, use grid view to avoid infinite recursion
-    return await discover_category(
-        request, type, sort, limit, 0, page, "grid", current_user, session
-    )
+    # Call the main discover endpoint but with applied filters
+    from .services.tmdb_service import TMDBService
+    from .services.plex_service import PlexService
+    from .services.settings_service import SettingsService
+    from .services.plex_sync_service import PlexSyncService
+        
+    base_url = SettingsService.get_base_url(session)
+    tmdb_service = TMDBService(session)
+    
+    try:
+        # Handle different category types first
+        if db_category_type and db_category_sort:
+            # Database categories (recent requests, recommendations, recently added)
+            return await filter_database_category(
+                request, db_category_type, db_category_sort, type, 
+                genres, rating_source, rating_min, page, limit,
+                current_user, session, tmdb_service,
+                year_from, year_to, studios, streaming
+            )
+        elif custom_category_id:
+            # Custom user categories - load the saved filters and apply them
+            from app.models.user_custom_category import UserCustomCategory
+            
+            stmt = select(UserCustomCategory).where(
+                UserCustomCategory.id == int(custom_category_id),
+                UserCustomCategory.user_id == current_user.id,
+                UserCustomCategory.is_active == True
+            )
+            custom_category = session.exec(stmt).first()
+            
+            if not custom_category:
+                return HTMLResponse('<div class="text-center py-8 text-red-600">Custom category not found</div>')
+            
+            # Get the saved filters from the custom category
+            filters = custom_category.to_category_dict()['filters']
+            
+            # Use the saved filters for TMDB discover
+            custom_media_type = filters.get('media_type', type)
+            if custom_media_type == 'mixed':
+                custom_media_type = type  # Use the requested type for mixed categories
+            
+            # Build discover parameters from saved filters
+            results = tmdb_service.discover_movies(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                vote_average_gte=filters.get('rating_min'),
+                primary_release_date_gte=filters.get('year_from'),
+                primary_release_date_lte=filters.get('year_to'),
+                with_companies=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers=",".join(filters.get('streaming', [])) if filters.get('streaming') else None
+            ) if custom_media_type == 'movie' else tmdb_service.discover_tv(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                vote_average_gte=filters.get('rating_min'),
+                first_air_date_gte=filters.get('year_from'),
+                first_air_date_lte=filters.get('year_to'),
+                with_companies=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_networks=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers=",".join(filters.get('streaming', [])) if filters.get('streaming') else None
+            )
+            
+            limited_results = results.get('results', [])[:limit]
+            has_more = page < results.get('total_pages', 1) and len(limited_results) > 0
+            
+            # Add Plex status and prepare for template
+            sync_service = PlexSyncService(session)
+            for item in limited_results:
+                item['media_type'] = custom_media_type
+                item["base_url"] = base_url
+                
+            return create_template_response(
+                "components/expanded_results.html",
+                {
+                    "request": request,
+                    "current_user": current_user,
+                    "results": limited_results,
+                    "category": {
+                        "type": f"custom_{custom_category_id}",
+                        "sort": "user_defined",
+                        "title": custom_category.name
+                    },
+                    "category_title": custom_category.name,
+                    "sort_by": "user_defined",
+                    "media_type": custom_media_type,
+                    "has_more": has_more,
+                    "current_page": page,
+                    "total_pages": results.get('total_pages', 1),
+                    "current_query_params": f"custom_category_id={custom_category_id}&type={custom_media_type}&page={page + 1}",
+                }
+            )
+        
+        # Process filter parameters for content source categories
+        genre_filter = ",".join(genres) if genres else None
+        # Convert rating to TMDB format (only TMDB ratings are supported by TMDB API)
+        rating_filter = None
+        if rating_min:
+            if rating_source == "tmdb" or not rating_source:  # Default to TMDB if no source specified
+                rating_filter = float(rating_min)
+            elif rating_source == "imdb":
+                # IMDb uses 0-10 scale like TMDB, so we can use the same value
+                # Note: This filters by TMDB rating, not actual IMDb rating
+                rating_filter = float(rating_min)
+            elif rating_source == "rotten_tomatoes":
+                # Convert RT 0-100 scale to TMDB 0-10 scale as approximation
+                # Note: This filters by TMDB rating, not actual RT rating
+                rating_filter = float(rating_min) / 10.0
+        year_from_filter = int(year_from) if year_from else None
+        year_to_filter = int(year_to) if year_to else None
+        studios_filter = ",".join(studios) if studios else None
+        streaming_filter = ",".join(streaming) if streaming else None
+        
+        print(f"🔍 PROCESSED FILTERS: genre_filter={genre_filter}, rating_filter={rating_filter}, year_from={year_from_filter}, year_to={year_to_filter}")
+        
+        # For expanded view, we need to handle both traditional categories and filtered content
+        if content_sources and len(content_sources) > 0:
+            # Traditional category with additional filters using unified system
+            print(f"🔍 EXPANDED: Traditional category '{sort}' with additional filters")
+            
+            # Smart studio filtering for TV shows - separate networks from production companies
+            tv_networks_filter = None
+            tv_companies_filter = studios_filter
+            
+            if type == "tv" and studios_filter:
+                studio_ids = studios_filter.split(",") if studios_filter else []
+                # Networks (TV-specific)
+                tv_networks = [id for id in studio_ids if id in ["213", "49", "2739", "1024"]]  # Netflix, HBO, Disney+, Amazon Studios when used as networks
+                # Production companies that also work for TV
+                tv_companies = [id for id in studio_ids if id in ["420", "2", "174", "33", "5", "4"]]  # Marvel, Disney Pictures, Warner Bros, Universal, Columbia, Paramount
+                
+                if tv_networks:
+                    tv_networks_filter = ",".join(tv_networks)
+                if tv_companies:
+                    tv_companies_filter = ",".join(tv_companies)
+            
+            # Use unified category system with filters
+            try:
+                # CRITICAL FIX: Added debug logging and proper date parameter mapping
+                print(f"🔍 EXPANDED UNIFIED DEBUG - Using unified category system for {type}, category={sort}")
+                print(f"🔍 EXPANDED UNIFIED DEBUG - Year filters: {year_from_filter} to {year_to_filter}")
+                print(f"🔍 EXPANDED UNIFIED DEBUG - Will map to {'primary_release_date' if type == 'movie' else 'first_air_date'}")
+                
+                # CRITICAL FIX: Handle mixed media type correctly for date parameters
+                if type == "mixed":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                    companies_filter = studios_filter  # Use studios for both movie and TV companies in mixed
+                    networks_filter = studios_filter   # Also try studios as networks for TV in mixed
+                elif type == "movie":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = None
+                    tv_date_lte = None
+                    companies_filter = studios_filter
+                    networks_filter = None
+                else:  # type == "tv"
+                    movie_date_gte = None
+                    movie_date_lte = None
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                    companies_filter = tv_companies_filter
+                    networks_filter = tv_networks_filter
+                
+                results = tmdb_service.get_category_content(
+                    media_type=type,
+                    category=sort,
+                    page=page,
+                    with_genres=genre_filter,
+                    vote_average_gte=rating_filter,
+                    with_companies=companies_filter,
+                    with_networks=networks_filter,
+                    with_watch_providers=streaming_filter,
+                    primary_release_date_gte=movie_date_gte,
+                    primary_release_date_lte=movie_date_lte,
+                    first_air_date_gte=tv_date_gte,
+                    first_air_date_lte=tv_date_lte
+                )
+            except ValueError as e:
+                print(f"🔍 EXPANDED: Category '{sort}' not found in unified system, falling back to popular")
+                # Fallback for unknown categories
+                # CRITICAL FIX: Added debug logging for fallback to popular
+                print(f"🔍 EXPANDED FALLBACK DEBUG - Falling back to popular for {type}")
+                print(f"🔍 EXPANDED FALLBACK DEBUG - Year filters: {year_from_filter} to {year_to_filter}")
+                
+                # CRITICAL FIX: Handle mixed media type correctly for date parameters in fallback too
+                if type == "mixed":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                    companies_filter = studios_filter
+                    networks_filter = studios_filter
+                elif type == "movie":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = None
+                    tv_date_lte = None
+                    companies_filter = studios_filter
+                    networks_filter = None
+                else:  # type == "tv"
+                    movie_date_gte = None
+                    movie_date_lte = None
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                    companies_filter = tv_companies_filter
+                    networks_filter = tv_networks_filter
+                
+                results = tmdb_service.get_category_content(
+                    media_type=type,
+                    category="popular",
+                    page=page,
+                    with_genres=genre_filter,
+                    vote_average_gte=rating_filter,
+                    with_companies=companies_filter,
+                    with_networks=networks_filter,
+                    with_watch_providers=streaming_filter,
+                    primary_release_date_gte=movie_date_gte,
+                    primary_release_date_lte=movie_date_lte,
+                    first_air_date_gte=tv_date_gte,
+                    first_air_date_lte=tv_date_lte
+                )
+            
+            limited_results = results.get('results', [])
+            has_more = results.get('total_pages', 1) > page
+            
+        else:
+            # Pure filtered content (no specific category)
+            print(f"🔍 EXPANDED: Pure filtered content search")
+            
+            if type == "movie":
+                results = tmdb_service.discover_movies(
+                    page=page, sort_by="popularity.desc",
+                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                    with_companies=studios_filter, with_watch_providers=streaming_filter,
+                    primary_release_date_gte=year_from_filter, primary_release_date_lte=year_to_filter
+                )
+            elif type == "tv":
+                # Smart studio filtering for TV shows - separate networks from production companies
+                tv_networks_filter = None
+                tv_companies_filter = None
+                
+                if studios_filter:
+                    studio_ids = studios_filter.split(",") if studios_filter else []
+                    # Networks (TV-specific)
+                    tv_networks = [id for id in studio_ids if id in ["213", "49", "2739", "1024"]]  # Netflix, HBO, Disney+, Amazon Studios when used as networks
+                    # Production companies that also work for TV
+                    tv_companies = [id for id in studio_ids if id in ["420", "2", "174", "33", "5", "4"]]  # Marvel, Disney Pictures, Warner Bros, Universal, Columbia, Paramount
+                    
+                    if tv_networks:
+                        tv_networks_filter = ",".join(tv_networks)
+                    if tv_companies:
+                        tv_companies_filter = ",".join(tv_companies)
+                
+                results = tmdb_service.discover_tv(
+                    page=page, sort_by="popularity.desc",
+                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                    with_networks=tv_networks_filter, with_companies=tv_companies_filter,
+                    with_watch_providers=streaming_filter,
+                    first_air_date_gte=year_from_filter, first_air_date_lte=year_to_filter
+                )
+            else:
+                # Mixed type - combine results
+                movie_results = tmdb_service.discover_movies(
+                    page=page, sort_by="popularity.desc",
+                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                    with_companies=studios_filter, with_watch_providers=streaming_filter,
+                    primary_release_date_gte=year_from_filter, primary_release_date_lte=year_to_filter
+                )
+                # Smart studio filtering for TV shows in mixed mode
+                tv_networks_filter = None
+                tv_companies_filter = None
+                
+                if studios_filter:
+                    studio_ids = studios_filter.split(",") if studios_filter else []
+                    # Networks (TV-specific)
+                    tv_networks = [id for id in studio_ids if id in ["213", "49", "2739", "1024"]]  # Netflix, HBO, Disney+, Amazon Studios when used as networks
+                    # Production companies that also work for TV
+                    tv_companies = [id for id in studio_ids if id in ["420", "2", "174", "33", "5", "4"]]  # Marvel, Disney Pictures, Warner Bros, Universal, Columbia, Paramount
+                    
+                    if tv_networks:
+                        tv_networks_filter = ",".join(tv_networks)
+                    if tv_companies:
+                        tv_companies_filter = ",".join(tv_companies)
+                
+                tv_results = tmdb_service.discover_tv(
+                    page=page, sort_by="popularity.desc",
+                    with_genres=genre_filter, vote_average_gte=rating_filter,
+                    with_networks=tv_networks_filter, with_companies=tv_companies_filter,
+                    with_watch_providers=streaming_filter,
+                    first_air_date_gte=year_from_filter, first_air_date_lte=year_to_filter
+                )
+                
+                # Combine and sort by popularity
+                all_results = []
+                for item in movie_results.get('results', []):
+                    item['media_type'] = 'movie'
+                    all_results.append(item)
+                for item in tv_results.get('results', []):
+                    item['media_type'] = 'tv'
+                    all_results.append(item)
+                
+                # Sort by vote_average * vote_count for popularity
+                all_results.sort(key=lambda x: x.get('vote_average', 0) * x.get('vote_count', 0), reverse=True)
+                
+                limited_results = all_results[:limit]
+                has_more = len(all_results) >= limit or movie_results.get('total_pages', 1) > page or tv_results.get('total_pages', 1) > page
+                
+                results = {"results": limited_results}
+            
+            if type != "mixed":
+                limited_results = results.get('results', [])
+                has_more = results.get('total_pages', 1) > page
+        
+        # Add status information
+        try:
+            sync_service = PlexSyncService(session)
+            tmdb_ids = [item['id'] for item in limited_results]
+            
+            if type == "mixed":
+                # Handle mixed media types
+                movie_ids = [item['id'] for item in limited_results if item.get('media_type') == 'movie']
+                tv_ids = [item['id'] for item in limited_results if item.get('media_type') == 'tv']
+                
+                movie_status = sync_service.check_items_status(movie_ids, 'movie') if movie_ids else {}
+                tv_status = sync_service.check_items_status(tv_ids, 'tv') if tv_ids else {}
+                
+                for item in limited_results:
+                    if item.get('media_type') == 'movie':
+                        status = movie_status.get(item['id'], 'available')
+                    else:
+                        status = tv_status.get(item['id'], 'available')
+                    item['status'] = status
+                    item['in_plex'] = status == 'in_plex'
+            else:
+                # Single media type
+                status_map = sync_service.check_items_status(tmdb_ids, type)
+                for item in limited_results:
+                    item['media_type'] = type
+                    status = status_map.get(item['id'], 'available')
+                    item['status'] = status
+                    item['in_plex'] = status == 'in_plex'
+                    item["base_url"] = base_url
+        except Exception as status_error:
+            print(f"Warning: Status check failed for expanded view: {status_error}")
+            for item in limited_results:
+                if not item.get('media_type'):
+                    item['media_type'] = type
+                item['status'] = 'available'
+                item['in_plex'] = False
+                item["base_url"] = base_url
+        
+        # Debug output for infinite scroll
+        print(f"🔍 EXPANDED CONTEXT DEBUG - has_more: {has_more}, page: {page}, total_pages: {results.get('total_pages', 'unknown')}, results_count: {len(limited_results)}")
+        
+        # Return expanded grid template
+        return create_template_response(
+            "components/expanded_results.html",
+            {
+                "request": request,
+                "current_user": current_user,
+                "results": limited_results,
+                "category": {
+                    "type": type,
+                    "sort": sort,
+                    "title": f"{sort.replace('_', ' ').title()} {type.title()}"
+                },
+                "sort_by": sort,
+                "has_more": has_more,
+                "current_page": page,
+                "base_url": base_url,
+                # Pass current filter values for infinite scroll
+                "current_content_sources": content_sources,
+                "current_genres": genres,
+                "current_rating_min": rating_min,
+                "current_rating_source": rating_source,
+                "current_year_from": year_from,
+                "current_year_to": year_to,
+                "current_studios": studios,
+                "current_streaming": streaming
+            }
+        )
+        
+    except Exception as expanded_error:
+        print(f"❌ Error in expanded category view: {expanded_error}")
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Error loading expanded content</div>')
+
+@app.get("/discover/genres", response_class=HTMLResponse)
+async def discover_genres(
+    request: Request,
+    media_type: str = "movie",
+    current_genres: list[str] = Query(default=[]),
+    current_user: User | None = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    """Get dynamic genre list based on media type"""
+    if not current_user:
+        return HTMLResponse('<div class="text-red-600 text-xs">Please log in to see genres.</div>')
+    
+    try:
+        from .services.tmdb_service import TMDBService
+        tmdb_service = TMDBService(session)
+        
+        # Get genres for the specific media type
+        if media_type == "tv":
+            genre_data = tmdb_service.get_genre_list("tv")
+        elif media_type == "mixed":
+            # For mixed media type, get both movie and TV genres and combine them
+            movie_genres = tmdb_service.get_genre_list("movie").get('genres', [])
+            tv_genres = tmdb_service.get_genre_list("tv").get('genres', [])
+            
+            # Combine and deduplicate genres by name
+            combined_genres = {}
+            for genre in movie_genres:
+                combined_genres[genre['name']] = genre
+            for genre in tv_genres:
+                if genre['name'] not in combined_genres:
+                    combined_genres[genre['name']] = genre
+                else:
+                    # If genre exists in both, prefer the movie ID for consistency with TMDB discover
+                    # but note that mixed queries will handle both IDs appropriately
+                    pass
+            
+            genre_data = {'genres': list(combined_genres.values())}
+        else:
+            # Default to movie genres for "movie"
+            genre_data = tmdb_service.get_genre_list("movie")
+        
+        genres = genre_data.get('genres', [])
+        
+        # Generate HTML for genre checkboxes
+        html_content = ""
+        for genre in genres:
+            genre_id = str(genre['id'])
+            genre_name = genre['name']
+            checked = 'checked' if genre_id in current_genres else ''
+            
+            html_content += f'''
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="genres" value="{genre_id}" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3" {checked}>
+                {genre_name}
+            </label>
+            '''
+        
+        return HTMLResponse(html_content)
+        
+    except Exception as e:
+        print(f"Error fetching genres: {e}")
+        return HTMLResponse('<div class="text-red-600 text-xs">Error loading genres</div>')
 
 @app.get("/discover/filters", response_class=HTMLResponse)
 async def discover_filters(
@@ -2334,19 +3284,312 @@ async def discover_category_more(
     genres: list[str] = Query(default=[]),
     rating_source: str = "",
     rating_min: str = "",
+    year_from: str = "",
+    year_to: str = "",
+    studios: list[str] = Query(default=[]),
+    streaming: list[str] = Query(default=[]),
     page: int = 1,
     limit: int = 40,
+    # Parameters for database categories
+    db_category_type: str = Query(default="", description="Type for database categories (plex, requests, recommendations)"),
+    db_category_sort: str = Query(default="", description="Sort for database categories (recently_added, recent, personalized)"),
+    # Parameter for custom categories
+    custom_category_id: str = Query(default="", description="ID for custom user categories"),
     current_user: User | None = Depends(get_current_user_optional),
     session: Session = Depends(get_session)
 ):
-    """Get more items for infinite scroll - returns only the movie cards"""
+    """Get more items for infinite scroll - simplified for debugging"""
     if not current_user:
         return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
     
-    # Just call the existing discover_category with view="more" to get the cards
-    return await discover_category(
-        request, type, sort, limit, 0, page, "more", current_user, session
-    )
+    try:
+        # Import required services
+        from .services.tmdb_service import TMDBService
+        from .services.plex_service import PlexService
+        from .services.settings_service import SettingsService
+        from .services.plex_sync_service import PlexSyncService
+        from fastapi.templating import Jinja2Templates
+        
+        base_url = SettingsService.get_base_url(session)
+        tmdb_service = TMDBService(session)
+        templates = Jinja2Templates(directory="app/templates")
+        
+        # Handle different category types first (same as expanded endpoint)
+        if db_category_type and db_category_sort:
+            # Database categories (recent requests, recommendations, recently added)
+            return await filter_database_category(
+                request, db_category_type, db_category_sort, type, 
+                genres, rating_source, rating_min, page, limit,
+                current_user, session, tmdb_service,
+                year_from, year_to, studios, streaming
+            )
+        elif custom_category_id:
+            # Custom user categories - load the saved filters and apply them
+            from app.models.user_custom_category import UserCustomCategory
+            
+            stmt = select(UserCustomCategory).where(
+                UserCustomCategory.id == int(custom_category_id),
+                UserCustomCategory.user_id == current_user.id,
+                UserCustomCategory.is_active == True
+            )
+            custom_category = session.exec(stmt).first()
+            
+            if not custom_category:
+                return HTMLResponse('<div class="text-center py-8 text-red-600">Custom category not found</div>')
+            
+            # Get the saved filters from the custom category
+            filters = custom_category.to_category_dict()['filters']
+            
+            # Use the saved filters for TMDB discover
+            custom_media_type = filters.get('media_type', type)
+            if custom_media_type == 'mixed':
+                custom_media_type = type
+            
+            # Build discover parameters from saved filters
+            results = tmdb_service.discover_movies(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                vote_average_gte=filters.get('rating_min'),
+                primary_release_date_gte=filters.get('year_from'),
+                primary_release_date_lte=filters.get('year_to'),
+                with_companies=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers=",".join(filters.get('streaming', [])) if filters.get('streaming') else None
+            ) if custom_media_type == 'movie' else tmdb_service.discover_tv(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                vote_average_gte=filters.get('rating_min'),
+                first_air_date_gte=filters.get('year_from'),
+                first_air_date_lte=filters.get('year_to'),
+                with_companies=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_networks=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers=",".join(filters.get('streaming', [])) if filters.get('streaming') else None
+            )
+            
+            limited_results = results.get('results', [])[:limit]
+            has_more = page < results.get('total_pages', 1) and len(limited_results) > 0
+            
+            # Add Plex status and prepare for template
+            sync_service = PlexSyncService(session)
+            for item in limited_results:
+                item['media_type'] = custom_media_type
+                item["base_url"] = base_url
+                
+            return create_template_response(
+                "components/movie_cards_only.html",
+                {
+                    "request": request,
+                    "results": limited_results,
+                    "has_more": has_more,
+                    "current_page": page,
+                    "total_pages": results.get('total_pages', 1),
+                    "current_query_params": f"custom_category_id={custom_category_id}&type={custom_media_type}&page={page + 1}",
+                    "called_from_expanded": True,
+                }
+            )
+        
+        # Process filter parameters for content source categories (same logic as discover_category_expanded)
+        genre_filter = ",".join(genres) if genres else None
+        rating_filter = None
+        if rating_min:
+            if rating_source == "tmdb" or not rating_source:
+                rating_filter = float(rating_min)
+            elif rating_source == "imdb":
+                rating_filter = float(rating_min)
+            elif rating_source == "rotten_tomatoes":
+                rating_filter = float(rating_min) / 10.0
+        year_from_filter = int(year_from) if year_from else None
+        year_to_filter = int(year_to) if year_to else None
+        
+        # Handle studio/company filtering
+        company_filter = None
+        if studios:
+            company_filter = ",".join(studios)
+            
+        # Handle streaming service filtering
+        streaming_filter = None
+        if streaming:
+            streaming_filter = ",".join(streaming)
+        
+        results = []
+        total_pages = 1
+        
+        # Get results based on category type (SAME LOGIC AS MAIN CATEGORY ENDPOINT)
+        if type in ['recently-added', 'recent-requests']:
+            # Database categories - get from Plex sync data
+            plex_sync_service = PlexSyncService(session)
+            if type == 'recently-added':
+                results = plex_sync_service.get_recently_added_media(limit=limit, offset=(page-1)*limit)
+            elif type == 'recent-requests':
+                # Get recent requests from database
+                from sqlmodel import select
+                from .models.request import Request as MediaRequest
+                stmt = select(MediaRequest).order_by(MediaRequest.created_at.desc()).limit(limit).offset((page-1)*limit)
+                db_results = session.exec(stmt).all()
+                results = [{'id': r.tmdb_id, 'title': r.title, 'media_type': r.media_type} for r in db_results]
+            # For database results, estimate has_more based on result count
+            total_pages = 1000 if len(results) >= limit else page
+        elif type.startswith('custom_'):
+            # Custom category logic
+            from .models.user_custom_category import UserCustomCategory
+            from sqlmodel import select
+            
+            category_id = int(type.split('_')[1])
+            stmt = select(UserCustomCategory).where(
+                UserCustomCategory.id == category_id,
+                UserCustomCategory.user_id == current_user.id
+            )
+            custom_category = session.exec(stmt).first()
+            
+            if custom_category:
+                # Use custom category filters
+                media_type = custom_category.media_type or "movie"
+                filters = custom_category.get_filters()
+                
+                if media_type == "movie":
+                    data = tmdb_service.discover_movies(
+                        page=page,
+                        with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                        with_companies=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                        with_watch_providers=",".join(filters.get('streaming', [])) if filters.get('streaming') else None,
+                        vote_average_gte=float(filters.get('rating_min', 0)) if filters.get('rating_min') else None
+                    )
+                else:
+                    data = tmdb_service.discover_tv(
+                        page=page,
+                        with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                        with_companies=",".join(filters.get('studios', [])) if filters.get('studios') else None,
+                        with_watch_providers=",".join(filters.get('streaming', [])) if filters.get('streaming') else None,
+                        vote_average_gte=float(filters.get('rating_min', 0)) if filters.get('rating_min') else None
+                    )
+                
+                results = data.get('results', [])
+                total_pages = data.get('total_pages', 1)
+                
+                # Add media_type
+                for item in results:
+                    item['media_type'] = media_type
+        else:
+            # TMDB API categories using unified system
+            print(f"🔍 EXPANDED: Pure category '{sort}' without additional filters")
+            
+            try:
+                # CRITICAL FIX: Added debug logging for pure category call
+                print(f"🔍 PURE CATEGORY DEBUG - Pure category {sort} for {type}")
+                print(f"🔍 PURE CATEGORY DEBUG - Year filters: {year_from_filter} to {year_to_filter}")
+                
+                # CRITICAL FIX: Handle mixed media type correctly for date parameters
+                # For mixed media, we need to pass BOTH movie and TV date parameters
+                if type == "mixed":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                elif type == "movie":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = None
+                    tv_date_lte = None
+                else:  # type == "tv"
+                    movie_date_gte = None
+                    movie_date_lte = None
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                
+                data = tmdb_service.get_category_content(
+                    media_type=type,
+                    category=sort,
+                    page=page,
+                    with_genres=genre_filter,
+                    vote_average_gte=rating_filter,
+                    with_companies=company_filter,
+                    with_networks=None,  # Networks not used in this path
+                    with_watch_providers=streaming_filter,
+                    primary_release_date_gte=movie_date_gte,
+                    primary_release_date_lte=movie_date_lte,
+                    first_air_date_gte=tv_date_gte,
+                    first_air_date_lte=tv_date_lte
+                )
+            except ValueError as e:
+                print(f"🔍 EXPANDED: Category '{sort}' not found in unified system, falling back to popular")
+                # Fallback for unknown categories
+                # CRITICAL FIX: Added debug logging for fallback in pure category
+                print(f"🔍 PURE CATEGORY FALLBACK DEBUG - Falling back to popular for {type}")
+                print(f"🔍 PURE CATEGORY FALLBACK DEBUG - Year filters: {year_from_filter} to {year_to_filter}")
+                
+                # CRITICAL FIX: Handle mixed media type correctly for date parameters in fallback too
+                if type == "mixed":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                elif type == "movie":
+                    movie_date_gte = year_from_filter
+                    movie_date_lte = year_to_filter
+                    tv_date_gte = None
+                    tv_date_lte = None
+                else:  # type == "tv"
+                    movie_date_gte = None
+                    movie_date_lte = None
+                    tv_date_gte = year_from_filter
+                    tv_date_lte = year_to_filter
+                
+                data = tmdb_service.get_category_content(
+                    media_type=type,
+                    category="popular",
+                    page=page,
+                    with_genres=genre_filter,
+                    vote_average_gte=rating_filter,
+                    with_companies=company_filter,
+                    with_networks=None,  # Networks not used in this path
+                    with_watch_providers=streaming_filter,
+                    primary_release_date_gte=movie_date_gte,
+                    primary_release_date_lte=movie_date_lte,
+                    first_air_date_gte=tv_date_gte,
+                    first_air_date_lte=tv_date_lte
+                )
+            
+            results = data.get('results', [])
+            total_pages = data.get('total_pages', 1)
+        
+        # Add media_type to all results for consistency
+        for item in results:
+            if 'media_type' not in item:
+                item['media_type'] = type
+            # Skip Plex checks for performance
+            item['in_plex'] = False
+        
+        # Check if there are more results available using TMDB pagination
+        has_more = page < total_pages and len(results) > 0
+        
+        
+        # Prepare context for template  
+        context = {
+            "request": request,
+            "results": results,
+            "base_url": base_url,
+            "has_more": has_more,
+            "current_page": page,
+            "called_from_expanded": False,  # Allow infinite scroll trigger in movie_cards_only.html
+            # Pass all filter parameters for the next page
+            "current_query_params": f"type={type}&sort={sort}" + 
+                                   (f"&{'&'.join([f'content_sources={cs}' for cs in content_sources])}" if content_sources else "") +
+                                   (f"&{'&'.join([f'genres={g}' for g in genres])}" if genres else "") +
+                                   (f"&rating_min={rating_min}&rating_source={rating_source}" if rating_min else "") +
+                                   (f"&year_from={year_from}" if year_from else "") +
+                                   (f"&year_to={year_to}" if year_to else "") +
+                                   (f"&{'&'.join([f'studios={s}' for s in studios])}" if studios else "") +
+                                   (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else "")
+        }
+        
+        return templates.TemplateResponse("components/movie_cards_only.html", context)
+        
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(f'<div class="text-center py-8 text-red-600">Error: {str(e)}</div>')
 
 
 @app.get("/search")
