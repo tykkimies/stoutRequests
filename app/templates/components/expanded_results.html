@@ -89,17 +89,30 @@
         {% endfor %}
     </div>
 
-    <!-- Infinite Scroll Trigger -->
-    {% if total_pages and page < total_pages %}
-    <div id="load-more-trigger"
-        hx-get="{{ base_url }}/discover?media_type={{ current_media_type }}&page={{ page + 1 }}{% for source in current_content_sources %}&content_sources={{ source }}{% endfor %}{% for genre in current_genres %}&genres={{ genre }}{% endfor %}{% if current_rating_min %}&rating_min={{ current_rating_min }}&rating_source=tmdb{% endif %}"
+    <!-- Infinite Scroll Trigger for first page -->
+    {% if has_more %}
+    <div id="load-more-trigger-page-1"
+        hx-get="{{ base_url|default('') }}{% if current_query_params and current_query_params.startswith('media_type=') %}/discover?{{ current_query_params }}&page=2{% else %}/discover/category/more?{% if custom_category_id %}custom_category_id={{ custom_category_id }}&type={{ media_type|default('movie') }}&page=2{% elif current_db_category_type %}db_category_type={{ current_db_category_type }}&db_category_sort={{ current_db_category_sort }}&type={{ category.type|default('movie') }}&page=2{% if current_rating_min %}&rating_min={{ current_rating_min }}&rating_source={{ current_rating_source }}{% endif %}{% else %}type={{ category.type|default('movie') }}&sort={{ category.sort|default('trending') }}&page=2{% endif %}&limit=40{% endif %}"
         hx-target="#results-grid"
         hx-swap="beforeend"
-        hx-trigger="revealed"
+        hx-trigger="intersect threshold:0.1 once"
         hx-on="htmx:afterRequest: if(event.detail.successful) this.remove()"
-        class="text-center py-8 col-span-full">
+        class="text-center py-8">
         <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
         <p class="text-gray-500">Loading more content...</p>
+    </div>
+    {% endif %}
+    
+    <!-- End of results info -->
+    {% if not has_more %}
+    <div class="text-center py-4 text-gray-500 text-xs">
+        {% if results|length == 0 %}
+        No results to display
+        {% elif results|length < 40 %}
+        Showing all {{ results|length }} results
+        {% else %}
+        You've reached the end of results
+        {% endif %}
     </div>
     {% endif %}
     

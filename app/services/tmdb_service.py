@@ -428,7 +428,7 @@ class TMDBService:
                        vote_count_gte: int = None,
                        with_companies: str = None, with_watch_providers: str = None,
                        primary_release_date_gte: str = None, primary_release_date_lte: str = None,
-                       region: str = "US") -> Dict:
+                       region: str = "US", watch_region: str = "US") -> Dict:
         """Discover movies with flexible filtering and sorting"""
         url = f"{self.base_url}/discover/movie"
         params = {
@@ -449,6 +449,8 @@ class TMDBService:
             params['with_companies'] = with_companies
         if with_watch_providers:
             params['with_watch_providers'] = with_watch_providers
+            # CRITICAL FIX: watch_region is REQUIRED when using with_watch_providers
+            params['watch_region'] = watch_region
         if primary_release_date_gte:
             # Handle both string and int formats
             if isinstance(primary_release_date_gte, int):
@@ -462,10 +464,23 @@ class TMDBService:
             else:
                 params['primary_release_date.lte'] = primary_release_date_lte
         
+        # Debug logging for TMDB API calls
+        print(f"🌐 TMDB Movies API Request URL: {url}")
+        print(f"🌐 TMDB Movies API Parameters: {params}")
+        
         response = requests.get(url, params=params)
         response.raise_for_status()
         
         data = response.json()
+        print(f"🌐 TMDB Movies API Response: {len(data.get('results', []))} results found")
+        
+        # Debug the actual ratings returned
+        if data.get('results'):
+            ratings = [result.get('vote_average', 0) for result in data.get('results', [])]
+            print(f"🌐 TMDB Movies API Ratings: {ratings}")
+            print(f"🌐 Min rating in results: {min(ratings) if ratings else 'N/A'}")
+            print(f"🌐 Max rating in results: {max(ratings) if ratings else 'N/A'}")
+        
         self._process_results(data.get('results', []))
         return data
     
@@ -474,7 +489,7 @@ class TMDBService:
                    vote_count_gte: int = None,
                    with_networks: str = None, with_companies: str = None, with_watch_providers: str = None,
                    first_air_date_gte: str = None, first_air_date_lte: str = None,
-                   region: str = "US") -> Dict:
+                   region: str = "US", watch_region: str = "US") -> Dict:
         """Discover TV shows with flexible filtering and sorting"""
         url = f"{self.base_url}/discover/tv"
         params = {
@@ -497,6 +512,8 @@ class TMDBService:
             params['with_companies'] = with_companies
         if with_watch_providers:
             params['with_watch_providers'] = with_watch_providers
+            # CRITICAL FIX: watch_region is REQUIRED when using with_watch_providers
+            params['watch_region'] = watch_region
         if first_air_date_gte:
             # Handle both string and int formats
             if isinstance(first_air_date_gte, int):
@@ -510,10 +527,23 @@ class TMDBService:
             else:
                 params['first_air_date.lte'] = first_air_date_lte
         
+        # Debug logging for TMDB API calls
+        print(f"🌐 TMDB TV API Request URL: {url}")
+        print(f"🌐 TMDB TV API Parameters: {params}")
+        
         response = requests.get(url, params=params)
         response.raise_for_status()
         
         data = response.json()
+        print(f"🌐 TMDB TV API Response: {len(data.get('results', []))} results found")
+        
+        # Debug the actual ratings returned
+        if data.get('results'):
+            ratings = [result.get('vote_average', 0) for result in data.get('results', [])]
+            print(f"🌐 TMDB TV API Ratings: {ratings}")
+            print(f"🌐 Min rating in results: {min(ratings) if ratings else 'N/A'}")
+            print(f"🌐 Max rating in results: {max(ratings) if ratings else 'N/A'}")
+        
         self._process_results(data.get('results', []))
         return data
     
@@ -587,7 +617,8 @@ class TMDBService:
                             with_watch_providers=with_watch_providers,
                             primary_release_date_gte=primary_release_date_gte,
                             primary_release_date_lte=primary_release_date_lte,
-                            region=region
+                            region=region,
+                            watch_region=region
                         )
                     else:  # tv
                         return self.discover_tv(
@@ -600,7 +631,8 @@ class TMDBService:
                             with_watch_providers=with_watch_providers,
                             first_air_date_gte=first_air_date_gte,
                             first_air_date_lte=first_air_date_lte,
-                            region=region
+                            region=region,
+                            watch_region=region
                         )
                 else:
                     # No filters applied, use original trending endpoint for authentic results
@@ -635,6 +667,9 @@ class TMDBService:
             if primary_release_date_lte:
                 params['primary_release_date_lte'] = primary_release_date_lte
             
+            # Add watch_region parameter for streaming filters
+            if with_watch_providers:
+                params['watch_region'] = region
             return self.discover_movies(**params)
             
         elif media_type == 'tv':
@@ -667,6 +702,9 @@ class TMDBService:
             if first_air_date_lte:
                 params['first_air_date_lte'] = first_air_date_lte
             
+            # Add watch_region parameter for streaming filters
+            if with_watch_providers:
+                params['watch_region'] = region
             return self.discover_tv(**params)
     
     def _get_mixed_content(self, category: str, page: int = 1, 
@@ -679,6 +717,7 @@ class TMDBService:
         """
         Get mixed content by combining movie and TV results.
         Makes separate API calls for movies and TV shows, then combines and sorts the results.
+        CRITICAL FIX: Properly maps date parameters between movie and TV API calls.
         """
         try:
             # Ensure both media types support this category
@@ -695,6 +734,29 @@ class TMDBService:
                 # Map genres to appropriate IDs for each media type
                 movie_genres, tv_genres = self._map_genres_for_mixed_content(with_genres)
             
+            # CRITICAL FIX: Map date parameters correctly between movie and TV
+            # If we have movie date parameters but not TV date parameters, map them
+            tv_first_air_date_gte = first_air_date_gte
+            tv_first_air_date_lte = first_air_date_lte
+            
+            # Map movie date filters to TV date filters if TV dates not provided
+            if primary_release_date_gte and not first_air_date_gte:
+                tv_first_air_date_gte = primary_release_date_gte
+            if primary_release_date_lte and not first_air_date_lte:
+                tv_first_air_date_lte = primary_release_date_lte
+                
+            # Similarly, map TV date filters to movie date filters if needed
+            movie_primary_release_date_gte = primary_release_date_gte
+            movie_primary_release_date_lte = primary_release_date_lte
+            
+            if first_air_date_gte and not primary_release_date_gte:
+                movie_primary_release_date_gte = first_air_date_gte
+            if first_air_date_lte and not primary_release_date_lte:
+                movie_primary_release_date_lte = first_air_date_lte
+            
+            print(f"🔍 MIXED CONTENT DEBUG - Movie dates: {movie_primary_release_date_gte} to {movie_primary_release_date_lte}")
+            print(f"🔍 MIXED CONTENT DEBUG - TV dates: {tv_first_air_date_gte} to {tv_first_air_date_lte}")
+            
             # Calculate pages for each media type to get roughly equal representation
             # For page 1, get 10 items from each. For page 2+, alternate or split accordingly
             items_per_type = 10  # 10 movies + 10 TV shows = 20 total per page
@@ -705,8 +767,8 @@ class TMDBService:
                     "movie", category, page=page,
                     with_genres=movie_genres, vote_average_gte=vote_average_gte,
                     with_companies=with_companies, with_watch_providers=with_watch_providers,
-                    primary_release_date_gte=primary_release_date_gte, 
-                    primary_release_date_lte=primary_release_date_lte,
+                    primary_release_date_gte=movie_primary_release_date_gte, 
+                    primary_release_date_lte=movie_primary_release_date_lte,
                     region=region
                 )
                 movies = movie_results.get('results', [])
@@ -724,8 +786,8 @@ class TMDBService:
                     with_genres=tv_genres, vote_average_gte=vote_average_gte,
                     with_companies=with_companies, with_networks=with_networks,
                     with_watch_providers=with_watch_providers,
-                    first_air_date_gte=first_air_date_gte,
-                    first_air_date_lte=first_air_date_lte,
+                    first_air_date_gte=tv_first_air_date_gte,
+                    first_air_date_lte=tv_first_air_date_lte,
                     region=region
                 )
                 tv_shows = tv_results.get('results', [])
@@ -787,68 +849,165 @@ class TMDBService:
     def _map_genres_for_mixed_content(self, genre_ids_str: str):
         """
         Map genre IDs appropriately for mixed content queries.
-        Some genres have different IDs between movies and TV shows.
+        CRITICAL FIX: Direct ID mapping based on comprehensive TMDB research.
+        Some genres have completely different IDs between movies and TV shows.
+        
+        Based on research findings:
+        - Action: Movie ID 28 → TV ID 10759 (Action & Adventure)
+        - Adventure: Movie ID 12 → TV ID 10759 (Action & Adventure) 
+        - Fantasy: Movie ID 14 → TV ID 10765 (Sci-Fi & Fantasy)
+        - Science Fiction: Movie ID 878 → TV ID 10765 (Sci-Fi & Fantasy)
+        - War: Movie ID 10752 → TV ID 10768 (War & Politics)
         """
         if not genre_ids_str:
             return None, None
             
         try:
-            # Get both genre lists to create mapping
-            movie_genres = self.get_genre_list("movie").get('genres', [])
-            tv_genres = self.get_genre_list("tv").get('genres', [])
+            print(f"🔄 Genre mapping DEBUG: Starting with input genres: {genre_ids_str}")
             
-            # Create name-to-ID mappings
-            movie_genre_map = {genre['name']: str(genre['id']) for genre in movie_genres}
-            tv_genre_map = {genre['name']: str(genre['id']) for genre in tv_genres}
+            # Complete Movie Genre List (19 genres)
+            movie_genres = {
+                '28': 'Action',
+                '12': 'Adventure', 
+                '16': 'Animation',
+                '35': 'Comedy',
+                '80': 'Crime',
+                '99': 'Documentary',
+                '18': 'Drama',
+                '10751': 'Family',
+                '14': 'Fantasy',
+                '36': 'History',
+                '27': 'Horror',
+                '10402': 'Music',
+                '9648': 'Mystery',
+                '10749': 'Romance',
+                '878': 'Science Fiction',
+                '10770': 'TV Movie',
+                '53': 'Thriller',
+                '10752': 'War',
+                '37': 'Western'
+            }
+            
+            # Complete TV Genre List (16 genres)
+            tv_genres = {
+                '10759': 'Action & Adventure',
+                '16': 'Animation',
+                '35': 'Comedy',
+                '80': 'Crime',
+                '99': 'Documentary',
+                '18': 'Drama',
+                '10751': 'Family',
+                '10762': 'Kids',
+                '9648': 'Mystery',
+                '10763': 'News',
+                '10764': 'Reality',
+                '10765': 'Sci-Fi & Fantasy',
+                '10766': 'Soap',
+                '10767': 'Talk',
+                '10768': 'War & Politics',
+                '37': 'Western'
+            }
+            
+            # Direct ID Mapping: Movie ID → TV ID
+            movie_to_tv_mapping = {
+                '28': '10759',    # Action → Action & Adventure
+                '12': '10759',    # Adventure → Action & Adventure
+                '14': '10765',    # Fantasy → Sci-Fi & Fantasy
+                '878': '10765',   # Science Fiction → Sci-Fi & Fantasy
+                '10752': '10768', # War → War & Politics
+                # Direct matches (same ID)
+                '16': '16',       # Animation
+                '35': '35',       # Comedy
+                '80': '80',       # Crime
+                '99': '99',       # Documentary
+                '18': '18',       # Drama
+                '10751': '10751', # Family
+                '9648': '9648',   # Mystery
+                '37': '37'        # Western
+            }
+            
+            # Direct ID Mapping: TV ID → Movie ID
+            tv_to_movie_mapping = {
+                '10759': '28',    # Action & Adventure → Action (primary mapping)
+                '10765': '878',   # Sci-Fi & Fantasy → Science Fiction (primary mapping)
+                '10768': '10752', # War & Politics → War
+                # Direct matches (same ID)
+                '16': '16',       # Animation
+                '35': '35',       # Comedy
+                '80': '80',       # Crime
+                '99': '99',       # Documentary
+                '18': '18',       # Drama
+                '10751': '10751', # Family
+                '9648': '9648',   # Mystery
+                '37': '37'        # Western
+            }
+            
+            # Movie-only genres (exclude from TV)
+            movie_only_genres = {'10402', '10749', '53', '10770', '36', '27'}  # Music, Romance, Thriller, TV Movie, History, Horror
+            
+            # TV-only genres (exclude from movies)
+            tv_only_genres = {'10762', '10763', '10764', '10766', '10767'}  # Kids, News, Reality, Soap, Talk
             
             # Parse the input genre IDs
-            input_genre_ids = genre_ids_str.split(',')
+            input_genre_ids = [id.strip() for id in genre_ids_str.split(',') if id.strip()]
             
-            # Map each genre ID to names, then back to appropriate IDs
             movie_mapped_ids = []
             tv_mapped_ids = []
             
             for genre_id in input_genre_ids:
-                genre_id = genre_id.strip()
+                print(f"🔄 Processing genre ID: {genre_id}")
                 
-                # Find the genre name by checking both movie and TV genre lists
-                genre_name = None
+                # Determine if this is a movie genre, TV genre, or both
+                is_movie_genre = genre_id in movie_genres
+                is_tv_genre = genre_id in tv_genres
                 
-                # Check movie genres first
-                for genre in movie_genres:
-                    if str(genre['id']) == genre_id:
-                        genre_name = genre['name']
-                        break
-                        
-                # If not found in movies, check TV genres
-                if not genre_name:
-                    for genre in tv_genres:
-                        if str(genre['id']) == genre_id:
-                            genre_name = genre['name']
-                            break
+                # Handle movie mapping
+                if is_movie_genre:
+                    # Always add movie genre for movie results
+                    movie_mapped_ids.append(genre_id)
+                    print(f"🔄 Added movie genre: {genre_id} ({movie_genres[genre_id]})")
+                elif is_tv_genre and genre_id in tv_to_movie_mapping:
+                    # Map TV genre to movie equivalent
+                    mapped_movie_id = tv_to_movie_mapping[genre_id]
+                    movie_mapped_ids.append(mapped_movie_id)
+                    print(f"🔄 Mapped TV genre {genre_id} ({tv_genres[genre_id]}) to movie genre {mapped_movie_id} ({movie_genres[mapped_movie_id]})")
                 
-                # If we found the genre name, map it to appropriate IDs
-                if genre_name:
-                    # Map to movie ID if exists
-                    if genre_name in movie_genre_map:
-                        movie_mapped_ids.append(movie_genre_map[genre_name])
-                    
-                    # Map to TV ID if exists
-                    if genre_name in tv_genre_map:
-                        tv_mapped_ids.append(tv_genre_map[genre_name])
-                else:
-                    # If we can't find the genre name, use the original ID for both
-                    # This handles cases where the genre might not be in our cache
+                # Handle TV mapping
+                if is_tv_genre:
+                    # Always add TV genre for TV results
+                    tv_mapped_ids.append(genre_id)
+                    print(f"🔄 Added TV genre: {genre_id} ({tv_genres[genre_id]})")
+                elif is_movie_genre and genre_id in movie_to_tv_mapping:
+                    # Map movie genre to TV equivalent (but only if it's not movie-only)
+                    if genre_id not in movie_only_genres:
+                        mapped_tv_id = movie_to_tv_mapping[genre_id]
+                        tv_mapped_ids.append(mapped_tv_id)
+                        print(f"🔄 Mapped movie genre {genre_id} ({movie_genres[genre_id]}) to TV genre {mapped_tv_id} ({tv_genres[mapped_tv_id]})")
+                    else:
+                        print(f"🔄 Skipping movie-only genre {genre_id} ({movie_genres[genre_id]}) for TV mapping")
+                
+                # Handle unknown genres (shouldn't happen with valid TMDB data)
+                if not is_movie_genre and not is_tv_genre:
+                    print(f"⚠️ Unknown genre ID {genre_id}, using as fallback for both")
                     movie_mapped_ids.append(genre_id)
                     tv_mapped_ids.append(genre_id)
             
+            # Remove duplicates while preserving order
+            movie_mapped_ids = list(dict.fromkeys(movie_mapped_ids))
+            tv_mapped_ids = list(dict.fromkeys(tv_mapped_ids))
+            
+            # Create final comma-separated strings
             movie_genres_str = ','.join(movie_mapped_ids) if movie_mapped_ids else None
             tv_genres_str = ','.join(tv_mapped_ids) if tv_mapped_ids else None
+            
+            print(f"🔄 Genre mapping RESULT - Movies: {movie_genres_str}, TV: {tv_genres_str}")
             
             return movie_genres_str, tv_genres_str
             
         except Exception as e:
-            print(f"Error mapping genres for mixed content: {e}")
+            print(f"❌ Error mapping genres for mixed content: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback: use the original genre string for both
             return genre_ids_str, genre_ids_str
     

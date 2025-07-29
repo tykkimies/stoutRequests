@@ -74,32 +74,27 @@
         {% endfor %}
     </div>
     
-    <!-- Infinite Scroll Elements (included in results for filter views) -->
-    <div id="discover-sentinel" class="h-20 flex items-center justify-center">
-        <!-- This element triggers infinite scroll when it comes into view -->
+    <!-- HTMX-based Infinite scroll trigger for continued loading -->
+    {% if has_more %}
+    <div id="load-more-trigger-page-{{ current_page|default(page) }}"
+        hx-get="{{ base_url }}{% if current_query_params.startswith('media_type=') %}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}{% else %}/discover/category/more?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}{% endif %}"
+        hx-target="#results-grid"
+        hx-swap="beforeend" 
+        hx-trigger="intersect threshold:0.3 once"
+        hx-on="htmx:afterRequest: if(event.detail.successful) this.remove(); else this.innerHTML='<p class=\"text-red-500 text-sm\">Failed to load more content. <button onclick=\"htmx.trigger(this.parentElement.parentElement, \"intersect\")\" class=\"text-orange-600 underline ml-1\">Try again</button></p>'"
+        class="text-center py-8">
+        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p class="text-gray-500">Loading more content...</p>
     </div>
-    
-    <!-- Loading indicator for infinite scroll (included in results for filter views) -->
-    <div id="discover-loading" class="htmx-indicator text-center py-4 hidden">
-        <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-        <p class="text-sm text-gray-500">Loading more results...</p>
-    </div>
-    
-    <!-- End of results indicator (included in results for filter views) -->
-    <div id="discover-end" class="text-center py-4 text-gray-500 text-sm hidden">
-        <svg class="w-6 h-6 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-        </svg>
-        You've reached the end of the results
-    </div>
+    {% endif %}
 
     <!-- Pagination Controls -->
     {% if total_pages and total_pages > 1 %}
     <div class="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6 mt-6">
         <div class="flex flex-1 justify-between sm:hidden">
-            {% if page > 1 %}
+            {% if (current_page|default(page)) > 1 %}
             <button 
-                hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page - 1 }}"
+                hx-get="{{ base_url }}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) - 1 }}"
                 hx-target="#discover-results"
                 class="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 Previous
@@ -108,9 +103,9 @@
             <span class="relative inline-flex items-center rounded-md border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-400">Previous</span>
             {% endif %}
             
-            {% if page < total_pages %}
+            {% if (current_page|default(page)) < total_pages %}
             <button 
-                hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page + 1 }}"
+                hx-get="{{ base_url }}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}"
                 hx-target="#discover-results"
                 class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 Next
@@ -124,9 +119,9 @@
             <div>
                 <p class="text-sm text-gray-700">
                     Showing
-                    <span class="font-medium">{{ ((page - 1) * 20) + 1 }}</span>
+                    <span class="font-medium">{{ (((current_page|default(page)) - 1) * 20) + 1 }}</span>
                     to
-                    <span class="font-medium">{{ [page * 20, total_results or (results|length)]|min }}</span>
+                    <span class="font-medium">{{ [(current_page|default(page)) * 20, total_results or (results|length)]|min }}</span>
                     of
                     <span class="font-medium">{{ total_results or (results|length) }}</span>
                     results
@@ -134,9 +129,9 @@
             </div>
             <div>
                 <nav class="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
-                    {% if page > 1 %}
+                    {% if (current_page|default(page)) > 1 %}
                     <button 
-                        hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page - 1 }}"
+                        hx-get="{{ base_url }}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) - 1 }}"
                         hx-target="#discover-results"
                         class="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0">
                         <span class="sr-only">Previous</span>
@@ -146,20 +141,20 @@
                     </button>
                     {% endif %}
                     
-                    {% for page_num in range([1, page - 2]|max, [total_pages + 1, page + 3]|min) %}
-                        {% if page_num == page %}
+                    {% for page_num in range([1, (current_page|default(page)) - 2]|max, [total_pages + 1, (current_page|default(page)) + 3]|min) %}
+                        {% if page_num == (current_page|default(page)) %}
                         <span class="relative z-10 inline-flex items-center bg-orange-600 px-4 py-2 text-sm font-semibold text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600">{{ page_num }}</span>
                         {% else %}
                         <button 
-                            hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page_num }}"
+                            hx-get="{{ base_url }}/discover?{{ current_query_params }}&page={{ page_num }}"
                             hx-target="#discover-results"
                             class="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0">{{ page_num }}</button>
                         {% endif %}
                     {% endfor %}
                     
-                    {% if page < total_pages %}
+                    {% if (current_page|default(page)) < total_pages %}
                     <button 
-                        hx-get="{{ base_url }}/discover?{{ request.query_params }}&page={{ page + 1 }}"
+                        hx-get="{{ base_url }}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}"
                         hx-target="#discover-results"
                         class="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0">
                         <span class="sr-only">Next</span>
@@ -192,144 +187,35 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+
+/* Infinite scroll content animation */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.media-card {
+    animation: fadeInUp 0.4s ease-out;
+}
+
+/* Stagger animation for newly loaded content */
+.htmx-added .media-card {
+    animation: fadeInUp 0.4s ease-out;
+    animation-fill-mode: both;
+}
+
+.htmx-added .media-card:nth-child(1) { animation-delay: 0.05s; }
+.htmx-added .media-card:nth-child(2) { animation-delay: 0.1s; }
+.htmx-added .media-card:nth-child(3) { animation-delay: 0.15s; }
+.htmx-added .media-card:nth-child(4) { animation-delay: 0.2s; }
+.htmx-added .media-card:nth-child(5) { animation-delay: 0.25s; }
+.htmx-added .media-card:nth-child(6) { animation-delay: 0.3s; }
 </style>
 
-<script>
-// Initialize infinite scroll for discover results
-function initializeDiscoverInfiniteScroll() {
-    console.log('🔧 Discover infinite scroll script starting...');
-    
-    // Wait a moment for DOM to settle
-    setTimeout(() => {
-        const resultsGrid = document.getElementById('results-grid');
-        const loadingIndicator = document.getElementById('discover-loading');
-        const endIndicator = document.getElementById('discover-end');
-        const sentinel = document.getElementById('discover-sentinel');
-        
-        console.log('🔧 Elements found:', {
-            resultsGrid: !!resultsGrid,
-            loadingIndicator: !!loadingIndicator,
-            endIndicator: !!endIndicator,
-            sentinel: !!sentinel
-        });
-        
-        if (!resultsGrid || !loadingIndicator || !sentinel) {
-            console.error('❌ Missing required elements for infinite scroll');
-            return;
-        }
-        
-        console.log('✅ All required elements found, initializing infinite scroll');
-        setupInfiniteScroll(resultsGrid, loadingIndicator, endIndicator, sentinel);
-    }, 100);
-}
-
-function setupInfiniteScroll(resultsGrid, loadingIndicator, endIndicator, sentinel) {
-    let currentPage = 1; // Page 1 is already loaded, start loading from page 2
-    let isLoading = false;
-    let hasMoreResults = true;
-    
-    // Function to load more results
-    function loadMoreResults() {
-        if (isLoading || !hasMoreResults) return;
-        
-        isLoading = true;
-        loadingIndicator.classList.remove('hidden');
-        
-        currentPage++; // Increment to next page
-        
-        // Get current filters from URL
-        const urlParams = new URLSearchParams(window.location.search);
-        urlParams.set('page', currentPage);
-        
-        console.log(`📖 Loading discover page ${currentPage}`);
-        
-        fetch(`${window.location.pathname}?${urlParams.toString()}`, {
-            headers: {
-                'Accept': 'text/html',
-                'HX-Request': 'true'  // Tell server this is an HTMX/AJAX request
-            }
-        })
-        .then(response => response.text())
-        .then(html => {
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = html;
-            
-            // Look for the results grid in the returned HTML
-            let newResultsGrid = tempDiv.querySelector('#results-grid');
-            
-            // If not found, this might be a full page response, so try to find it in the full document
-            if (!newResultsGrid) {
-                newResultsGrid = tempDiv.querySelector('.grid');
-            }
-            
-            const newResults = newResultsGrid ? Array.from(newResultsGrid.children) : [];
-            
-            console.log(`📊 Loaded ${newResults.length} new results for page ${currentPage}`);
-            
-            if (newResults.length > 0) {
-                // Append new results to the existing grid
-                newResults.forEach(result => {
-                    resultsGrid.appendChild(result);
-                    // Process HTMX attributes on new content
-                    if (typeof htmx !== 'undefined') {
-                        htmx.process(result);
-                    }
-                });
-                
-                // Check if we should continue loading (assume we've reached the end if we get less than 20 results)
-                if (newResults.length < 20) {
-                    hasMoreResults = false;
-                    loadingIndicator.classList.add('hidden');
-                    if (endIndicator) endIndicator.classList.remove('hidden');
-                    console.log('📄 Reached end of results');
-                }
-            } else {
-                // No more results
-                hasMoreResults = false;
-                loadingIndicator.classList.add('hidden');
-                if (endIndicator) endIndicator.classList.remove('hidden');
-                console.log('📄 No more results available');
-            }
-            
-            isLoading = false;
-            if (hasMoreResults) {
-                loadingIndicator.classList.add('hidden');
-            }
-        })
-        .catch(error => {
-            console.error('Error loading more discover results:', error);
-            loadingIndicator.innerHTML = `
-                <div class="text-center py-4">
-                    <p class="text-red-600 mb-2">Error loading content</p>
-                    <button onclick="loadMoreResults()" class="bg-orange-600 text-white px-4 py-2 rounded text-sm">
-                        Try Again
-                    </button>
-                </div>
-            `;
-            isLoading = false;
-        });
-    }
-    
-    // Set up intersection observer for infinite scroll
-    console.log('🔧 Setting up IntersectionObserver...');
-    const observer = new IntersectionObserver((entries) => {
-        console.log('📱 Discover sentinel intersecting:', entries[0].isIntersecting, 'hasMoreResults:', hasMoreResults, 'isLoading:', isLoading);
-        if (entries[0].isIntersecting && hasMoreResults && !isLoading) {
-            console.log('🔄 Discover infinite scroll triggered');
-            loadMoreResults();
-        }
-    }, {
-        rootMargin: '200px' // Start loading when user is 200px from the sentinel
-    });
-    
-    observer.observe(sentinel);
-    console.log('✅ IntersectionObserver set up and observing sentinel');
-    
-    // Make loadMoreResults available globally for error retry button
-    window.loadMoreResults = loadMoreResults;
-}
-
-// Call the initialization function
-initializeDiscoverInfiniteScroll();
-</script>
 

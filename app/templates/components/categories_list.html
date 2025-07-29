@@ -16,7 +16,7 @@
             </h2>
             <div class="flex items-center space-x-2">
                 <button 
-                    onclick="expandCategoryView('{{ category.type }}', '{{ category.sort }}', '{{ category.title }}')"
+                    onclick="console.log('View More clicked!'); expandCategoryView('{% if category.id.startswith('custom_') %}{{ category.id }}{% else %}{{ category.type }}{% endif %}', '{{ category.sort }}', '{{ category.title }}')"
                     class="bg-{{ category.color }}-100 hover:bg-{{ category.color }}-200 text-{{ category.color }}-700 px-3 py-1 rounded-md text-sm font-medium transition-colors">
                     View More
                 </button>
@@ -28,7 +28,7 @@
     <div class="flex-1 overflow-hidden">
         <div id="{{ category.id }}-content" 
              class="horizontal-scroll"
-             hx-get="{{ base_url }}/discover/category?type={{ category.type }}&sort={{ category.sort }}&limit=20"
+             hx-get="{{ base_url }}/discover/category?type={% if category.id.startswith('custom_') %}{{ category.id }}{% else %}{{ category.type }}{% endif %}&sort={{ category.sort }}&limit={{ category.limit or 20 }}"
              hx-trigger="loadCategories"
              hx-target="this"
              data-cache-key="{{ category.id }}-{{ category.type }}-{{ category.sort }}">

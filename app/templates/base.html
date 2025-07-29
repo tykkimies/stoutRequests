@@ -21,24 +21,16 @@
             // Get the base URL from the current page's configuration
             const baseUrl = '{{ base_url }}';
             
-            console.log('🔍 HTMX configRequest:', {
-                originalPath: url,
-                baseUrl: baseUrl,
-                currentOrigin: window.location.origin,
-                currentProtocol: window.location.protocol
-            });
             
             // If it's a relative URL starting with our base_url path, 
             // convert it to an absolute URL with current protocol
             if (url && baseUrl && url.startsWith(baseUrl)) {
                 const newUrl = window.location.origin + url;
-                console.log('🔧 HTMX URL fixed:', url, '->', newUrl);
                 evt.detail.path = newUrl;
             }
             // Also handle any URL that starts with / but not with base_url
             else if (url && url.startsWith('/') && !url.startsWith('http')) {
                 const newUrl = window.location.origin + url;
-                console.log('🔧 HTMX relative URL fixed:', url, '->', newUrl);
                 evt.detail.path = newUrl;
             }
         });
@@ -298,8 +290,7 @@
         let expandedHistoryState = null;
 
         // Category expansion function - available globally
-        function expandCategoryView(type, sort, title) {
-            console.log('Expanding category:', type, sort, title);
+        window.expandCategoryView = function(type, sort, title) {
             
             // Set expanded state
             isExpanded = true;
@@ -308,30 +299,80 @@
             if (!expandedHistoryState) {
                 expandedHistoryState = { expanded: true, type: type, sort: sort, title: title };
                 const baseUrl = '{{ base_url }}';
-                history.pushState(expandedHistoryState, title, baseUrl + '/discover/' + type + '/' + sort);
+                
+                // Handle different URL patterns for different category types
+                let historyUrl;
+                if (type.startsWith('custom_')) {
+                    // For custom categories, use a more descriptive URL
+                    historyUrl = baseUrl + '/discover/category/' + type + '/' + sort;
+                } else {
+                    // For other categories, use the standard pattern
+                    historyUrl = baseUrl + '/discover/' + type + '/' + sort;
+                }
+                
+                history.pushState(expandedHistoryState, title, historyUrl);
             }
             
-            // Load expanded content
+            // For custom categories, we need to load the expanded view first to get the correct media type
+            // The backend will handle loading the saved filters and using the correct media type
             const baseUrl = '{{ base_url }}';
-            htmx.ajax('GET', baseUrl + '/discover/category?type=' + type + '&sort=' + sort + '&view=expanded&limit=40&page=1', {
-                target: '#categories-container', 
-                swap: 'innerHTML'
-            });
             
-            // Update filter bar - check if this is a database category
-            let filterUrl = baseUrl + '/discover/filters?media_type=' + type;
-            
-            // For database categories, add db_category parameters instead of content_sources
+            // Handle different category types with appropriate parameters
             if (type === 'plex' || type === 'requests' || type === 'recommendations') {
+                // Database categories: default to movie media type with db_category parameters
+                let mediaType = 'movie';
+                let expandUrl = baseUrl + '/discover/category/expanded?type=' + mediaType + '&sort=' + sort + '&limit=40&page=1';
+                expandUrl += '&db_category_type=' + type + '&db_category_sort=' + sort;
+                let filterUrl = baseUrl + '/discover/filters?media_type=' + mediaType;
                 filterUrl += '&db_category_type=' + type + '&db_category_sort=' + sort;
+                
+                htmx.ajax('GET', expandUrl, {
+                    target: '#categories-container', 
+                    swap: 'innerHTML'
+                });
+                
+                htmx.ajax('GET', filterUrl, {
+                    target: '#filter-form-container', 
+                    swap: 'innerHTML'
+                });
+            } else if (type.startsWith('custom_')) {
+                // Custom categories: Let the backend determine the correct media type from saved filters
+                let customCategoryId = type.replace('custom_', '');
+                let expandUrl = baseUrl + '/discover/category/expanded?sort=' + sort + '&limit=40&page=1';
+                expandUrl += '&custom_category_id=' + customCategoryId;
+                let filterUrl = baseUrl + '/discover/filters?custom_category_id=' + customCategoryId;
+                
+                console.log('🎯 Loading custom category:', customCategoryId);
+                console.log('🎯 Expand URL:', expandUrl);
+                console.log('🎯 Filter URL:', filterUrl);
+                
+                htmx.ajax('GET', expandUrl, {
+                    target: '#categories-container', 
+                    swap: 'innerHTML'
+                });
+                
+                htmx.ajax('GET', filterUrl, {
+                    target: '#filter-form-container', 
+                    swap: 'innerHTML'
+                });
             } else {
+                // Content source categories (trending, popular, top_rated, upcoming)
+                // For these, type is actually the media_type (movie/tv)
+                let expandUrl = baseUrl + '/discover/category/expanded?type=' + type + '&sort=' + sort + '&limit=40&page=1';
+                expandUrl += '&content_sources=' + sort;
+                let filterUrl = baseUrl + '/discover/filters?media_type=' + type;
                 filterUrl += '&content_sources=' + sort;
+                
+                htmx.ajax('GET', expandUrl, {
+                    target: '#categories-container', 
+                    swap: 'innerHTML'
+                });
+                
+                htmx.ajax('GET', filterUrl, {
+                    target: '#filter-form-container', 
+                    swap: 'innerHTML'
+                });
             }
-            
-            htmx.ajax('GET', filterUrl, {
-                target: '#filter-form-container', 
-                swap: 'innerHTML'
-            });
             
             // Scroll to top
             setTimeout(() => {
@@ -343,8 +384,7 @@
         }
 
         // Back to categories function - available globally
-        function backToCategoriesView() {
-            console.log('Going back to categories');
+        window.backToCategoriesView = function() {
             
             // Clear expanded state
             isExpanded = false;
@@ -375,13 +415,11 @@
             }, 100);
         }
 
+
         // Browser back button support
         window.addEventListener('popstate', function(event) {
-            console.log('Popstate event:', event.state, 'isExpanded:', isExpanded, 'URL:', window.location.href);
-            
             if (isExpanded) {
                 // If we're in expanded view and browser back is pressed, collapse
-                console.log('Browser back pressed while expanded - collapsing');
                 backToCategoriesView();
             }
         });
@@ -389,53 +427,25 @@
         // Category customization functionality
         let isCustomizeMode = false;
 
-        // Test that JavaScript is loading
-        console.log('✅ JavaScript loaded successfully in base.html');
-        console.log('HTMX available:', typeof htmx !== 'undefined');
-        
-        // FORCE CLEAR ALL CACHE to fix base_url issues - VERSION 2
-        console.log('🗑️ FORCE CLEARING ALL CACHE VERSION 2...');
+        // Clear any cached category data on page load
         Object.keys(sessionStorage).forEach(key => {
             if (key.startsWith('category-cache-')) {
                 sessionStorage.removeItem(key);
-                console.log('🗑️ Cleared cache key:', key);
             }
         });
         // Clear everything to be sure
         sessionStorage.clear();
         localStorage.clear();
         
-        // Check for elements on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded, checking elements:');
-            console.log('reorder-toggle found:', !!document.getElementById('reorder-toggle'));
-            console.log('categories-container found:', !!document.getElementById('categories-container'));
-            
-            // Check if we're in authenticated section
-            const mainContent = document.querySelector('.flex.bg-gray-50.min-h-screen');
-            console.log('Authenticated layout found:', !!mainContent);
-            
-            // List all buttons on page for debugging
-            const allButtons = document.querySelectorAll('button');
-            console.log('All buttons on page:', allButtons.length);
-            allButtons.forEach((btn, index) => {
-                console.log(`Button ${index}: id="${btn.id}", text="${btn.textContent.trim()}"`);
-            });
-        });
 
         // Global function for category customization
         window.toggleCustomizeMode = function() {
-            console.log('toggleCustomizeMode called, isCustomizeMode:', isCustomizeMode);
-            
             const button = document.getElementById('reorder-toggle');
             const categoriesContainer = document.getElementById('categories-container');
-            
-            console.log('button found:', !!button, 'container found:', !!categoriesContainer);
             
             if (!isCustomizeMode) {
                 // Enter customize mode
                 isCustomizeMode = true;
-                console.log('Entering customize mode');
                 
                 if (button) {
                     button.textContent = '💾 Save Changes';
@@ -445,7 +455,6 @@
                 
                 const baseUrl = '{{ base_url }}';
                 const url = baseUrl + '/discover/categories/customize-mode';
-                console.log('Making HTMX request to:', url);
                 
                 // Load customize mode interface
                 htmx.ajax('GET', url, {
@@ -455,7 +464,6 @@
             } else {
                 // Exit customize mode and save changes
                 isCustomizeMode = false;
-                console.log('Exiting customize mode');
                 
                 if (button) {
                     button.textContent = '📱 Customize';
@@ -469,7 +477,6 @@
         };
 
         window.saveCategoryCustomizations = function() {
-            console.log('Saving category customizations');
             // Collect all visible category preferences from the customization interface
             const categoryItems = document.querySelectorAll('.customize-category-item');
             
@@ -495,9 +502,6 @@
                 }
             });
             
-            console.log('Submitting customizations for', visibleCategoryIds.length, 'visible categories');
-            console.log('Customizations data:', customizations);
-            console.log('Visible categories:', visibleCategoryIds);
             
             // Reset customize mode state immediately
             isCustomizeMode = false;
@@ -517,9 +521,7 @@
             }).then(() => {
                 // Show success message
                 showToast('Categories saved successfully!', 'success');
-                console.log('Categories saved successfully');
             }).catch((error) => {
-                console.error('Error saving categories:', error);
                 showToast('Error saving categories. Please try again.', 'error');
                 
                 // Reset customize mode on error
@@ -551,27 +553,19 @@
         };
 
         
-        // Make sure toggleCustomizeMode is available globally immediately
-        console.log('Defining toggleCustomizeMode globally...');
-        
         // Also add click event listener as backup
         document.addEventListener('DOMContentLoaded', function() {
             const customizeBtn = document.getElementById('reorder-toggle');
             if (customizeBtn) {
-                console.log('Adding event listener to customize button');
                 customizeBtn.addEventListener('click', function() {
-                    console.log('Event listener triggered!');
                     window.toggleCustomizeMode();
                 });
             } else {
-                console.error('reorder-toggle button not found!');
                 // Try again after a delay in case it's loaded by HTMX
                 setTimeout(function() {
                     const delayedBtn = document.getElementById('reorder-toggle');
-                    console.log('Delayed check - reorder-toggle found:', !!delayedBtn);
                     if (delayedBtn) {
                         delayedBtn.addEventListener('click', function() {
-                            console.log('Delayed event listener triggered!');
                             window.toggleCustomizeMode();
                         });
                     }

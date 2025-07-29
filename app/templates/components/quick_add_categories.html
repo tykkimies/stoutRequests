@@ -9,7 +9,7 @@
     <div class="space-y-2">
         {% for category in available_categories %}
         <form hx-post="{{ base_url }}/discover/categories/add-single" 
-              hx-target="#visible-categories" 
+              hx-target="#categories-content" 
               hx-swap="beforeend"
               class="inline-block">
             <input type="hidden" name="category_id" value="{{ category.id }}">
@@ -50,13 +50,13 @@ function cancelAddCategories() {
     const customizeButton = document.getElementById('reorder-toggle');
     if (customizeButton && customizeButton.textContent.includes('Save')) {
         // We're in customize mode, so just reload the customize interface
-        htmx.ajax('GET', window.location.origin + '/discover/categories/customize-mode', {
+        htmx.ajax('GET', '{{ base_url }}/discover/categories/customize-mode', {
             target: '#categories-container',
             swap: 'innerHTML'
         });
     } else {
         // We're in normal mode, reload the normal categories
-        htmx.ajax('GET', window.location.origin + '/discover/categories', {
+        htmx.ajax('GET', '{{ base_url }}/discover/categories', {
             target: '#categories-container', 
             swap: 'innerHTML'
         });

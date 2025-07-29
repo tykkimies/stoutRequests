@@ -8,6 +8,10 @@
     hx-indicator="#discover-loading"
     hx-trigger="submit"
     class="space-y-4"
+    data-expanded-url="{{ base_url }}/discover/category/expanded"
+    data-base-url="{{ base_url }}/discover"
+    data-current-content-sources="{% if current_content_sources %}{{ current_content_sources|join(',') }}{% endif %}"
+    data-current-media-type="{{ current_media_type or 'movie' }}"
 >
     <!-- Hidden inputs for expanded category context -->
     {% if current_media_type in ['movie', 'tv'] and current_content_sources %}
@@ -82,93 +86,24 @@
                 onclick="this.closest('form').querySelectorAll('input[name=genres]').forEach(cb => cb.checked = false); htmx.trigger(this.closest('form'), 'change')"
                 class="text-xs text-orange-600 hover:text-orange-700">Clear</button>
         </div>
-        <div class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2">
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="28" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '28' in current_genres %}checked{% endif %}>
-                Action
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="12" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '12' in current_genres %}checked{% endif %}>
-                Adventure
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="16" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '16' in current_genres %}checked{% endif %}>
-                Animation
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="35" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '35' in current_genres %}checked{% endif %}>
-                Comedy
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="80" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '80' in current_genres %}checked{% endif %}>
-                Crime
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="99" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '99' in current_genres %}checked{% endif %}>
-                Documentary
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="18" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '18' in current_genres %}checked{% endif %}>
-                Drama
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="10751" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '10751' in current_genres %}checked{% endif %}>
-                Family
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="14" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '14' in current_genres %}checked{% endif %}>
-                Fantasy
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="27" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '27' in current_genres %}checked{% endif %}>
-                Horror
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="9648" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '9648' in current_genres %}checked{% endif %}>
-                Mystery
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="10749" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '10749' in current_genres %}checked{% endif %}>
-                Romance
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="878" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '878' in current_genres %}checked{% endif %}>
-                Science Fiction
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="53" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '53' in current_genres %}checked{% endif %}>
-                Thriller
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="10752" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '10752' in current_genres %}checked{% endif %}>
-                War
-            </label>
-            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="genres" value="37" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '37' in current_genres %}checked{% endif %}>
-                Western
-            </label>
+        <div id="genres-container" class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2"
+             hx-get="{{ base_url }}/discover/genres?media_type={{ current_media_type or 'movie' }}{% for genre in current_genres %}&current_genres={{ genre }}{% endfor %}"
+             hx-trigger="load, mediaTypeChanged from:body"
+             hx-target="this"
+             hx-swap="innerHTML">
+            <!-- Loading indicator -->
+            <div class="text-center py-2 text-gray-500 text-xs">
+                <div class="animate-spin w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-1"></div>
+                Loading genres...
+            </div>
         </div>
     </div>
 
     <!-- Rating Filter -->
     <div>
-        <label class="block text-xs font-medium text-gray-700 mb-1">Minimum TMDB Rating</label>
+        <label class="block text-xs font-medium text-gray-700 mb-2">Minimum TMDB Rating</label>
+        
+        <!-- Rating Value Selector -->
         <select name="rating_min" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white">
             <option value="">No Rating Filter</option>
             <option value="5.0" {% if current_rating_min == '5.0' %}selected{% endif %}>5.0+</option>
@@ -177,7 +112,225 @@
             <option value="8.0" {% if current_rating_min == '8.0' %}selected{% endif %}>8.0+</option>
             <option value="9.0" {% if current_rating_min == '9.0' %}selected{% endif %}>9.0+</option>
         </select>
+        
+        <!-- Hidden input to default rating_source to tmdb -->
         <input type="hidden" name="rating_source" value="tmdb">
+    </div>
+
+    <!-- Year Range Filter -->
+    <div>
+        <label class="block text-xs font-medium text-gray-700 mb-2">Release Year</label>
+        <div class="grid grid-cols-2 gap-2">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">From</label>
+                <input 
+                    type="number" 
+                    name="year_from" 
+                    placeholder="1900"
+                    min="1900" 
+                    max="2030"
+                    value="{{ current_year_from or '' }}"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">To</label>
+                <input 
+                    type="number" 
+                    name="year_to" 
+                    placeholder="2024"
+                    min="1900" 
+                    max="2030"
+                    value="{{ current_year_to or '' }}"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+            </div>
+        </div>
+        <p class="text-xs text-gray-500 mt-1">Leave empty for no year restriction</p>
+    </div>
+
+    <!-- Studio Filter -->
+    <div>
+        <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-medium text-gray-700">Studios/Networks</label>
+            <button type="button" 
+                onclick="this.closest('form').querySelectorAll('input[name=studios]').forEach(cb => cb.checked = false); htmx.trigger(this.closest('form'), 'change')"
+                class="text-xs text-orange-600 hover:text-orange-700">Clear</button>
+        </div>
+        <div class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2">
+            <!-- Popular Studios/Production Companies -->
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="420" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '420' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/hUzeosd33nzE5MCNsZxCGEKTXaQ.png" alt="Marvel Studios" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Marvel Studios</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="2" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '2' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/wdrCwmRnLFJhEoH8GSfymY85KHT.png" alt="Walt Disney Pictures" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Walt Disney Pictures</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="174" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '174' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/IuAlhI9eVC9Z8UQWOIDdWRKSEJ.png" alt="Warner Bros. Pictures" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Warner Bros. Pictures</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="33" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '33' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/8lvHyhjr8oUKOOy2dKXoALWKdp0.png" alt="Universal Pictures" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Universal Pictures</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="5" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '5' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/71BqEFAF4V3qjjMPCpLuyJFB9A.png" alt="Columbia Pictures" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Columbia Pictures</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="4" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '4' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/fycMZt242LVjagMByZOLUGbCvv3.png" alt="Paramount Pictures" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Paramount Pictures</span>
+                </div>
+            </label>
+            <!-- TV Networks -->
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="213" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '213' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/wwemzKWzjKYJFfCeiB57q3r4Bcm.png" alt="Netflix" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Netflix</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="49" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '49' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/tuomPhY2UtuPTqqFnKMVHvSb724.png" alt="HBO" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>HBO</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="2739" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '2739' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/uzKjVDmQ1WRMvGBb7UNRE0wTn1H.png" alt="Disney+" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Disney+</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="studios" value="1024" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '1024' in current_studios %}checked{% endif %}>
+                <div class="flex items-center">
+                    <img src="https://image.tmdb.org/t/p/original/ifhbNuuVnlwYy5oXA5VIb2YR8AZ.png" alt="Amazon Studios" class="w-4 h-4 mr-2 object-contain" onerror="this.style.display='none'">
+                    <span>Amazon Studios</span>
+                </div>
+            </label>
+        </div>
+    </div>
+
+    <!-- Streaming Service Filter -->
+    <div>
+        <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-medium text-gray-700">Streaming Services</label>
+            <button type="button" 
+                onclick="this.closest('form').querySelectorAll('input[name=streaming]').forEach(cb => cb.checked = false); htmx.trigger(this.closest('form'), 'change')"
+                class="text-xs text-orange-600 hover:text-orange-700">Clear</button>
+        </div>
+        <div class="space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2">
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="8" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '8' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-red-600 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">N</span>
+                    </div>
+                    <span>Netflix</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="337" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '337' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-blue-900 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">D+</span>
+                    </div>
+                    <span>Disney+</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="384" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '384' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-purple-700 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">H</span>
+                    </div>
+                    <span>HBO Max</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="9" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '9' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-blue-500 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">P</span>
+                    </div>
+                    <span>Amazon Prime Video</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="15" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '15' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-green-500 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">H</span>
+                    </div>
+                    <span>Hulu</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="350" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '350' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-orange-500 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">A</span>
+                    </div>
+                    <span>Apple TV+</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="531" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '531' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-blue-800 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">P+</span>
+                    </div>
+                    <span>Paramount+</span>
+                </div>
+            </label>
+            <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
+                <input type="checkbox" name="streaming" value="386" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '386' in current_streaming %}checked{% endif %}>
+                <div class="flex items-center">
+                    <div class="w-4 h-4 mr-2 bg-teal-600 rounded-sm flex items-center justify-center">
+                        <span class="text-white text-xs font-bold">P</span>
+                    </div>
+                    <span>Peacock</span>
+                </div>
+            </label>
+        </div>
     </div>
 
     <!-- Hidden field for pagination -->
@@ -188,13 +341,28 @@
         <!-- Apply Filters Button - simple form submit like search -->
         <button 
             type="submit"
-            class="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors duration-200 flex items-center justify-center space-x-2"
+            id="apply-filters-btn"
+            class="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors duration-200 flex items-center justify-center space-x-2 disabled:opacity-75 disabled:cursor-not-allowed"
         >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
             </svg>
-            <span>Apply Filters</span>
+            <span id="apply-filters-text">Apply Filters</span>
         </button>
+        
+        <!-- Save as Custom Category Button -->
+        {% if current_user %}
+        <button 
+            type="button"
+            onclick="openSaveCategoryModal()"
+            class="w-full mt-2 bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md transition-colors duration-200 flex items-center justify-center space-x-2"
+        >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+            </svg>
+            <span>Save as Category</span>
+        </button>
+        {% endif %}
         
         <!-- Clear Filters Button -->
         <button 
@@ -215,3 +383,299 @@
     <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-2"></div>
     <p class="text-sm text-gray-500">Loading results...</p>
 </div>
+
+<script>
+// Handle media type changes to reload genres
+document.addEventListener('DOMContentLoaded', function() {
+    const mediaTypeSelect = document.querySelector('select[name="media_type"]');
+    if (mediaTypeSelect) {
+        mediaTypeSelect.addEventListener('change', function() {
+            const selectedMediaType = this.value;
+            const genresContainer = document.getElementById('genres-container');
+            
+            if (genresContainer) {
+                // Trigger custom event to reload genres
+                htmx.trigger(document.body, 'mediaTypeChanged');
+                
+                // Update the hx-get URL with the new media type
+                const currentGenres = Array.from(genresContainer.querySelectorAll('input[name="genres"]:checked'))
+                                           .map(input => input.value);
+                
+                let genreParams = currentGenres.map(genre => `current_genres=${genre}`).join('&');
+                if (genreParams) genreParams = '&' + genreParams;
+                
+                const newUrl = `{{ base_url }}/discover/genres?media_type=${selectedMediaType}${genreParams}`;
+                genresContainer.setAttribute('hx-get', newUrl);
+                
+                // Trigger the reload
+                htmx.trigger(genresContainer, 'load');
+            }
+        });
+    }
+});
+
+// Clear Filters Function
+function clearFilters() {
+    const form = document.getElementById('discover-filter-form');
+    if (!form) return;
+    
+    // Reset all form fields to default values
+    form.reset();
+    
+    // Clear all checkboxes specifically
+    form.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    
+    // Reset select elements to first option
+    form.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
+    
+    // Reset text inputs
+    form.querySelectorAll('input[type="text"], input[type="number"]').forEach(input => input.value = '');
+    
+    // Use the same logic as the Back to Categories button
+    if (typeof backToCategoriesView === 'function') {
+        backToCategoriesView();
+    } else {
+        // Fallback: redirect to root
+        const baseUrl = '{{ base_url }}';
+        window.location.href = baseUrl + '/';
+    }
+    
+    console.log('✅ Filters cleared and returned to categories');
+}
+
+// Save Category Modal Functions
+function openSaveCategoryModal() {
+    // Check if any filters are actually applied
+    const form = document.getElementById('discover-filter-form');
+    const formData = new FormData(form);
+    let hasFilters = false;
+    
+    // Check for non-empty filter values
+    for (let [key, value] of formData.entries()) {
+        if (key !== 'page' && value && value.trim() !== '' && value !== 'mixed') {
+            hasFilters = true;
+            break;
+        }
+    }
+    
+    if (!hasFilters) {
+        alert('Please apply some filters before saving as a category.');
+        return;
+    }
+    
+    // Create and show modal
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Save as Custom Category</h3>
+            <form id="save-category-form">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Category Name</label>
+                    <input 
+                        type="text" 
+                        id="category-name" 
+                        required 
+                        maxlength="50"
+                        placeholder="e.g., High-Rated Sci-Fi Movies"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Color Theme</label>
+                    <div class="grid grid-cols-4 gap-2">
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-purple-500" data-color="purple"></button>
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-blue-500" data-color="blue"></button>
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-green-500" data-color="green"></button>
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-red-500" data-color="red"></button>
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-yellow-500" data-color="yellow"></button>
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-pink-500" data-color="pink"></button>
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-indigo-500" data-color="indigo"></button>
+                        <button type="button" class="color-option w-8 h-8 rounded-full bg-teal-500" data-color="teal"></button>
+                    </div>
+                </div>
+                <div class="flex space-x-3">
+                    <button 
+                        type="submit" 
+                        class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md transition-colors">
+                        Save Category
+                    </button>
+                    <button 
+                        type="button" 
+                        onclick="closeSaveCategoryModal()" 
+                        class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 font-medium py-2 px-4 rounded-md transition-colors">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    let selectedColor = 'purple';
+    
+    // Handle color selection
+    modal.querySelectorAll('.color-option').forEach(btn => {
+        btn.addEventListener('click', function() {
+            modal.querySelectorAll('.color-option').forEach(b => b.classList.remove('ring-4', 'ring-gray-300'));
+            this.classList.add('ring-4', 'ring-gray-300');
+            selectedColor = this.dataset.color;
+        });
+    });
+    
+    // Set default selection
+    modal.querySelector('[data-color="purple"]').classList.add('ring-4', 'ring-gray-300');
+    
+    // Handle form submission
+    modal.querySelector('#save-category-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const categoryName = modal.querySelector('#category-name').value.trim();
+        if (!categoryName) {
+            alert('Please enter a category name.');
+            return;
+        }
+        
+        saveCategoryWithFilters(categoryName, selectedColor);
+    });
+    
+    // Focus on input
+    setTimeout(() => modal.querySelector('#category-name').focus(), 100);
+    
+    // Close on background click
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeSaveCategoryModal();
+        }
+    });
+}
+
+function closeSaveCategoryModal() {
+    const modal = document.querySelector('.fixed.inset-0.bg-black.bg-opacity-50');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function saveCategoryWithFilters(categoryName, color) {
+    const form = document.getElementById('discover-filter-form');
+    const formData = new FormData(form);
+    
+    // Add the category name and color
+    formData.append('category_name', categoryName);
+    formData.append('color', color);
+    
+    // Make HTMX request to save category
+    htmx.ajax('POST', '{{ base_url }}/discover/categories/save-custom', {
+        values: Object.fromEntries(formData),
+        swap: 'none'
+    }).then(() => {
+        closeSaveCategoryModal();
+        // Show success message and reload categories
+        const notification = document.createElement('div');
+        notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50';
+        notification.textContent = `Category "${categoryName}" saved successfully!`;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.remove(), 3000);
+        
+        // Reload categories list to show the new category
+        setTimeout(() => {
+            window.location.href = '{{ base_url }}/discover';
+        }, 1000);
+    }).catch((error) => {
+        alert('Error saving category. Please try again.');
+        console.error('Save category error:', error);
+    });
+}
+
+// Enhanced form management and user experience
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('discover-filter-form');
+    if (form) {
+        const applyBtn = document.getElementById('apply-filters-btn');
+        const applyText = document.getElementById('apply-filters-text');
+        
+        // Update form URL based on current state
+        function updateFormUrl() {
+            const contentSources = form.dataset.currentContentSources;
+            const mediaType = form.dataset.currentMediaType;
+            
+            // Check if we're in an expanded category view
+            if (contentSources && contentSources.trim() && mediaType && ['movie', 'tv'].includes(mediaType)) {
+                // Use expanded URL for category filtering
+                form.setAttribute('hx-get', form.dataset.expandedUrl);
+            } else {
+                // Use base discover URL
+                form.setAttribute('hx-get', form.dataset.baseUrl);
+            }
+        }
+        
+        // Enhanced loading state management
+        form.addEventListener('htmx:beforeRequest', function() {
+            if (applyBtn && applyText) {
+                applyBtn.disabled = true;
+                applyText.textContent = 'Applying...';
+                applyBtn.classList.add('opacity-75');
+            }
+        });
+        
+        form.addEventListener('htmx:afterRequest', function() {
+            if (applyBtn && applyText) {
+                applyBtn.disabled = false;
+                applyText.textContent = 'Apply Filters';
+                applyBtn.classList.remove('opacity-75');
+            }
+        });
+        
+        // Update URL on page load
+        updateFormUrl();
+        
+        // Update URL before each form submission
+        form.addEventListener('htmx:configRequest', function(event) {
+            updateFormUrl();
+        });
+        
+        // Update content source data when form changes
+        const contentSourceCheckboxes = form.querySelectorAll('input[name="content_sources"]');
+        const mediaTypeSelect = form.querySelector('select[name="media_type"]');
+        
+        function updateFormData() {
+            // Update content sources data attribute
+            const checkedSources = Array.from(contentSourceCheckboxes)
+                .filter(cb => cb.checked)
+                .map(cb => cb.value);
+            form.dataset.currentContentSources = checkedSources.join(',');
+            
+            // Update media type data attribute
+            if (mediaTypeSelect) {
+                form.dataset.currentMediaType = mediaTypeSelect.value;
+            }
+            
+            // Update form URL after data change
+            updateFormUrl();
+        }
+        
+        // Listen for changes to content sources and media type
+        contentSourceCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', updateFormData);
+        });
+        
+        if (mediaTypeSelect) {
+            mediaTypeSelect.addEventListener('change', updateFormData);
+        }
+        
+        // Visual feedback for form changes
+        const allInputs = form.querySelectorAll('input, select');
+        allInputs.forEach(input => {
+            input.addEventListener('change', function() {
+                // Add subtle visual feedback that form has changed
+                this.classList.add('ring-2', 'ring-orange-200');
+                setTimeout(() => {
+                    this.classList.remove('ring-2', 'ring-orange-200');
+                }, 1000);
+            });
+        });
+    }
+});
+</script>

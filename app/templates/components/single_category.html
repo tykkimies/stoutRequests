@@ -27,7 +27,7 @@
     <div class="flex-1 overflow-hidden">
         <div id="{{ category.id }}-content" 
              class="horizontal-scroll"
-             hx-get="{{ base_url }}/discover/category?type={{ category.type }}&sort={{ category.sort }}&limit=20"
+             hx-get="{{ base_url }}/discover/category?type={{ category.type }}&sort={{ category.sort }}&limit={{ category.limit or 20 }}"
              hx-trigger="load"
              hx-target="this">
             <div class="text-center py-8">
