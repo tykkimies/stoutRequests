@@ -574,7 +574,6 @@ function handlePermissionsSave(userId) {
     data.auto_approve = formData.has('auto_approve');
     data.can_request_movies = formData.has('can_request_movies');
     data.can_request_tv = formData.has('can_request_tv');
-    data.can_request_4k = formData.has('can_request_4k');
     data.can_view_other_users_requests = formData.has('can_view_other_users_requests');
     data.can_see_requester_username = formData.has('can_see_requester_username');
     
@@ -685,7 +684,6 @@ function savePermissions(userId) {
         // Note: checkboxes with value="true" send 'true' when checked, not 'on'
         can_request_movies: rawData.can_request_movies === 'true',
         can_request_tv: rawData.can_request_tv === 'true',
-        can_request_4k: rawData.can_request_4k === 'true',
         can_view_other_users_requests: rawData.can_view_other_users_requests === 'true',
         can_see_requester_username: rawData.can_see_requester_username === 'true'
     };
@@ -698,15 +696,14 @@ function savePermissions(userId) {
         return false;
     });
     
-    // Make HTMX request manually with JSON body
-    fetch('{{ base_url }}/admin/users/' + userId + '/permissions/save', {
+    // Make request with form data to the limits endpoint (which handles instances)
+    fetch('{{ base_url }}/admin/users/' + userId + '/permissions/limits', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
-            'HX-Request': 'true',
             'X-Skip-Global-Toast': 'true'
         },
-        body: JSON.stringify(jsonData)
+        body: formData,  // Send form data directly instead of JSON
+        credentials: 'include'
     }).then(response => {
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);

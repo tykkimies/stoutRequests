@@ -650,6 +650,7 @@ async def users_list(
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Instance Access</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joined</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -721,6 +722,10 @@ async def users_list(
                         <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-{status_color}-100 text-{status_color}-800">
                             {status_text}
                         </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <!-- Instance access info - managed via main permissions modal -->
+                        <span class="text-xs text-gray-600">Via Permissions</span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {join_date}
@@ -1125,6 +1130,8 @@ async def get_service_status(
 
 
 
+
+
 # ===== USER PERMISSIONS MANAGEMENT =====
 
 @router.get("/users/{user_id}/permissions", response_class=HTMLResponse)
@@ -1162,6 +1169,13 @@ async def get_user_permissions_page(
         print(f"🔍 TV: {user_permissions.can_request_tv}")
         print(f"🔍 4K: {user_permissions.can_request_4k}")
         print(f"🔍 Updated at: {user_permissions.updated_at}")
+        
+        # Debug custom permissions specifically
+        custom_perms = user_permissions.get_custom_permissions()
+        print(f"🔍 Custom permissions JSON: {user_permissions.custom_permissions}")
+        print(f"🔍 Custom permissions dict: {custom_perms}")
+        print(f"🔍 Can view other users requests: {custom_perms.get('can_view_other_users_requests')}")
+        print(f"🔍 Can see requester username: {custom_perms.get('can_see_requester_username')}")
     else:
         print("🔍 No user permissions found - will create defaults")
     
@@ -1187,6 +1201,12 @@ async def get_user_permissions_page(
     # Get all permission flags with descriptions
     all_permissions = PermissionFlags.get_all_permissions()
     
+    # Get all available service instances for instance permissions
+    from ..models.service_instance import ServiceInstance
+    available_service_instances = session.exec(
+        select(ServiceInstance).where(ServiceInstance.is_enabled == True)
+    ).all()
+    
     # Content negotiation
     if request.headers.get("HX-Request"):
         # Get base URL for the template
@@ -1203,6 +1223,7 @@ async def get_user_permissions_page(
                 "effective_permissions": effective_permissions,
                 "template_effective_permissions": template_effective_permissions,
                 "all_permissions": all_permissions,
+                "available_service_instances": available_service_instances,
                 "base_url": base_url
             }
         )
@@ -1362,7 +1383,6 @@ class UserPermissionsUpdate(BaseModel):
     auto_approve: bool = False
     can_request_movies: Optional[bool] = None  # None = inherit from role
     can_request_tv: Optional[bool] = None
-    can_request_4k: Optional[bool] = None
     can_view_other_users_requests: Optional[bool] = None
     can_see_requester_username: Optional[bool] = None
 
@@ -1385,7 +1405,6 @@ async def save_user_permissions(
         print(f"🔍 Auto-approve: {permissions_data.auto_approve}")
         print(f"🔍 Can request movies: {permissions_data.can_request_movies} (None=inherit, True=allow, False=deny)")
         print(f"🔍 Can request TV: {permissions_data.can_request_tv} (None=inherit, True=allow, False=deny)")
-        print(f"🔍 Can request 4K: {permissions_data.can_request_4k} (None=inherit, True=allow, False=deny)")
         print(f"🔍 Custom permissions - view others: {permissions_data.can_view_other_users_requests}")
         print(f"🔍 Custom permissions - see usernames: {permissions_data.can_see_requester_username}")
         
@@ -1450,20 +1469,19 @@ async def save_user_permissions(
         user_permissions.can_request_tv = calculate_override(
             permissions_data.can_request_tv, PermissionFlags.REQUEST_TV
         )
-        user_permissions.can_request_4k = calculate_override(
-            permissions_data.can_request_4k, PermissionFlags.REQUEST_4K
-        )
         
         print(f"🔍 Calculated overrides:")
         print(f"🔍   Movies: desired={permissions_data.can_request_movies}, role={role_permissions.get(PermissionFlags.REQUEST_MOVIES, False)}, override={user_permissions.can_request_movies}")
         print(f"🔍   TV: desired={permissions_data.can_request_tv}, role={role_permissions.get(PermissionFlags.REQUEST_TV, False)}, override={user_permissions.can_request_tv}")
-        print(f"🔍   4K: desired={permissions_data.can_request_4k}, role={role_permissions.get(PermissionFlags.REQUEST_4K, False)}, override={user_permissions.can_request_4k}")
         
         # Handle new permission fields via custom_permissions JSON
         custom_perms = user_permissions.get_custom_permissions()
+        print(f"🔍 BEFORE updating custom permissions: {custom_perms}")
         custom_perms['can_view_other_users_requests'] = permissions_data.can_view_other_users_requests
         custom_perms['can_see_requester_username'] = permissions_data.can_see_requester_username
+        print(f"🔍 AFTER updating custom permissions: {custom_perms}")
         user_permissions.set_custom_permissions(custom_perms)
+        print(f"🔍 Custom permissions JSON string set to: {user_permissions.custom_permissions}")
         
         user_permissions.updated_at = datetime.utcnow()
         
@@ -1504,6 +1522,13 @@ async def save_user_permissions(
             print(f"✅ VERIFICATION - TV: {verification_perms.can_request_tv}")
             print(f"✅ VERIFICATION - 4K: {verification_perms.can_request_4k}")
             print(f"✅ VERIFICATION - Updated at: {verification_perms.updated_at}")
+            
+            # Verify custom permissions
+            verification_custom_perms = verification_perms.get_custom_permissions()
+            print(f"✅ VERIFICATION - Custom permissions JSON: {verification_perms.custom_permissions}")
+            print(f"✅ VERIFICATION - Custom permissions dict: {verification_custom_perms}")
+            print(f"✅ VERIFICATION - Can view other users requests: {verification_custom_perms.get('can_view_other_users_requests')}")
+            print(f"✅ VERIFICATION - Can see requester username: {verification_custom_perms.get('can_see_requester_username')}")
         else:
             print("❌ VERIFICATION FAILED - No permissions found after save!")
         
@@ -1527,7 +1552,6 @@ async def set_user_limits(
     auto_approve: bool = Form(False),
     can_request_movies: Optional[bool] = Form(None),
     can_request_tv: Optional[bool] = Form(None),
-    can_request_4k: Optional[bool] = Form(None),
     movie_quality_profile_id: Optional[int] = Form(None),
     tv_quality_profile_id: Optional[int] = Form(None),
     notification_enabled: bool = Form(False),
@@ -1557,14 +1581,39 @@ async def set_user_limits(
             user_perms.can_request_movies = can_request_movies
         if can_request_tv is not None:
             user_perms.can_request_tv = can_request_tv
-        if can_request_4k is not None:
-            user_perms.can_request_4k = can_request_4k
         if movie_quality_profile_id is not None:
             user_perms.movie_quality_profile_id = movie_quality_profile_id
         if tv_quality_profile_id is not None:
             user_perms.tv_quality_profile_id = tv_quality_profile_id
         user_perms.notification_enabled = notification_enabled
         user_perms.updated_at = datetime.utcnow()
+        
+        # Process instance permissions from form data
+        form_data = await request.form()
+        instance_permissions = {}
+        
+        # Category permissions
+        instance_permissions['category_4k'] = 'category_4k' in form_data
+        instance_permissions['category_anime'] = 'category_anime' in form_data
+        instance_permissions['category_foreign'] = 'category_foreign' in form_data
+        
+        # Instance-specific permissions - check all instances explicitly
+        from app.models.service_instance import ServiceInstance
+        all_instances = session.exec(select(ServiceInstance)).all()
+        for instance in all_instances:
+            instance_key = f'instance_{instance.id}'
+            instance_permissions[instance_key] = instance_key in form_data
+        
+        # Update instance permissions
+        user_perms.set_instance_permissions(instance_permissions)
+        
+        # Handle custom permissions
+        custom_perms = user_perms.get_custom_permissions()
+        custom_perms['can_view_other_users_requests'] = 'can_view_other_users_requests' in form_data
+        custom_perms['can_see_requester_username'] = 'can_see_requester_username' in form_data
+        user_perms.set_custom_permissions(custom_perms)
+        
+        print(f"🔍 [LIMITS ENDPOINT] Updated custom permissions for user {user_id}: {custom_perms}")
         
         session.add(user_perms)
         session.commit()
@@ -1579,6 +1628,20 @@ async def set_user_limits(
         effective_permissions = permissions_service.get_user_effective_permissions(user_id)
         all_permissions = PermissionFlags.get_all_permissions()
         
+        # Get service instances for the modal
+        from ..models.service_instance import ServiceInstance
+        available_service_instances = session.exec(
+            select(ServiceInstance).where(ServiceInstance.is_enabled == True)
+        ).all()
+        
+        # Create template effective permissions for checkboxes
+        template_effective_permissions = {
+            'can_request_movies': permissions_service.can_request_media_type(user_id, 'movie'),
+            'can_request_tv': permissions_service.can_request_media_type(user_id, 'tv'),
+            'can_request_4k': permissions_service.can_request_4k(user_id),
+            'auto_approve_enabled': user_permissions.auto_approve_enabled if user_permissions else False
+        }
+        
         base_url = SettingsService.get_base_url(session)
         context = {
             "request": request,
@@ -1588,7 +1651,9 @@ async def set_user_limits(
             "user_role": user_role,
             "roles": roles,
             "effective_permissions": effective_permissions,
+            "template_effective_permissions": template_effective_permissions,
             "all_permissions": all_permissions,
+            "available_service_instances": available_service_instances,
             "base_url": base_url,
             "success_message": f'User limits updated for {user.username}'
         }
@@ -1602,8 +1667,7 @@ async def set_user_limits(
                 "max_requests": max_requests,
                 "auto_approve": auto_approve,
                 "can_request_movies": can_request_movies,
-                "can_request_tv": can_request_tv,
-                "can_request_4k": can_request_4k
+                "can_request_tv": can_request_tv
             }
         }
 
@@ -1646,52 +1710,6 @@ async def get_roles_management(
             "available_permissions": all_permissions
         }
 
-
-@router.get("/jobs/content", response_class=HTMLResponse)
-async def admin_jobs_content(
-    request: Request,
-    current_user: User = Depends(get_current_admin_user_flexible),
-    session: Session = Depends(get_session)
-):
-    """Get scheduled jobs content for admin dashboard"""
-    try:
-        from ..services.background_jobs import background_jobs
-        
-        # Get all job statuses from the background job manager
-        all_jobs = background_jobs.get_all_jobs_status()
-        
-        # Get library sync stats for display
-        sync_stats = {}
-        try:
-            sync_service = PlexSyncService(session)
-            sync_stats = sync_service.get_sync_stats()
-        except Exception as e:
-            print(f"Error getting sync stats: {e}")
-            sync_stats = {"error": str(e)}
-        
-        # Format the jobs for display
-        jobs_info = {}
-        for job_name, job_data in all_jobs.items():
-            jobs_info[job_name] = {
-                "name": job_data.get('name', job_name.replace('_', ' ').title()),
-                "description": job_data.get('description', ''),
-                "interval": f"{job_data.get('interval_seconds', 0) // 60} minutes" if job_data.get('interval_seconds') else "Manual",
-                "running": job_data.get('running', False),
-                "last_run": job_data.get('last_run').strftime("%Y-%m-%d %H:%M:%S UTC") if job_data.get('last_run') else "Never",
-                "next_run": job_data.get('next_run').strftime("%Y-%m-%d %H:%M:%S UTC") if job_data.get('next_run') else "Manual",
-                "stats": job_data.get('stats', {})
-            }
-        
-        return create_template_response("admin_jobs.html", {
-            "request": request,
-            "current_user": current_user,
-            "jobs": jobs_info,
-            "sync_stats": sync_stats
-        })
-        
-    except Exception as e:
-        print(f"Error loading jobs content: {e}")
-        return HTMLResponse(f'<div class="text-red-600">Error loading jobs: {str(e)}</div>')
 
 
 @router.get("/jobs/status")
@@ -2588,16 +2606,58 @@ async def edit_radarr_form(
                                 </div>
                             </div>
                             
-                            <!-- Automation Options -->
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
-                                <div class="flex items-center">
-                                    <input type="checkbox" name="is_default" id="is_default" 
-                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
-                                    <label for="is_default" class="ml-2 text-sm text-gray-700">
-                                        Default instance for movie requests
-                                    </label>
+                            <!-- Multi-Instance Configuration -->
+                            <div class="border-t pt-4 mt-4">
+                                <h6 class="text-sm font-semibold text-gray-900 mb-3">Multi-Instance Configuration</h6>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label for="instance_category" class="block text-sm font-medium text-gray-700 mb-2">Instance Category</label>
+                                        <select name="instance_category" id="instance_category" 
+                                                class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                            <option value="">Standard</option>
+                                            <option value="4k" {"selected" if instance.instance_category == "4k" else ""}>4K</option>
+                                            <option value="anime" {"selected" if instance.instance_category == "anime" else ""}>Anime</option>
+                                            <option value="foreign" {"selected" if instance.instance_category == "foreign" else ""}>Foreign</option>
+                                            <option value="family" {"selected" if instance.instance_category == "family" else ""}>Family</option>
+                                        </select>
+                                        <p class="mt-1 text-xs text-gray-500">Categorize this instance for specialized content</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <label for="quality_tier" class="block text-sm font-medium text-gray-700 mb-2">Quality Tier</label>
+                                        <select name="quality_tier" id="quality_tier" 
+                                                class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                                            <option value="standard" {"selected" if (instance.quality_tier or "standard") == "standard" else ""}>Standard</option>
+                                            <option value="4k" {"selected" if instance.quality_tier == "4k" else ""}>4K</option>
+                                            <option value="hdr" {"selected" if instance.quality_tier == "hdr" else ""}>HDR</option>
+                                        </select>
+                                        <p class="mt-1 text-xs text-gray-500">Quality tier this instance handles</p>
+                                    </div>
                                 </div>
                                 
+                                <div class="mt-4 space-y-2">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="is_default_movie" id="is_default_movie" 
+                                               {"checked" if instance.is_default_movie else ""}
+                                               class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                        <label for="is_default_movie" class="ml-2 text-sm text-gray-700">
+                                            Default instance for movie requests
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="is_4k_default" id="is_4k_default" 
+                                               {"checked" if instance.is_4k_default else ""}
+                                               class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                        <label for="is_4k_default" class="ml-2 text-sm text-gray-700">
+                                            Default instance for 4K movie requests
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Automation Options -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
                                 <div class="flex items-center">
                                     <input type="checkbox" name="enable_scan" id="enable_scan" 
                                            {"checked" if enable_scan else ""}
@@ -2699,10 +2759,43 @@ async def update_radarr_instance(
         protocol = "https" if use_ssl else "http"
         radarr_url = f"{protocol}://{radarr_hostname}:{radarr_port}"
         
+        # Extract multi-instance configuration
+        instance_category = form_data.get("instance_category", "").strip() or None
+        quality_tier = form_data.get("quality_tier", "standard").strip()
+        is_default_movie = form_data.get("is_default_movie") == "on"
+        is_4k_default = form_data.get("is_4k_default") == "on"
+        
         # Update instance
         instance.name = radarr_name
         instance.url = radarr_url
         instance.api_key = radarr_api_key
+        instance.instance_category = instance_category
+        instance.quality_tier = quality_tier
+        instance.is_default_movie = is_default_movie
+        instance.is_4k_default = is_4k_default
+        
+        # Handle default instance conflicts
+        if is_default_movie:
+            # Clear other default movie instances
+            other_defaults = session.exec(select(ServiceInstance).where(
+                ServiceInstance.service_type == ServiceType.RADARR,
+                ServiceInstance.id != instance_id,
+                ServiceInstance.is_default_movie == True
+            )).all()
+            for other_instance in other_defaults:
+                other_instance.is_default_movie = False
+                session.add(other_instance)
+        
+        if is_4k_default:
+            # Clear other 4K default instances
+            other_4k_defaults = session.exec(select(ServiceInstance).where(
+                ServiceInstance.service_type == ServiceType.RADARR,
+                ServiceInstance.id != instance_id,
+                ServiceInstance.is_4k_default == True
+            )).all()
+            for other_instance in other_4k_defaults:
+                other_instance.is_4k_default = False
+                session.add(other_instance)
         
         # Update settings - extract all form data with correct field names
         quality_profile_id = form_data.get("radarr_quality_profile_id", "").strip()
@@ -4604,14 +4697,67 @@ async def admin_jobs_tab(
             'last_run': job_data.get('last_run').strftime('%Y-%m-%d %H:%M:%S') if job_data.get('last_run') else 'Never',
             'next_run': job_data.get('next_run').strftime('%Y-%m-%d %H:%M:%S') if job_data.get('next_run') else 'Not scheduled',
             'running': job_data.get('running', False),
-            'stats': job_data.get('stats', {})
+            'stats': job_data.get('stats', {}),
+            'enabled': job_data.get('enabled', False),
+            'interval_seconds': job_data.get('interval_seconds', 0)
         }
     
-    return create_template_response("admin_jobs.html", {
+    # Get current scheduling configuration from the background jobs
+    library_sync_job = all_jobs.get('library_sync', {})
+    download_status_job = all_jobs.get('download_status_check', {})
+    
+    # Determine sync schedule based on job configuration
+    sync_schedule = "disabled"
+    if library_sync_job.get('enabled', False):
+        interval = library_sync_job.get('interval_seconds', 3600)
+        if interval <= 3600:  # 1 hour
+            sync_schedule = "hourly"
+        elif interval <= 14400:  # 4 hours
+            sync_schedule = "4hours"
+        elif interval <= 86400:  # 24 hours
+            sync_schedule = "daily"
+        else:
+            sync_schedule = "weekly"
+    
+    # Format next sync time
+    next_sync = library_sync_job.get('next_run')
+    next_sync_formatted = next_sync.strftime('%Y-%m-%d %H:%M:%S UTC') if next_sync else "Not scheduled"
+    
+    # Determine download status check schedule
+    download_schedule = "disabled"
+    if download_status_job.get('enabled', False):
+        interval = download_status_job.get('interval_seconds', 120)
+        if interval <= 120:  # 2 minutes
+            download_schedule = "2minutes"
+        elif interval <= 300:  # 5 minutes
+            download_schedule = "5minutes"
+        elif interval <= 900:  # 15 minutes
+            download_schedule = "15minutes"
+        elif interval <= 1800:  # 30 minutes
+            download_schedule = "30minutes"
+        else:  # 1 hour or more
+            download_schedule = "hourly"
+    
+    # Format next download check time
+    next_download_check = download_status_job.get('next_run')
+    next_download_check_formatted = next_download_check.strftime('%Y-%m-%d %H:%M:%S UTC') if next_download_check else "Not scheduled"
+    
+    return create_template_response("admin_tabs/jobs.html", {
         "request": request,
         "current_user": current_user,
         "jobs": jobs_info,
-        "sync_stats": sync_stats
+        "sync_stats": sync_stats,
+        "sync_schedule": sync_schedule,
+        "next_sync": next_sync_formatted,
+        "download_schedule": download_schedule,
+        "next_download_check": next_download_check_formatted,
+        "cleanup_schedule": "disabled",  # Not implemented yet
+        "cleanup_retention": "30days",  # Default value
+        "job_stats": {
+            "active": sum(1 for job in all_jobs.values() if job.get('running', False)),
+            "scheduled": sum(1 for job in all_jobs.values() if job.get('enabled', False)),
+            "failed": 0  # TODO: Track failed jobs
+        }
     })
 
 
@@ -5053,6 +5199,32 @@ async def run_manual_job(
                     </div>
                 """)
                 
+        elif job_type == "download-status":
+            result = await background_jobs.trigger_download_status_check()
+            
+            if result['success']:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-green-50 border border-green-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-green-700">Download status check started successfully!</p>
+                        </div>
+                    </div>
+                """)
+            else:
+                return HTMLResponse(f"""
+                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex">
+                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            <p class="ml-3 text-sm text-yellow-700">{result['message']}</p>
+                        </div>
+                    </div>
+                """)
+                
         elif job_type == "cleanup-requests":
             # Placeholder for request cleanup job
             return HTMLResponse(f"""
@@ -5118,52 +5290,83 @@ async def get_job_history(
     from fastapi.responses import HTMLResponse
     from ..services.background_jobs import background_jobs
     
-    # Get all jobs status
-    all_jobs = background_jobs.get_all_jobs_status()
+    # Get recent job execution history
+    history = background_jobs.get_job_execution_history(limit=50)
     
     # Build history HTML
+    if not history:
+        return HTMLResponse("""
+            <div class="text-center py-12">
+                <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012-2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+                </svg>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">No Job History</h3>
+                <p class="text-gray-500">Job execution history will appear here once jobs start running.</p>
+            </div>
+        """)
+    
     history_items = []
-    for job_name, job_info in all_jobs.items():
-        status = "success" if not job_info.get('running', False) else "running"
-        status_color = "green" if status == "success" else "blue"
-        status_text = "Completed" if status == "success" else "Running"
+    for execution in history:
+        # Format timestamps
+        started_at = execution['started_at'].strftime('%Y-%m-%d %H:%M:%S') if execution['started_at'] else "Unknown"
+        completed_at = execution['completed_at'].strftime('%Y-%m-%d %H:%M:%S') if execution['completed_at'] else "Still running"
         
-        last_run = job_info.get('last_run')
-        last_run_text = last_run.strftime('%Y-%m-%d %H:%M:%S') if last_run else "Never"
+        # Determine status styling
+        status = execution['status']
+        if status == 'success':
+            status_color = "green"
+            status_bg = "bg-green-100"
+            status_text_color = "text-green-800"
+            status_icon = "✅"
+        elif status == 'failed':
+            status_color = "red"
+            status_bg = "bg-red-100"
+            status_text_color = "text-red-800"
+            status_icon = "❌"
+        else:  # running
+            status_color = "blue"
+            status_bg = "bg-blue-100"
+            status_text_color = "text-blue-800"
+            status_icon = "🔄"
         
-        next_run = job_info.get('next_run')
-        next_run_text = next_run.strftime('%Y-%m-%d %H:%M:%S') if next_run else "Not scheduled"
+        # Format duration
+        duration_text = f"{execution['duration_seconds']:.1f}s" if execution['duration_seconds'] else "N/A"
+        
+        # Format triggered by
+        triggered_by = execution['triggered_by'].capitalize()
+        triggered_color = "text-blue-600" if execution['triggered_by'] == 'scheduler' else "text-gray-600"
+        
+        # Format job name
+        job_display_name = {
+            'library_sync': 'Library Sync',
+            'download_status_check': 'Download Status Check'
+        }.get(execution['job_name'], execution['job_name'].replace('_', ' ').title())
         
         history_items.append(f"""
             <tr class="hover:bg-gray-50">
                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {job_info.get('name', job_name)}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {job_info.get('description', 'No description')}
+                    {job_display_name}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-{status_color}-100 text-{status_color}-800">
-                        {status_text}
+                    <span class="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full {status_bg} {status_text_color}">
+                        {status_icon} {status.title()}
                     </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {last_run_text}
+                    {started_at}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {next_run_text}
+                    {completed_at}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {duration_text}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm {triggered_color}">
+                    {triggered_by}
                 </td>
             </tr>
         """)
     
-    if not history_items:
-        history_content = """
-            <tr>
-                <td colspan="5" class="px-6 py-8 text-center text-sm text-gray-500">
-                    No job history available
-                </td>
-            </tr>
-        """
     else:
         history_content = "".join(history_items)
     
@@ -5173,10 +5376,11 @@ async def get_job_history(
                 <thead class="bg-gray-50">
                     <tr>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Name</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Run</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Run</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Started</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completed</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Triggered By</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
@@ -5277,6 +5481,42 @@ async def update_job_schedule(
             return HTMLResponse(f'''
                 <div class="p-3 bg-red-50 border border-red-200 rounded-md">
                     <p class="text-red-700 text-sm">✗ Error: {str(e)}</p>
+                </div>
+            ''')
+        else:
+            return {"success": False, "message": f"Error: {str(e)}"}
+
+
+@router.post("/jobs/start-scheduler")
+async def start_scheduler(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible)
+):
+    """Start or restart the background job scheduler"""
+    try:
+        from ..services.background_jobs import background_jobs
+        
+        # Stop and restart the scheduler to ensure clean state
+        if background_jobs.running:
+            background_jobs.stop()
+        
+        background_jobs.start()
+        
+        if request.headers.get("HX-Request"):
+            return HTMLResponse(f'''
+                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p class="text-green-700 text-sm">✓ Background job scheduler started successfully</p>
+                </div>
+            ''')
+        else:
+            return {"success": True, "message": "Scheduler started successfully"}
+            
+    except Exception as e:
+        print(f"Error starting scheduler: {e}")
+        if request.headers.get("HX-Request"):
+            return HTMLResponse(f'''
+                <div class="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-red-700 text-sm">✗ Error starting scheduler: {str(e)}</p>
                 </div>
             ''')
         else:

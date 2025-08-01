@@ -389,6 +389,49 @@ class TMDBService:
             self._process_results(data['crew'])
         return data
     
+    def get_media_videos(self, item_id: int, media_type: str) -> Dict:
+        """Get videos (trailers) for media from TMDB"""
+        if media_type not in ['movie', 'tv']:
+            return {}
+            
+        url = f"{self.base_url}/{media_type}/{item_id}/videos"
+        params = {'api_key': self.api_key}
+        
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            videos = data.get('results', [])
+            
+            # Filter for YouTube trailers, prioritize official trailers
+            trailers = []
+            for video in videos:
+                if video.get('site') == 'YouTube' and video.get('type') in ['Trailer', 'Teaser']:
+                    trailers.append(video)
+            
+            # Sort by priority: Official Trailer > Trailer > Teaser
+            def trailer_priority(video):
+                name = video.get('name', '').lower()
+                if 'official trailer' in name:
+                    return 0
+                elif video.get('type') == 'Trailer':
+                    return 1
+                elif video.get('type') == 'Teaser':
+                    return 2
+                return 3
+            
+            trailers.sort(key=trailer_priority)
+            
+            return {
+                'results': trailers,
+                'total_results': len(trailers)
+            }
+            
+        except Exception as e:
+            print(f"Error fetching videos for {media_type} {item_id}: {e}")
+            return {'results': [], 'total_results': 0}
+    
     def discover_movies_by_person(self, person_id: int, page: int = 1) -> Dict:
         """Discover movies by person"""
         url = f"{self.base_url}/discover/movie"

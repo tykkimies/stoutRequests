@@ -133,6 +133,9 @@ async def create_service_instance(
             url=url,
             api_key=data['api_key'],
             is_enabled=data.get('is_enabled', True),
+            is_default_movie=data.get('is_default_movie', False),
+            is_default_tv=data.get('is_default_tv', False),
+            is_4k_default=data.get('is_4k_default', False),
             created_by=current_user.id,
             updated_at=datetime.utcnow()
         )
@@ -212,6 +215,15 @@ async def update_service_instance(
         
         if 'is_enabled' in data:
             instance.is_enabled = data['is_enabled']
+        
+        if 'is_default_movie' in data:
+            instance.is_default_movie = data['is_default_movie']
+            
+        if 'is_default_tv' in data:
+            instance.is_default_tv = data['is_default_tv']
+            
+        if 'is_4k_default' in data:
+            instance.is_4k_default = data['is_4k_default']
         
         if 'settings' in data:
             current_settings = instance.get_settings()

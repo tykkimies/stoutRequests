@@ -1,0 +1,277 @@
+<!-- Multi-Instance Request Button Macros -->
+<!-- Enhanced request buttons with instance selection support -->
+
+{% macro multi_instance_request_button(item, user_permissions=None, available_instances=None, style='button', size='md', status=None, tmdb_id=None, media_type=None, base_url='') -%}
+    {%- set computed_status = status if status else (item.status if item and item.status else 'available') -%}
+    {%- set item_tmdb_id = tmdb_id if tmdb_id else (item.id if item else '') -%}
+    {%- set item_media_type = media_type if media_type else (item.media_type if item else '') -%}
+    {%- set size_class = 'sm' if not size else size -%}
+    {%- set display_style = 'button' if not style else style -%}
+    
+    <!-- Filter available instances to match the media type of this specific item -->
+    {%- set filtered_instances = [] -%}
+    {%- if available_instances -%}
+        {%- for instance in available_instances -%}
+            {%- if (item_media_type == 'movie' and instance.service_type == 'radarr') or (item_media_type == 'tv' and instance.service_type == 'sonarr') -%}
+                {%- set _ = filtered_instances.append(instance) -%}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- endif -%}
+
+    <!-- Size classes -->
+    {%- if size_class == 'sm' -%}
+        {%- set text_size = 'text-xs' -%}
+        {%- set padding = 'px-2 py-1' -%}
+    {%- elif size_class == 'lg' -%}
+        {%- set text_size = 'text-base' -%}
+        {%- set padding = 'px-6 py-3' -%}
+    {%- else -%}
+        {%- set text_size = 'text-sm' -%}
+        {%- set padding = 'px-4 py-2' -%}
+    {%- endif -%}
+
+    <!-- Handle non-available statuses (delegate to original macro) -->
+    {%- if computed_status != 'available' -%}
+        {% from 'macros/status_display.html' import media_status_badge %}
+        {{ media_status_badge(item, style, size, status, tmdb_id, media_type, base_url) }}
+    {%- else -%}
+        <!-- Available status - show multi-instance request buttons -->
+        
+        {%- if filtered_instances and filtered_instances|length > 1 -%}
+            <!-- Multiple instances available - show dropdown selector -->
+            {%- if display_style == 'button' -%}
+                <div class="w-full relative" onclick="event.preventDefault(); event.stopPropagation(); return false;">
+                    <!-- Dropdown trigger button -->
+                    <button 
+                        type="button"
+                        class="w-full bg-orange-600/90 hover:bg-orange-700/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium transition-colors flex items-center justify-center"
+                        onclick="event.preventDefault(); event.stopPropagation(); toggleDropdownMenu(this); return false;"
+                    >
+                        Request
+                        <svg class="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </button>
+                    
+                    <!-- Dropdown menu (will be repositioned by JavaScript) -->
+                    <div class="hidden dropdown-menu bg-white rounded-md shadow-xl border border-gray-200" style="position: fixed; z-index: 99999; min-width: 160px;">
+                        {%- for instance in filtered_instances -%}
+                            <form hx-post="{{ base_url }}/requests/create" hx-target="#button-area-{{ item_tmdb_id }}" hx-swap="innerHTML" class="block">
+                                <input type="hidden" name="tmdb_id" value="{{ item_tmdb_id }}">
+                                <input type="hidden" name="media_type" value="{{ item_media_type }}">
+                                <input type="hidden" name="title" value="{{ ((item.title or item.name)|e) if item else '' }}">
+                                <input type="hidden" name="overview" value="{{ ((item.overview or '')|e) if item else '' }}">
+                                <input type="hidden" name="poster_path" value="{{ (item.poster_path or '') if item else '' }}">
+                                <input type="hidden" name="release_date" value="{{ (item.release_date or item.first_air_date or '') if item else '' }}">
+                                <input type="hidden" name="service_instance_id" value="{{ instance.id }}">
+                                <input type="hidden" name="quality_tier" value="{{ instance.quality_tier or 'standard' }}">
+                                <input type="hidden" name="request_source" value="multi_instance">
+                                
+                                <button 
+                                    type="submit" 
+                                    class="w-full text-left px-3 py-2 {{ text_size }} text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md border-b border-gray-100 last:border-b-0"
+                                    onclick="event.stopPropagation(); closeAllDropdowns();"
+                                >
+                                    <div class="flex items-center justify-between">
+                                        <span>{{ instance.name }}</span>
+                                        <div class="flex space-x-1">
+                                            {%- if instance.quality_tier and instance.quality_tier != 'standard' -%}
+                                                <span class="text-xs px-1 py-0.5 bg-blue-100 text-blue-800 rounded">{{ instance.quality_tier|upper }}</span>
+                                            {%- endif -%}
+                                            {%- if instance.instance_category -%}
+                                                <span class="text-xs px-1 py-0.5 bg-gray-100 text-gray-600 rounded">{{ instance.instance_category }}</span>
+                                            {%- endif -%}
+                                        </div>
+                                    </div>
+                                </button>
+                            </form>
+                        {%- endfor -%}
+                    </div>
+                </div>
+                
+            {%- elif display_style == 'search' -%}
+                <!-- Search page multi-instance dropdown -->
+                <div class="inline-block relative" onclick="event.preventDefault(); event.stopPropagation(); return false;">
+                    <button 
+                        type="button"
+                        class="inline-flex items-center px-3 py-2 border border-orange-300 text-sm leading-4 font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors"
+                        onclick="event.preventDefault(); event.stopPropagation(); toggleDropdownMenu(this); return false;"
+                    >
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                        </svg>
+                        Request
+                        <svg class="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </button>
+                    
+                    <div class="hidden dropdown-menu bg-white rounded-md shadow-xl border border-gray-200" style="position: fixed; z-index: 99999; min-width: 200px;">
+                        {%- for instance in filtered_instances -%}
+                            <form hx-post="{{ base_url }}/requests/create" hx-target="#button-area-{{ item_tmdb_id }}" hx-swap="innerHTML" class="block">
+                                <input type="hidden" name="tmdb_id" value="{{ item_tmdb_id }}">
+                                <input type="hidden" name="media_type" value="{{ item_media_type }}">
+                                <input type="hidden" name="title" value="{{ ((item.title or item.name)|e) if item else '' }}">
+                                <input type="hidden" name="overview" value="{{ ((item.overview or '')|e) if item else '' }}">
+                                <input type="hidden" name="poster_path" value="{{ (item.poster_path or '') if item else '' }}">
+                                <input type="hidden" name="release_date" value="{{ (item.release_date or item.first_air_date or '') if item else '' }}">
+                                <input type="hidden" name="service_instance_id" value="{{ instance.id }}">
+                                <input type="hidden" name="quality_tier" value="{{ instance.quality_tier or 'standard' }}">
+                                <input type="hidden" name="request_source" value="multi_instance">
+                                
+                                <button 
+                                    type="submit" 
+                                    class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md border-b border-gray-100 last:border-b-0"
+                                    onclick="event.stopPropagation(); closeAllDropdowns();"
+                                >
+                                    <div class="flex items-center justify-between">
+                                        <span>{{ instance.name }}</span>
+                                        <div class="flex space-x-1">
+                                            {%- if instance.quality_tier and instance.quality_tier != 'standard' -%}
+                                                <span class="text-xs px-1 py-0.5 bg-blue-100 text-blue-800 rounded">{{ instance.quality_tier|upper }}</span>
+                                            {%- endif -%}
+                                            {%- if instance.instance_category -%}
+                                                <span class="text-xs px-1 py-0.5 bg-gray-100 text-gray-600 rounded">{{ instance.instance_category }}</span>
+                                            {%- endif -%}
+                                        </div>
+                                    </div>
+                                </button>
+                            </form>
+                        {%- endfor -%}
+                    </div>
+                </div>
+            {%- endif -%}
+            
+        {%- elif filtered_instances and filtered_instances|length == 1 -%}
+            <!-- Single instance available - simple request button -->
+            {%- set instance = filtered_instances[0] -%}
+            
+            {%- if display_style == 'button' -%}
+                <form hx-post="{{ base_url }}/requests/create" hx-target="#button-area-{{ item_tmdb_id }}" hx-swap="innerHTML" class="w-full relative" onclick="event.stopPropagation();">
+                    <input type="hidden" name="tmdb_id" value="{{ item_tmdb_id }}">
+                    <input type="hidden" name="media_type" value="{{ item_media_type }}">
+                    <input type="hidden" name="title" value="{{ ((item.title or item.name)|e) if item else '' }}">
+                    <input type="hidden" name="overview" value="{{ ((item.overview or '')|e) if item else '' }}">
+                    <input type="hidden" name="poster_path" value="{{ (item.poster_path or '') if item else '' }}">
+                    <input type="hidden" name="release_date" value="{{ (item.release_date or item.first_air_date or '') if item else '' }}">
+                    <input type="hidden" name="service_instance_id" value="{{ instance.id }}">
+                    <input type="hidden" name="quality_tier" value="{{ instance.quality_tier or 'standard' }}">
+                    <input type="hidden" name="request_source" value="single_instance">
+                    
+                    <button type="submit" class="w-full bg-orange-600/90 hover:bg-orange-700/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium transition-colors flex items-center justify-center" onclick="event.stopPropagation();">
+                        Request
+                        {%- if instance.quality_tier and instance.quality_tier != 'standard' -%}
+                            <span class="ml-1 text-xs">({{ instance.quality_tier|upper }})</span>
+                        {%- endif -%}
+                    </button>
+                </form>
+                
+            {%- elif display_style == 'search' -%}
+                <form hx-post="{{ base_url }}/requests/create" hx-target="#button-area-{{ item_tmdb_id }}" hx-swap="innerHTML" class="inline-block relative" onclick="event.stopPropagation();">
+                    <input type="hidden" name="tmdb_id" value="{{ item_tmdb_id }}">
+                    <input type="hidden" name="media_type" value="{{ item_media_type }}">
+                    <input type="hidden" name="title" value="{{ ((item.title or item.name)|e) if item else '' }}">
+                    <input type="hidden" name="overview" value="{{ ((item.overview or '')|e) if item else '' }}">
+                    <input type="hidden" name="poster_path" value="{{ (item.poster_path or '') if item else '' }}">
+                    <input type="hidden" name="release_date" value="{{ (item.release_date or item.first_air_date or '') if item else '' }}">
+                    <input type="hidden" name="service_instance_id" value="{{ instance.id }}">
+                    <input type="hidden" name="quality_tier" value="{{ instance.quality_tier or 'standard' }}">
+                    <input type="hidden" name="request_source" value="single_instance">
+                    
+                    <button type="submit" class="inline-flex items-center px-3 py-2 border border-orange-300 text-sm leading-4 font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors" onclick="event.stopPropagation();">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                        </svg>
+                        Request
+                        {%- if instance.quality_tier and instance.quality_tier != 'standard' -%}
+                            <span class="ml-1 text-xs">({{ instance.quality_tier|upper }})</span>
+                        {%- endif -%}
+                    </button>
+                </form>
+            {%- endif -%}
+            
+        {%- else -%}
+            <!-- No instances available - show disabled button -->
+            {%- if display_style == 'button' -%}
+                <div class="w-full bg-gray-400/90 backdrop-blur-sm text-white {{ padding }} rounded {{ text_size }} font-medium text-center cursor-not-allowed">
+                    No Access
+                </div>
+            {%- elif display_style == 'search' -%}
+                <div class="inline-flex items-center px-3 py-2 border border-gray-300 text-sm leading-4 font-medium rounded-md text-gray-500 bg-gray-50 cursor-not-allowed">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 5.636M5.636 18.364l12.728-12.728"></path>
+                    </svg>
+                    No Access
+                </div>
+            {%- endif -%}
+        {%- endif -%}
+    {%- endif -%}
+{%- endmacro %}
+
+<!-- Simplified version for backward compatibility -->
+{% macro enhanced_request_button(item, available_instances=None, style='button', size='md', base_url='') -%}
+    {{ multi_instance_request_button(item, None, available_instances, style, size, None, None, None, base_url) }}
+{%- endmacro %}
+
+<!-- Instance permission badge macro -->
+{% macro instance_permission_badge(instance, user_has_access=True, size='sm') -%}
+    {%- set size_class = 'sm' if not size else size -%}
+    
+    {%- if size_class == 'sm' -%}
+        {%- set text_size = 'text-xs' -%}
+        {%- set padding = 'px-2 py-1' -%}
+    {%- else -%}
+        {%- set text_size = 'text-xs' -%}
+        {%- set padding = 'px-2 py-1' -%}
+    {%- endif -%}
+
+    <div class="flex items-center space-x-1">
+        <!-- Instance name -->
+        <span class="text-gray-700 font-medium">{{ instance.name }}</span>
+        
+        <!-- Quality tier badge -->
+        {%- if instance.quality_tier and instance.quality_tier != 'standard' -%}
+            <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-blue-100 text-blue-800">
+                {{ instance.quality_tier|upper }}
+            </span>
+        {%- endif -%}
+        
+        <!-- Category badge -->
+        {%- if instance.instance_category -%}
+            <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-purple-100 text-purple-800">
+                {{ instance.instance_category|title }}
+            </span>
+        {%- endif -%}
+        
+        <!-- Default badges -->
+        {%- if instance.is_default_movie -%}
+            <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-green-100 text-green-800">
+                Default Movies
+            </span>
+        {%- endif -%}
+        
+        {%- if instance.is_default_tv -%}
+            <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-green-100 text-green-800">
+                Default TV
+            </span>
+        {%- endif -%}
+        
+        {%- if instance.is_4k_default -%}
+            <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-yellow-100 text-yellow-800">
+                4K Default
+            </span>
+        {%- endif -%}
+        
+        <!-- Access indicator -->
+        {%- if user_has_access -%}
+            <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-green-100 text-green-800">
+                ✓ Access
+            </span>
+        {%- else -%}
+            <span class="inline-flex items-center {{ padding }} rounded-full {{ text_size }} font-medium bg-red-100 text-red-800">
+                ✗ No Access
+            </span>
+        {%- endif -%}
+    </div>
+{%- endmacro %}
+

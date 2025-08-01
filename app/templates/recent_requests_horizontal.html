@@ -1,5 +1,5 @@
 <!-- Recent Requests Horizontal Template - Jellyseerr Style -->
-{% from 'macros/status_display.html' import media_status_badge %}
+{% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 {% if results %}
 <div class="flex space-x-4 overflow-x-auto pb-2">
     {% for item in results %}
@@ -36,7 +36,15 @@
                 <div>
                     <div class="flex items-start justify-between">
                         <div class="flex-1 min-w-0">
-                            <h3 class="text-base font-semibold text-white truncate">{{ item.title or item.name }}</h3>
+                            <h3 class="text-base font-semibold text-white truncate">
+                                {% if item.is_episode_request and item.season_number and item.episode_number %}
+                                    {{ item.title or item.name }} - S{{ "%02d"|format(item.season_number) }}E{{ "%02d"|format(item.episode_number) }}
+                                {% elif item.is_season_request and item.season_number %}
+                                    {{ item.title or item.name }} - Season {{ item.season_number }}
+                                {% else %}
+                                    {{ item.title or item.name }}
+                                {% endif %}
+                            </h3>
                             <div class="flex items-center space-x-2 mt-1">
                                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
                                     {% if item.media_type == 'movie' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
@@ -52,7 +60,7 @@
                         
                         <!-- Status Badge -->
                         <div class="ml-2 flex-shrink-0" id="status-badge-{{ item.request_id }}">
-                            {{ media_status_badge(item, style='badge', size='sm', base_url=base_url) }}
+                            {{ multi_instance_request_button(item, None, available_instances, style='badge', size='sm', base_url=base_url) }}
                         </div>
                     </div>
                     

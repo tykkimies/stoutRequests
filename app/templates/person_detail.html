@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from 'macros/status_display.html' import media_status_badge %}
+{% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 
 {% block title %}{{ person.name }} - Stout Requests{% endblock %}
 
@@ -137,7 +137,7 @@
                                     </div>
                                     
                                     <!-- Action button -->
-                                    {{ media_status_badge(item, style='button', size='md', base_url=base_url) }}
+                                    {{ multi_instance_request_button(item, None, available_instances, style='button', size='md', base_url=base_url) }}
                                 </div>
                             </div>
                         </div>
@@ -145,7 +145,7 @@
                         <!-- Top badges -->
                         <div class="absolute top-2 left-2">
                             {% if item.status and (item.status == 'in_plex' or item.status == 'partial_plex') or item.in_plex %}
-                            {{ media_status_badge(item, style='overlay', size='sm', base_url=base_url) }}
+                            {{ multi_instance_request_button(item, None, available_instances, style='overlay', size='sm', base_url=base_url) }}
                             {% endif %}
                         </div>
                         

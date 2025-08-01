@@ -7,5 +7,7 @@ from .role import Role, PermissionFlags
 from .user_permissions import UserPermissions
 from .user_category_preferences import UserCategoryPreferences
 from .user_custom_category import UserCustomCategory
+from .job_execution import JobExecution
+from .service_instance import ServiceInstance, ServiceType
 
-__all__ = ["User", "MediaRequest", "PlexLibraryItem", "PlexTVItem", "Settings", "Role", "PermissionFlags", "UserPermissions", "UserCategoryPreferences", "UserCustomCategory"]
+__all__ = ["User", "MediaRequest", "PlexLibraryItem", "PlexTVItem", "Settings", "Role", "PermissionFlags", "UserPermissions", "UserCategoryPreferences", "UserCustomCategory", "JobExecution", "ServiceInstance", "ServiceType"]

@@ -1,9 +1,10 @@
 <!-- Movie Cards Only - For Infinite Scroll Append -->
-{% from 'macros/status_display.html' import media_status_badge %}
+{% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 
 {% if results %}
 {% for item in results %}
-<div class="media-card group relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
+<div id="media-card-{{ item.id }}" class="media-card group relative bg-white rounded-lg shadow-sm hover:shadow-xl transition-all duration-300 hover:scale-105">
+    <div class="rounded-lg" style="overflow: visible;"  data-dropdown-boundary>
     <div class="relative aspect-[2/3]">
         {% if item.poster_url %}
         <img src="{{ item.poster_url }}" alt="{{ item.title or item.name }}" class="w-full h-full object-cover">
@@ -48,15 +49,17 @@
                     </div>
                     
                     <!-- Action button -->
-                    {{ media_status_badge(item, style='button', size='md') }}
+                    <div id="button-area-{{ item.id }}">
+                        {{ multi_instance_request_button(item, None, available_instances, style='button', size='md', base_url=base_url) }}
+                    </div>
                 </div>
             </div>
         </div>
         
         <!-- Top badges (always visible) -->
-        <div class="absolute top-2 left-2">
+        <div id="overlay-area-{{ item.id }}" class="absolute top-2 left-2">
             {% if item.status and (item.status == 'in_plex' or item.status == 'partial_plex') or item.in_plex %}
-            {{ media_status_badge(item, style='overlay', size='sm') }}
+            {{ multi_instance_request_button(item, None, available_instances, style='overlay', size='sm', base_url=base_url) }}
             {% endif %}
         </div>
         
@@ -68,6 +71,7 @@
         
         <!-- Clickable area for poster (excludes bottom action area) -->
         <a href="{{ base_url }}/media/{{ item.media_type }}/{{ item.id }}" class="absolute inset-0 z-10" style="bottom: 60px;"></a>
+    </div>
     </div>
 </div>
 {% endfor %}

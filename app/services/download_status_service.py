@@ -256,24 +256,112 @@ class DownloadStatusService:
                         break
                 
                 if series_found:
-                    episode_file_count = series_found.get('statistics', {}).get('episodeFileCount', 0)
-                    if episode_file_count > 0:
-                        # TV show has episodes - mark as available
-                        if request.status != RequestStatus.AVAILABLE:
-                            request.status = RequestStatus.AVAILABLE
-                            request.updated_at = datetime.utcnow()
-                            self.session.add(request)
-                            stats['updated_to_downloaded'] += 1
-                            print(f"✅ TV show '{request.title}' marked as available ({episode_file_count} episodes)")
+                    # Handle granular requests (specific episodes/seasons) vs complete series requests
+                    is_available = False
+                    
+                    if request.is_episode_request and request.episode_number and request.season_number:
+                        # Check specific episode availability
+                        is_available = await self._check_specific_episode_available(
+                            instance, headers, series_found, request.season_number, request.episode_number
+                        )
+                        if is_available:
+                            print(f"✅ Episode S{request.season_number}E{request.episode_number} of '{request.title}' is available")
+                    
+                    elif request.is_season_request and request.season_number:
+                        # Check if all episodes in the requested season are available
+                        is_available = await self._check_season_available(
+                            instance, headers, series_found, request.season_number
+                        )
+                        if is_available:
+                            print(f"✅ Season {request.season_number} of '{request.title}' is fully available")
+                    
                     else:
-                        # Series exists but no episodes yet
-                        print(f"📥 TV show '{request.title}' added to Sonarr but no episodes downloaded yet")
+                        # Complete series request - check if show has any episodes
+                        episode_file_count = series_found.get('statistics', {}).get('episodeFileCount', 0)
+                        is_available = episode_file_count > 0
+                        if is_available:
+                            print(f"✅ TV show '{request.title}' has {episode_file_count} episodes available")
+                    
+                    # Update request status if content is available
+                    if is_available and request.status != RequestStatus.AVAILABLE:
+                        request.status = RequestStatus.AVAILABLE
+                        request.updated_at = datetime.utcnow()
+                        self.session.add(request)
+                        stats['updated_to_downloaded'] += 1
+                    elif not is_available:
+                        print(f"📥 '{request.title}' added to Sonarr but requested content not yet available")
                 
         except Exception as e:
             print(f"❌ Error checking Sonarr instance {instance.name}: {e}")
             stats['errors'] += 1
         
         return stats
+    
+    async def _check_specific_episode_available(self, instance: ServiceInstance, headers: dict, series: dict, season_number: int, episode_number: int) -> bool:
+        """Check if a specific episode is available in Sonarr"""
+        try:
+            series_id = series.get('id')
+            if not series_id:
+                return False
+            
+            # Get episode files for this series
+            episodes_response = requests.get(
+                f"{instance.url.rstrip('/')}/api/v3/episodefile",
+                headers=headers,
+                params={'seriesId': series_id},
+                timeout=10
+            )
+            episodes_response.raise_for_status()
+            episode_files = episodes_response.json()
+            
+            # Check if the specific episode has a file
+            for episode_file in episode_files:
+                for episode_info in episode_file.get('episodes', []):
+                    if (episode_info.get('seasonNumber') == season_number and 
+                        episode_info.get('episodeNumber') == episode_number):
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"❌ Error checking specific episode S{season_number}E{episode_number}: {e}")
+            return False
+    
+    async def _check_season_available(self, instance: ServiceInstance, headers: dict, series: dict, season_number: int) -> bool:
+        """Check if all episodes in a season are available in Sonarr"""
+        try:
+            series_id = series.get('id')
+            if not series_id:
+                return False
+            
+            # Get season information to know how many episodes should exist
+            series_response = requests.get(
+                f"{instance.url.rstrip('/')}/api/v3/series/{series_id}",
+                headers=headers,
+                timeout=10
+            )
+            series_response.raise_for_status()
+            series_detail = series_response.json()
+            
+            # Find the requested season
+            requested_season = None
+            for season in series_detail.get('seasons', []):
+                if season.get('seasonNumber') == season_number:
+                    requested_season = season
+                    break
+            
+            if not requested_season:
+                return False
+            
+            total_episodes = requested_season.get('statistics', {}).get('totalEpisodeCount', 0)
+            available_episodes = requested_season.get('statistics', {}).get('episodeFileCount', 0)
+            
+            # Season is considered available if all episodes have files
+            return total_episodes > 0 and available_episodes >= total_episodes
+            
+        except Exception as e:
+            print(f"❌ Error checking season {season_number}: {e}")
+            return False
     
     def commit_changes(self):
         """Commit any status changes to the database"""

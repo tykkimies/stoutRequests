@@ -140,10 +140,45 @@
                     </div>
                 </div>
                 
-                <div class="flex items-center">
-                    <input type="checkbox" name="is_enabled" id="edit-service-enabled" 
-                           class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
-                    <label for="edit-service-enabled" class="ml-2 text-sm text-gray-700">Enable this service instance</label>
+                <div class="space-y-3">
+                    <div class="flex items-center">
+                        <input type="checkbox" name="is_enabled" id="edit-service-enabled" 
+                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                        <label for="edit-service-enabled" class="ml-2 text-sm text-gray-700">Enable this service instance</label>
+                    </div>
+                    
+                    <!-- Default Instance Settings -->
+                    <div class="border-t pt-3">
+                        <h4 class="text-sm font-medium text-gray-900 mb-2">Default Instance Settings</h4>
+                        <div class="space-y-2">
+                            <div class="flex items-center" id="edit-default-movie" style="display: none;">
+                                <input type="checkbox" name="is_default_movie" id="edit-service-default-movie" 
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                <label for="edit-service-default-movie" class="ml-2 text-sm text-gray-700">
+                                    Default instance for movie requests
+                                    <span class="text-xs text-gray-500 block">New movie requests will use this instance by default</span>
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center" id="edit-default-tv" style="display: none;">  
+                                <input type="checkbox" name="is_default_tv" id="edit-service-default-tv" 
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                <label for="edit-service-default-tv" class="ml-2 text-sm text-gray-700">
+                                    Default instance for TV requests
+                                    <span class="text-xs text-gray-500 block">New TV requests will use this instance by default</span>
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center">
+                                <input type="checkbox" name="is_4k_default" id="edit-service-4k-default" 
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                <label for="edit-service-4k-default" class="ml-2 text-sm text-gray-700">
+                                    Default 4K instance
+                                    <span class="text-xs text-gray-500 block">Use this instance for 4K quality requests</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Advanced Settings Section -->
@@ -215,7 +250,7 @@
                                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
                                         <label for="edit-radarr-monitored" class="ml-2 text-sm text-gray-700">
                                             Monitor by Default
-                                            <span class="text-xs text-gray-500 block">Monitor new movies for available releases</span>
+                                            <span class="text-xs text-gray-500 block">Monitor new movies for available releases (required for downloads)</span>
                                         </label>
                                     </div>
                                 </div>
@@ -287,7 +322,7 @@
                                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
                                         <label for="edit-sonarr-monitored" class="ml-2 text-sm text-gray-700">
                                             Monitor by Default
-                                            <span class="text-xs text-gray-500 block">Monitor new shows for available releases</span>
+                                            <span class="text-xs text-gray-500 block">Monitor new shows for available releases (required for downloads)</span>
                                         </label>
                                     </div>
                                     
@@ -423,10 +458,45 @@
                     </div>
                 </div>
                 
-                <div class="flex items-center">
-                    <input type="checkbox" name="is_enabled" id="service-enabled" checked 
-                           class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
-                    <label for="service-enabled" class="ml-2 text-sm text-gray-700">Enable this service instance</label>
+                <div class="space-y-3">
+                    <div class="flex items-center">
+                        <input type="checkbox" name="is_enabled" id="service-enabled" checked 
+                               class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                        <label for="service-enabled" class="ml-2 text-sm text-gray-700">Enable this service instance</label>
+                    </div>
+                    
+                    <!-- Default Instance Settings -->
+                    <div class="border-t pt-3">
+                        <h4 class="text-sm font-medium text-gray-900 mb-2">Default Instance Settings</h4>
+                        <div class="space-y-2">
+                            <div class="flex items-center" id="default-movie" style="display: none;">
+                                <input type="checkbox" name="is_default_movie" id="service-default-movie" 
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                <label for="service-default-movie" class="ml-2 text-sm text-gray-700">
+                                    Default instance for movie requests
+                                    <span class="text-xs text-gray-500 block">New movie requests will use this instance by default</span>
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center" id="default-tv" style="display: none;">  
+                                <input type="checkbox" name="is_default_tv" id="service-default-tv" 
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                <label for="service-default-tv" class="ml-2 text-sm text-gray-700">
+                                    Default instance for TV requests
+                                    <span class="text-xs text-gray-500 block">New TV requests will use this instance by default</span>
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center">
+                                <input type="checkbox" name="is_4k_default" id="service-4k-default" 
+                                       class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                <label for="service-4k-default" class="ml-2 text-sm text-gray-700">
+                                    Default 4K instance
+                                    <span class="text-xs text-gray-500 block">Use this instance for 4K quality requests</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Advanced Settings Section -->
@@ -498,7 +568,7 @@
                                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
                                         <label for="radarr-monitored" class="ml-2 text-sm text-gray-700">
                                             Monitor by Default
-                                            <span class="text-xs text-gray-500 block">Monitor new movies for available releases</span>
+                                            <span class="text-xs text-gray-500 block">Monitor new movies for available releases (required for downloads)</span>
                                         </label>
                                     </div>
                                 </div>
@@ -570,7 +640,7 @@
                                                class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
                                         <label for="sonarr-monitored" class="ml-2 text-sm text-gray-700">
                                             Monitor by Default
-                                            <span class="text-xs text-gray-500 block">Monitor new shows for available releases</span>
+                                            <span class="text-xs text-gray-500 block">Monitor new shows for available releases (required for downloads)</span>
                                         </label>
                                     </div>
                                     
@@ -650,6 +720,10 @@ function updateServiceDefaults() {
     const hostnameInput = document.getElementById('service-hostname');
     const portInput = document.getElementById('service-port');
     
+    // Show/hide service-specific default checkboxes
+    const defaultMovieDiv = document.getElementById('default-movie');
+    const defaultTvDiv = document.getElementById('default-tv');
+    
     // Update default values based on service type
     if (serviceType === 'radarr') {
         if (!nameInput.value) nameInput.value = 'Radarr';
@@ -657,15 +731,24 @@ function updateServiceDefaults() {
         if (!portInput.value) portInput.value = '7878';
         document.getElementById('radarr-settings').classList.remove('hidden');
         document.getElementById('sonarr-settings').classList.add('hidden');
+        // Show movie default checkbox for Radarr
+        if (defaultMovieDiv) defaultMovieDiv.style.display = 'flex';
+        if (defaultTvDiv) defaultTvDiv.style.display = 'none';
     } else if (serviceType === 'sonarr') {
         if (!nameInput.value) nameInput.value = 'Sonarr';
         if (!hostnameInput.value) hostnameInput.value = 'localhost';
         if (!portInput.value) portInput.value = '8989';
         document.getElementById('sonarr-settings').classList.remove('hidden');
         document.getElementById('radarr-settings').classList.add('hidden');
+        // Show TV default checkbox for Sonarr
+        if (defaultMovieDiv) defaultMovieDiv.style.display = 'none';
+        if (defaultTvDiv) defaultTvDiv.style.display = 'flex';
     } else {
         document.getElementById('radarr-settings').classList.add('hidden');
         document.getElementById('sonarr-settings').classList.add('hidden');
+        // Hide both default checkboxes for unknown service type
+        if (defaultMovieDiv) defaultMovieDiv.style.display = 'none';
+        if (defaultTvDiv) defaultTvDiv.style.display = 'none';
     }
 }
 
@@ -843,6 +926,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 use_ssl: formData.get('use_ssl'),
                 api_key: formData.get('api_key'),
                 is_enabled: formData.get('is_enabled') === 'on',
+                is_default_movie: formData.get('is_default_movie') === 'on',
+                is_default_tv: formData.get('is_default_tv') === 'on',
+                is_4k_default: formData.get('is_4k_default') === 'on',
                 settings: {}
             };
             
@@ -868,11 +954,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     enable_scan: enableScanChecked,
                     enable_integration: enableIntegrationChecked,
                     enable_automatic_search: enableAutoSearchChecked,
+                    search_for_movie: enableAutoSearchChecked,
                     monitored: monitoredChecked
                 });
                 serviceData.settings.enable_scan = enableScanChecked;
                 serviceData.settings.enable_integration = enableIntegrationChecked;
                 serviceData.settings.enable_automatic_search = enableAutoSearchChecked;
+                serviceData.settings.search_for_movie = enableAutoSearchChecked; // RadarrService uses this field
                 serviceData.settings.monitored = monitoredChecked;
             } else if (serviceData.service_type === 'sonarr') {
                 if (formData.get('quality_profile_id')) serviceData.settings.quality_profile_id = parseInt(formData.get('quality_profile_id'));
@@ -986,6 +1074,10 @@ function hideEditServiceModal() {
 function updateEditServiceDefaults() {
     const serviceType = document.getElementById('edit-service-type').value;
     
+    // Show/hide service-specific default checkboxes
+    const editDefaultMovieDiv = document.getElementById('edit-default-movie');
+    const editDefaultTvDiv = document.getElementById('edit-default-tv');
+    
     // Show/hide service-specific settings
     if (serviceType === 'radarr') {
         const radarrDiv = document.getElementById('edit-radarr-settings');
@@ -1001,6 +1093,9 @@ function updateEditServiceDefaults() {
             sonarrDiv.classList.add('hidden');
             sonarrDiv.style.display = 'none';
         }
+        // Show movie default checkbox for Radarr
+        if (editDefaultMovieDiv) editDefaultMovieDiv.style.display = 'flex';
+        if (editDefaultTvDiv) editDefaultTvDiv.style.display = 'none';
     } else if (serviceType === 'sonarr') {
         const radarrDiv = document.getElementById('edit-radarr-settings');
         const sonarrDiv = document.getElementById('edit-sonarr-settings');
@@ -1015,6 +1110,9 @@ function updateEditServiceDefaults() {
             radarrDiv.classList.add('hidden');
             radarrDiv.style.display = 'none';
         }
+        // Show TV default checkbox for Sonarr
+        if (editDefaultMovieDiv) editDefaultMovieDiv.style.display = 'none';
+        if (editDefaultTvDiv) editDefaultTvDiv.style.display = 'flex';
     } else {
         // Hide both
         const radarrDiv = document.getElementById('edit-radarr-settings');
@@ -1027,6 +1125,9 @@ function updateEditServiceDefaults() {
             sonarrDiv.classList.add('hidden');
             sonarrDiv.style.display = 'none';
         }
+        // Hide both default checkboxes for unknown service type
+        if (editDefaultMovieDiv) editDefaultMovieDiv.style.display = 'none';
+        if (editDefaultTvDiv) editDefaultTvDiv.style.display = 'none';
     }
 }
 
@@ -1243,6 +1344,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 name: formData.get('name'),
                 url: url,
                 is_enabled: formData.get('is_enabled') === 'on',
+                is_default_movie: formData.get('is_default_movie') === 'on',
+                is_default_tv: formData.get('is_default_tv') === 'on',
+                is_4k_default: formData.get('is_4k_default') === 'on',
                 settings: {}
             };
             
@@ -1268,6 +1372,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 serviceData.settings.enable_scan = formData.get('enable_scan') === 'on';
                 serviceData.settings.enable_integration = formData.get('enable_integration') === 'on';
                 serviceData.settings.enable_automatic_search = formData.get('enable_automatic_search') === 'on';
+                serviceData.settings.search_for_movie = formData.get('enable_automatic_search') === 'on'; // RadarrService uses this field
                 serviceData.settings.monitored = formData.get('monitored') === 'on';
             } else if (serviceType === 'sonarr') {
                 if (formData.get('quality_profile_id')) serviceData.settings.quality_profile_id = parseInt(formData.get('quality_profile_id'));

@@ -30,6 +30,11 @@ class MediaRequest(SQLModel, table=True):
     episode_number: Optional[int] = None  # For specific episode requests
     is_season_request: bool = Field(default=False)  # True if requesting specific season
     is_episode_request: bool = Field(default=False)  # True if requesting specific episode
+    
+    # Multi-instance support
+    service_instance_id: Optional[int] = Field(default=None, foreign_key="serviceinstance.id")  # Which instance handled/will handle this request
+    requested_quality_tier: Optional[str] = Field(default="standard", max_length=20)  # Quality tier requested ("standard", "4k", "hdr")
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
     approved_at: Optional[datetime] = None

@@ -10,6 +10,7 @@ from ..core.database import get_session
 from ..core.template_context import get_global_template_context
 from ..models.user import User
 from ..models.media_request import MediaRequest, MediaType, RequestStatus
+from ..models.service_instance import ServiceInstance
 from ..api.auth import get_current_user_flexible, get_current_admin_user_flexible
 from ..core.permission_decorators import (
     require_permission, require_any_permission, check_request_permissions, 
@@ -22,6 +23,8 @@ from ..services.sonarr_service import SonarrService
 from ..services.settings_service import build_app_url
 from ..services.settings_service import SettingsService
 from ..services.permissions_service import PermissionsService
+from ..services.instance_selection_service import InstanceSelectionService
+from ..services.multi_instance_integration_service import integrate_with_multi_instance_services
 
 router = APIRouter(prefix="/requests", tags=["requests"])
 templates = Jinja2Templates(directory="app/templates")
@@ -40,6 +43,53 @@ def create_template_response(template_name: str, context: dict):
     return templates.TemplateResponse(template_name, merged_context)
 
 
+async def create_template_response_with_instances(template_name: str, context: dict, session: Session = None):
+    """Create a template response with instance data for multi-instance support"""
+    current_user = context.get('current_user')
+    media_type = context.get('media_type', context.get('current_media_type', 'movie'))
+    requests = context.get('requests', [])
+    
+    # Get available instances for the user
+    from ..main import get_user_instances_for_template
+    available_instances = await get_user_instances_for_template(current_user, media_type)
+    
+    # Create instance lookup for requests that have service instances
+    instance_lookup = {}
+    if requests and session:
+        from sqlmodel import select
+        from ..models.service_instance import ServiceInstance
+        
+        # Get all unique instance IDs from requests
+        instance_ids = {req.service_instance_id for req in requests if req.service_instance_id}
+        
+        if instance_ids:
+            # Load all instances in one query
+            statement = select(ServiceInstance).where(ServiceInstance.id.in_(instance_ids))
+            instances = session.exec(statement).all()
+            
+            # Create lookup dictionary
+            for instance in instances:
+                instance_lookup[instance.id] = instance
+    
+    # Add instance data to context
+    enhanced_context = {
+        **context,
+        'available_instances': available_instances,
+        'instance_lookup': instance_lookup
+    }
+    
+    print(f"🔧 [REQUESTS API MULTI_INSTANCE] Template: {template_name}")
+    print(f"🔧 [REQUESTS API MULTI_INSTANCE] Media type: {media_type}")
+    print(f"🔧 [REQUESTS API MULTI_INSTANCE] Available instances: {len(available_instances)}")
+    if available_instances and current_user:
+        print(f"🔧 [REQUESTS API MULTI_INSTANCE] User is admin: {current_user.is_admin if current_user else False}")
+        print(f"🔧 [REQUESTS API MULTI_INSTANCE] Has multiple instances: {len(available_instances) > 1}")
+    else:
+        print(f"🔧 [REQUESTS API MULTI_INSTANCE] ❌ No instances available for user {current_user.username if current_user else 'None'}")
+    
+    return create_template_response(template_name, enhanced_context)
+
+
 class CreateRequestData(BaseModel):
     tmdb_id: int
     media_type: str
@@ -51,119 +101,90 @@ class CreateRequestData(BaseModel):
 
 async def integrate_with_services(media_request: MediaRequest, session: Session) -> Optional[Dict]:
     """
-    Automatically send approved requests to Radarr/Sonarr
+    Automatically send approved requests to Radarr/Sonarr using the specified service instance
     Returns integration result or None if no service configured
     """
     import asyncio
+    from sqlmodel import select
+    from ..models.service_instance import ServiceInstance
+    
+    print(f"\n🎬 ===== INTEGRATION CHAIN STARTING ===== 🎬")
+    print(f"📊 Request ID: {media_request.id}")
+    print(f"📊 Title: {media_request.title}")
+    print(f"📊 Media Type: {media_request.media_type.value}")
+    print(f"📊 TMDB ID: {media_request.tmdb_id}")
+    print(f"📊 Service Instance ID: {media_request.service_instance_id}")
+    print(f"📊 Quality Tier: {media_request.requested_quality_tier}")
+    print(f"📊 User ID: {media_request.user_id}")
+    print(f"📊 Season Request: {media_request.is_season_request}")
+    print(f"📊 Episode Request: {media_request.is_episode_request}")
+    if media_request.is_season_request and media_request.season_number:
+        print(f"📊 Season Number: {media_request.season_number}")
+    if media_request.is_episode_request and media_request.episode_number:
+        print(f"📊 Episode Number: {media_request.episode_number}")
+    
+    # Get the specific service instance that was selected for this request
+    if not media_request.service_instance_id:
+        print(f"❌ INTEGRATION FAILED: No service instance specified for request {media_request.id}")
+        print(f"🔍 This request does not have a service instance assigned")
+        print(f"🔍 Multi-instance support requires a service instance to be selected")
+        return None
+    
+    print(f"🔍 Loading service instance {media_request.service_instance_id} from database...")
+    # Load the service instance
+    statement = select(ServiceInstance).where(ServiceInstance.id == media_request.service_instance_id)
+    service_instance = session.exec(statement).first()
+    
+    if not service_instance:
+        print(f"❌ INTEGRATION FAILED: Service instance {media_request.service_instance_id} not found in database")
+        return None
+    
+    print(f"✅ Found service instance: {service_instance.name}")
+    print(f"📊 Instance Type: {service_instance.service_type.value}")
+    print(f"📊 Instance URL: {service_instance.url}")
+    print(f"📊 Instance Enabled: {service_instance.is_enabled}")
+    print(f"📊 Instance Category: {service_instance.instance_category}")
+    print(f"📊 API Key Present: {'✅' if service_instance.api_key else '❌'}")
     
     try:
-        if media_request.media_type == MediaType.MOVIE:
-            # Send to Radarr
-            from ..services.radarr_service import RadarrService
-            
-            radarr = RadarrService(session)
-            if not radarr.base_url or not radarr.api_key:
-                print(f"⚠️ Radarr not configured, skipping integration for movie request {media_request.id}")
-                return None
-            
-            # Check if integration is disabled
-            if radarr.instance and not radarr.instance.get_settings().get('enable_integration', True):
-                print(f"⚠️ Radarr integration disabled, skipping integration for movie request {media_request.id}")
-                return None
-            
-            print(f"🎬 Sending movie '{media_request.title}' (TMDB: {media_request.tmdb_id}) to Radarr...")
-            print(f"🔍 Radarr service instance settings available: {radarr.instance.get_settings() if radarr.instance else 'No instance'}")
-            
-            # Add a timeout to prevent hanging
-            try:
-                result = await asyncio.wait_for(
-                    radarr.add_movie(
-                        tmdb_id=media_request.tmdb_id,
-                        user_id=media_request.user_id
-                    ),
-                    timeout=30.0
-                )
-                
-                if result:
-                    return {
-                        'service': 'Radarr',
-                        'service_id': result.get('id'),
-                        'title': result.get('title', media_request.title)
-                    }
-                else:
-                    print(f"❌ Failed to add movie to Radarr: {media_request.title}")
-                    return None
-            except asyncio.TimeoutError:
-                print(f"⏰ Radarr integration timeout for request {media_request.id}")
-                return None
-                
-        elif media_request.media_type == MediaType.TV:
-            # Send to Sonarr
-            from ..services.sonarr_service import SonarrService
-            
-            sonarr = SonarrService(session)
-            if not sonarr.base_url or not sonarr.api_key:
-                print(f"⚠️ Sonarr not configured, skipping integration for TV request {media_request.id}")
-                return None
-            
-            # Check if integration is disabled
-            if sonarr.instance and not sonarr.instance.get_settings().get('enable_integration', True):
-                print(f"⚠️ Sonarr integration disabled, skipping integration for TV request {media_request.id}")
-                return None
-            
-            print(f"📺 Sending TV series '{media_request.title}' (TMDB: {media_request.tmdb_id}) to Sonarr...")
-            print(f"🔍 Sonarr service instance settings available: {sonarr.instance.get_settings() if sonarr.instance else 'No instance'}")
-            
-            # Determine monitoring based on request type
-            monitor_type = 'all'
-            season_numbers = None
-            episode_numbers = None
-            
-            if media_request.is_episode_request and media_request.season_number and media_request.episode_number:
-                # This is an episode-specific request
-                monitor_type = 'specificEpisodes'
-                season_numbers = [media_request.season_number]
-                episode_numbers = {media_request.season_number: [media_request.episode_number]}
-                print(f"📺 Episode-specific request: monitoring S{media_request.season_number:02d}E{media_request.episode_number:02d}")
-            elif media_request.is_season_request and media_request.season_number:
-                # This is a season-specific request
-                monitor_type = 'specificSeasons'
-                season_numbers = [media_request.season_number]
-                print(f"📺 Season-specific request: monitoring season {media_request.season_number}")
-            else:
-                print(f"📺 Complete series request: monitoring all seasons")
-            
-            # Add a timeout to prevent hanging
-            try:
-                result = await asyncio.wait_for(
-                    sonarr.add_series(
-                        tmdb_id=media_request.tmdb_id,
-                        user_id=media_request.user_id,
-                        monitor_type=monitor_type,
-                        season_numbers=season_numbers,
-                        episode_numbers=episode_numbers
-                    ),
-                    timeout=30.0
-                )
-                
-                if result:
-                    return {
-                        'service': 'Sonarr',
-                        'service_id': result.get('id'),
-                        'title': result.get('title', media_request.title)
-                    }
-                else:
-                    print(f"❌ Failed to add TV series to Sonarr: {media_request.title}")
-                    return None
-            except asyncio.TimeoutError:
-                print(f"⏰ Sonarr integration timeout for request {media_request.id}")
-                return None
+        # Use the multi-instance integration service
+        from ..services.multi_instance_integration_service import MultiInstanceIntegrationService
         
-        return None
+        print(f"🔧 Creating MultiInstanceIntegrationService...")
+        integration_service = MultiInstanceIntegrationService(session)
+        
+        print(f"🔗 Starting integration for request {media_request.id} ({media_request.title}) with instance '{service_instance.name}'...")
+        
+        # Add a timeout to prevent hanging
+        try:
+            print(f"⏰ Starting integration with 30s timeout...")
+            result = await asyncio.wait_for(
+                integration_service.integrate_request(media_request),
+                timeout=30.0
+            )
+            
+            print(f"📡 Integration result received: {result}")
+            
+            if result:
+                success_data = {
+                    'service': f"{service_instance.service_type.value.title()} ({service_instance.name})",
+                    'service_id': result.get('service_id'),
+                    'title': result.get('title', media_request.title),
+                    'instance_name': service_instance.name
+                }
+                print(f"✅ INTEGRATION SUCCESS: {success_data}")
+                return success_data
+            else:
+                print(f"❌ INTEGRATION FAILED: No result returned from integration service for request {media_request.id}")
+                return None
+        except asyncio.TimeoutError:
+            print(f"⏰ INTEGRATION TIMEOUT: 30s timeout exceeded for request {media_request.id} on instance '{service_instance.name}'")
+            return None
         
     except Exception as e:
-        print(f"❌ Error integrating request {media_request.id} with services: {e}")
+        print(f"❌ INTEGRATION EXCEPTION: Error integrating request {media_request.id} with services: {e}")
         import traceback
+        print(f"🔍 Full stack trace:")
         traceback.print_exc()
         return None
 
@@ -180,6 +201,9 @@ async def create_request(
     selected_seasons: Optional[str] = Form(None),  # JSON string for granular requests
     selected_episodes: Optional[str] = Form(None),  # JSON string for granular requests  
     request_source: str = Form("main"),  # "main" for main media, "similar_recommended" for cards
+    # Multi-instance support
+    service_instance_id: Optional[int] = Form(None),  # Specific instance to use
+    quality_tier: str = Form("standard"),  # Quality tier requested ("standard", "4k", "hdr")
     current_user: User = Depends(get_current_user_flexible),
     session: Session = Depends(get_session)
 ):
@@ -188,8 +212,41 @@ async def create_request(
     if not all([tmdb_id, media_type, title]):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
-    # Initialize permissions service
+    # Initialize services
     permissions_service = PermissionsService(session)
+    instance_service = InstanceSelectionService(session)
+    
+    # Multi-instance support: Validate and select service instance
+    selected_instance = None
+    if service_instance_id:
+        # User specified a particular instance - validate access
+        if not await instance_service.validate_instance_access(
+            current_user.id, service_instance_id, MediaType(media_type), quality_tier
+        ):
+            return HTMLResponse(
+                f'''<div class="inline-flex items-center px-3 py-2 border border-red-300 text-sm leading-4 font-medium rounded-md text-red-700 bg-red-50">
+                    <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    No access to selected service instance
+                </div>'''
+            )
+        selected_instance = session.get(ServiceInstance, service_instance_id)
+    else:
+        # Auto-select best instance for user
+        selected_instance = await instance_service.select_best_instance(
+            current_user.id, MediaType(media_type), quality_tier
+        )
+        
+    if not selected_instance:
+        return HTMLResponse(
+            f'''<div class="inline-flex items-center px-3 py-2 border border-red-300 text-sm leading-4 font-medium rounded-md text-red-700 bg-red-50">
+                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                </svg>
+                No available service instances for this request type
+            </div>'''
+        )
     
     # Check if user can request this media type
     if not permissions_service.can_request_media_type(current_user.id, media_type):
@@ -302,7 +359,7 @@ async def create_request(
                     if existing_season_req:
                         continue  # Skip already requested seasons
                     
-                    # Create season request
+                    # Create season request with multi-instance support
                     season_request = MediaRequest(
                         user_id=current_user.id,
                         tmdb_id=tmdb_id,
@@ -315,7 +372,10 @@ async def create_request(
                         is_season_request=True,
                         status=RequestStatus.APPROVED if permissions_service.should_auto_approve(current_user.id, media_type) else RequestStatus.PENDING,
                         approved_by=current_user.id if permissions_service.should_auto_approve(current_user.id, media_type) else None,
-                        approved_at=datetime.utcnow() if permissions_service.should_auto_approve(current_user.id, media_type) else None
+                        approved_at=datetime.utcnow() if permissions_service.should_auto_approve(current_user.id, media_type) else None,
+                        # Multi-instance fields
+                        service_instance_id=selected_instance.id,
+                        requested_quality_tier=quality_tier
                     )
                     session.add(season_request)
                     created_requests.append(season_request)
@@ -342,7 +402,7 @@ async def create_request(
                         if existing_episode_req:
                             continue  # Skip already requested episodes
                         
-                        # Create episode request
+                        # Create episode request with multi-instance support
                         episode_request = MediaRequest(
                             user_id=current_user.id,
                             tmdb_id=tmdb_id,
@@ -356,7 +416,10 @@ async def create_request(
                             is_episode_request=True,
                             status=RequestStatus.APPROVED if permissions_service.should_auto_approve(current_user.id, media_type) else RequestStatus.PENDING,
                             approved_by=current_user.id if permissions_service.should_auto_approve(current_user.id, media_type) else None,
-                            approved_at=datetime.utcnow() if permissions_service.should_auto_approve(current_user.id, media_type) else None
+                            approved_at=datetime.utcnow() if permissions_service.should_auto_approve(current_user.id, media_type) else None,
+                            # Multi-instance fields
+                            service_instance_id=selected_instance.id,
+                            requested_quality_tier=quality_tier
                         )
                         session.add(episode_request)
                         created_requests.append(episode_request)
@@ -479,7 +542,7 @@ async def create_request(
         approved_by = current_user.id
         approved_at = datetime.utcnow()
 
-    # Create new request
+    # Create new request with multi-instance support
     new_request = MediaRequest(
         user_id=current_user.id,
         tmdb_id=tmdb_id,
@@ -492,7 +555,10 @@ async def create_request(
         is_season_request=bool(season_number),
         status=initial_status,
         approved_by=approved_by,
-        approved_at=approved_at
+        approved_at=approved_at,
+        # Multi-instance fields
+        service_instance_id=selected_instance.id,
+        requested_quality_tier=quality_tier
     )
 
     session.add(new_request)
@@ -502,9 +568,9 @@ async def create_request(
     if initial_status == RequestStatus.PENDING:
         permissions_service.increment_user_request_count(current_user.id)
     
-    # 🎬 NEW: Automatic Service Integration for Auto-Approved Requests
+    # 🎬 NEW: Automatic Service Integration for Auto-Approved Requests (Multi-Instance)
     if initial_status == RequestStatus.APPROVED:
-        integration_result = await integrate_with_services(new_request, session)
+        integration_result = await integrate_with_multi_instance_services(new_request, session)
         if integration_result:
             print(f"✅ Auto-approved request {new_request.id} integrated with {integration_result['service']}")
         else:
@@ -545,7 +611,44 @@ async def create_request(
     </script>
     '''
     
-    # Build the main response message
+    # Special handling for multi-instance requests (from dropdowns) - return simple success message
+    if request_source == "multi_instance":
+        # Use the proper status values that the macro expects
+        if initial_status == RequestStatus.APPROVED:
+            computed_status = 'requested_approved'
+            status_message = f"Request auto approved and sent to {selected_instance.name}!"
+        else:
+            computed_status = 'requested_pending'
+            status_message = f"Request submitted to {selected_instance.name} and pending approval!"
+        
+        # Generate the proper status badges using the same logic as the macro
+        if computed_status == 'requested_approved':
+            button_badge = '<div class="w-full bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium text-center">✓ Approved</div>'
+            overlay_badge = '<span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Approved</span>'
+        else:  # requested_pending
+            button_badge = '<div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium text-center">⏳ Pending</div>'
+            overlay_badge = '<span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Pending</span>'
+        
+        # Return the badge that will replace the dropdown form
+        return HTMLResponse(f'''
+        {button_badge}
+        
+        <script>
+            // Close the dropdown after successful request
+            closeAllDropdowns();
+            
+            // Update the top-left overlay if it exists and doesn't already have a status badge
+            const cardElement = document.getElementById('media-card-{tmdb_id}');
+            if (cardElement) {{
+                const topBadgeArea = cardElement.querySelector('.absolute.top-2.left-2');
+                if (topBadgeArea && !topBadgeArea.querySelector('.bg-blue-600') && !topBadgeArea.querySelector('.bg-yellow-600')) {{
+                    topBadgeArea.innerHTML = `{overlay_badge}`;
+                }}
+            }}
+        </script>
+        ''')
+    
+    # Build the main response message for non-multi-instance requests
     response_html = f'''<div class="inline-flex items-center px-3 py-2 border border-{color_class}-300 text-sm leading-4 font-medium rounded-md text-{color_class}-700 bg-{color_class}-50">
         <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
@@ -680,7 +783,7 @@ async def unified_requests(
             all_requests_for_counts = session.exec(count_query).all()
             
             # Return only the fragment
-            return create_template_response(
+            return await create_template_response_with_instances(
                 template_name,
                 {
                     "request": request, 
@@ -698,11 +801,12 @@ async def unified_requests(
                     "has_next": has_next,
                     "has_prev": has_prev,
                     "total_requests": total_requests
-                }
+                },
+                session
             )
         else:
             # Return full page
-            return create_template_response(
+            return await create_template_response_with_instances(
                 "requests.html",
                 {
                     "request": request, 
@@ -719,7 +823,8 @@ async def unified_requests(
                     "has_next": has_next,
                     "has_prev": has_prev,
                     "total_requests": total_requests
-                }
+                },
+                session
             )
         
     except Exception as e:
@@ -733,7 +838,7 @@ async def unified_requests(
         for media_request in requests:
             user_lookup[media_request.id] = current_user
         
-        return create_template_response(
+        return await create_template_response_with_instances(
             "requests.html",
             {
                 "request": request, 
@@ -743,7 +848,8 @@ async def unified_requests(
                 "user_is_admin": False,  # In error case, default to False for safety
                 "show_request_user": False,
                 "can_view_all_requests": False
-            }
+            },
+            session
         )
 
 
@@ -796,11 +902,34 @@ async def approve_request(
     # 🎬 NEW: Automatic Service Integration
     # Send approved request to Radarr/Sonarr if services are configured
     if was_pending:  # Only integrate newly approved requests, not already approved ones
+        print(f"\n🚀 ===== APPROVAL -> INTEGRATION FLOW ===== 🚀")
+        print(f"📊 Request ID: {request_id}")
+        print(f"📊 Was Pending: {was_pending}")
+        print(f"📊 Current Status: {media_request.status.value}")
+        print(f"📊 Service Instance ID: {media_request.service_instance_id}")
+        print(f"📊 Media Type: {media_request.media_type.value}")
+        print(f"📊 Title: {media_request.title}")
+        print(f"📊 TMDB ID: {media_request.tmdb_id}")
+        print(f"📊 Approved By: {current_user.id} ({current_user.username})")
+        print(f"📊 Approved At: {media_request.approved_at}")
+        
+        print(f"🔧 Calling integrate_with_services...")
         integration_result = await integrate_with_services(media_request, session)
+        
         if integration_result:
-            print(f"✅ Successfully integrated request {request_id} with {integration_result['service']}")
+            print(f"✅ APPROVAL INTEGRATION SUCCESS: Request {request_id} integrated with {integration_result['service']}")
+            print(f"📊 Service ID: {integration_result.get('service_id')}")
+            print(f"📊 Instance: {integration_result.get('instance_name')}")
         else:
-            print(f"⚠️ Could not integrate request {request_id} with services (may not be configured)")
+            print(f"❌ APPROVAL INTEGRATION FAILED: Could not integrate request {request_id} with services")
+            print(f"🔍 This could mean:")
+            print(f"🔍   - Service instance not found or disabled")
+            print(f"🔍   - API connection issues")
+            print(f"🔍   - Configuration problems")
+            print(f"🔍   - Media already exists in service")
+            print(f"🔍   - Quality profile or root folder misconfiguration")
+            print(f"🔍   - Network connectivity issues")
+            print(f"🔍 Review the detailed logs above to identify the specific failure point")
     
     # Content negotiation - check if this is an HTMX request
     if request.headers.get("HX-Request"):
@@ -825,6 +954,7 @@ async def approve_request(
             user_is_admin = is_user_admin(current_user, session)
             
             # Create context for the updated request section
+            integration_message = "Request approved and sent to service" if integration_result else "Request approved (service integration failed)"
             context = {
                 "request": request,
                 "request_status": "approved",

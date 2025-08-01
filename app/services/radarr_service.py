@@ -114,39 +114,85 @@ class RadarrService:
     
     async def search_movie(self, tmdb_id: int) -> Optional[Dict]:
         """Search for movie by TMDB ID"""
+        print(f"\n🔍 ===== RADARR SEARCH_MOVIE ===== 🔍")
+        print(f"📊 TMDB ID: {tmdb_id}")
+        print(f"📊 Base URL: {self.base_url}")
+        print(f"📊 API Key Present: {'✅' if self.api_key else '❌'}")
+        
         if not self.base_url:
-            print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
+            print("❌ RADARR SEARCH ERROR: No URL configured. Please set up Radarr in the Services section.")
             return None
         if not self.api_key:
-            print("Radarr error: No API key configured. Please add an API key in the Services section.")
+            print("❌ RADARR SEARCH ERROR: No API key configured. Please add an API key in the Services section.")
             return None
             
         try:
+            search_url = f"{self.base_url}/api/v3/movie/lookup"
+            search_params = {'term': f'tmdb:{tmdb_id}'}
+            
+            print(f"📡 Making GET request to: {search_url}")
+            print(f"📡 Search params: {search_params}")
+            print(f"📡 Headers: {dict(self.headers)}")
+            
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(
-                    f"{self.base_url}/api/v3/movie/lookup",
+                    search_url,
                     headers=self.headers,
-                    params={'term': f'tmdb:{tmdb_id}'},
+                    params=search_params,
                     timeout=10
                 )
+                
+                print(f"📡 Search Response Status: {response.status_code}")
+                print(f"📡 Search Response Headers: {dict(response.headers)}")
+                
                 response.raise_for_status()
                 results = response.json()
-                return results[0] if results else None
+                
+                print(f"📡 Search Results Count: {len(results) if results else 0}")
+                if results:
+                    first_result = results[0]
+                    print(f"✅ MOVIE FOUND: {first_result.get('title', 'Unknown')} ({first_result.get('year', 'Unknown')})")
+                    print(f"📊 Title Slug: {first_result.get('titleSlug', 'Unknown')}")
+                    print(f"📊 TMDB ID in result: {first_result.get('tmdbId', 'None')}")
+                    return first_result
+                else:
+                    print(f"❌ NO MOVIE FOUND for TMDB ID: {tmdb_id}")
+                    return None
+                    
         except Exception as e:
-            print(f"Error searching movie in Radarr: {e}")
+            print(f"❌ RADARR SEARCH EXCEPTION: Error searching movie in Radarr: {e}")
+            print(f"📊 TMDB ID: {tmdb_id}")
+            print(f"📊 URL: {self.base_url}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"📡 HTTP Response Status: {e.response.status_code}")
+                print(f"📡 HTTP Response Content: {e.response.text}")
+            import traceback
+            print(f"🔍 Full stack trace from RadarrService.search_movie:")
+            traceback.print_exc()
             return None
     
-    async def add_movie(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, user_id: int = None) -> Optional[Dict]:
+    async def add_movie(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, user_id: int = None, quality_tier: str = None, instance_category: str = None) -> Optional[Dict]:
         """Add movie to Radarr"""
+        print(f"\n🎬 ===== RADARR ADD_MOVIE START ===== 🎬")
+        print(f"📊 TMDB ID: {tmdb_id}")
+        print(f"📊 Quality Profile ID: {quality_profile_id}")
+        print(f"📊 Root Folder Path: {root_folder_path}")
+        print(f"📊 User ID: {user_id}")
+        print(f"📊 Quality Tier: {quality_tier}")
+        print(f"📊 Instance Category: {instance_category}")
+        print(f"📊 Base URL: {self.base_url}")
+        print(f"📊 API Key Present: {'✅' if self.api_key else '❌'}")
+        
         if not self.base_url:
-            print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
+            print("❌ RADARR ERROR: No URL configured. Please set up Radarr in the Services section.")
             return None
         if not self.api_key:
-            print("Radarr error: No API key configured. Please add an API key in the Services section.")
+            print("❌ RADARR ERROR: No API key configured. Please add an API key in the Services section.")
             return None
             
         try:
             # First search for the movie
+            print(f"🔍 Searching for movie with TMDB ID: {tmdb_id}")
             movie_data = await self.search_movie(tmdb_id)
             if not movie_data:
                 print(f"❌ Movie not found in Radarr search for TMDB ID: {tmdb_id}")
@@ -260,6 +306,11 @@ class RadarrService:
             print(f"🔍 Final quality profile ID being sent to Radarr: {quality_profile_id}")
             print(f"🔍 Radarr payload for '{movie_data['title']}': {add_data}")
             
+            print(f"📡 Making POST request to Radarr API...")
+            print(f"📡 URL: {self.base_url}/api/v3/movie")
+            print(f"📡 Headers: {dict(self.headers)}")
+            print(f"📡 Payload: {add_data}")
+            
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.post(
                     f"{self.base_url}/api/v3/movie",
@@ -268,46 +319,90 @@ class RadarrService:
                     timeout=15
                 )
                 
+                print(f"📡 Response Status: {response.status_code}")
+                print(f"📡 Response Headers: {dict(response.headers)}")
+                
                 if not response.is_success:
-                    print(f"❌ Radarr API error {response.status_code}: {response.text}")
-                    print(f"🔍 Request URL: {response.url}")
-                    print(f"🔍 Request headers: {self.headers}")
+                    print(f"❌ RADARR API ERROR {response.status_code}: {response.text}")
+                    print(f"📡 Request URL: {response.url}")
+                    print(f"📡 Request headers: {self.headers}")
+                    print(f"📡 Response content type: {response.headers.get('content-type', 'unknown')}")
+                    try:
+                        error_json = response.json()
+                        print(f"📡 Error JSON: {error_json}")
+                    except:
+                        print(f"📡 Raw error text: {response.text}")
                 
                 response.raise_for_status()
-                return response.json()
+                response_data = response.json()
+                print(f"✅ RADARR ADD_MOVIE SUCCESS: {response_data}")
+                return response_data
             
         except Exception as e:
-            print(f"Error adding movie to Radarr: {e}")
+            print(f"❌ RADARR ADD_MOVIE EXCEPTION: Error adding movie to Radarr: {e}")
+            print(f"📊 Movie TMDB ID: {tmdb_id}")
+            print(f"📊 Instance: {self.instance.name if self.instance else 'Unknown'}")
             if hasattr(e, 'response') and e.response is not None:
-                print(f"🔍 Response content: {e.response.text}")
+                print(f"📡 HTTP Response Status: {e.response.status_code}")
+                print(f"📡 HTTP Response Content: {e.response.text}")
+                print(f"📡 HTTP Response Headers: {dict(e.response.headers)}")
+            import traceback
+            print(f"🔍 Full stack trace from RadarrService.add_movie:")
+            traceback.print_exc()
             return None
     
     async def get_movie_by_tmdb_id(self, tmdb_id: int) -> Optional[Dict]:
         """Check if movie already exists in Radarr"""
+        print(f"\n🔍 ===== RADARR GET_MOVIE_BY_TMDB_ID ===== 🔍")
+        print(f"📊 TMDB ID: {tmdb_id}")
+        print(f"📊 Base URL: {self.base_url}")
+        print(f"📊 API Key Present: {'✅' if self.api_key else '❌'}")
+        
         if not self.base_url:
-            print("Radarr error: No URL configured. Please set up Radarr in the Services section.")
+            print("❌ RADARR CHECK ERROR: No URL configured. Please set up Radarr in the Services section.")
             return None
         if not self.api_key:
-            print("Radarr error: No API key configured. Please add an API key in the Services section.")
+            print("❌ RADARR CHECK ERROR: No API key configured. Please add an API key in the Services section.")
             return None
             
         try:
+            check_url = f"{self.base_url}/api/v3/movie"
+            print(f"📡 Making GET request to: {check_url}")
+            print(f"📡 Headers: {dict(self.headers)}")
+            
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(
-                    f"{self.base_url}/api/v3/movie",
+                    check_url,
                     headers=self.headers,
                     timeout=10
                 )
+                
+                print(f"📡 Check Response Status: {response.status_code}")
                 response.raise_for_status()
                 movies = response.json()
                 
+                print(f"📡 Total movies in Radarr: {len(movies) if movies else 0}")
+                
                 for movie in movies:
                     if movie.get('tmdbId') == tmdb_id:
+                        print(f"✅ MOVIE EXISTS: {movie.get('title', 'Unknown')} (Radarr ID: {movie.get('id', 'Unknown')})")
+                        print(f"📊 Status: {movie.get('status', 'Unknown')}")
+                        print(f"📊 Monitored: {movie.get('monitored', False)}")
                         return movie
+                        
+                print(f"⚙️ MOVIE NOT FOUND: TMDB ID {tmdb_id} does not exist in Radarr")
                 return None
             
         except Exception as e:
-            print(f"Error checking movie in Radarr: {e}")
+            print(f"❌ RADARR CHECK EXCEPTION: Error checking movie in Radarr: {e}")
+            print(f"📊 TMDB ID: {tmdb_id}")
+            print(f"📊 URL: {self.base_url}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"📡 HTTP Response Status: {e.response.status_code}")
+                print(f"📡 HTTP Response Content: {e.response.text}")
+            import traceback
+            print(f"🔍 Full stack trace from RadarrService.get_movie_by_tmdb_id:")
+            traceback.print_exc()
             return None
     
     async def get_movie_details(self, radarr_id: int) -> Optional[Dict]:

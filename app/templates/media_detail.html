@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from 'macros/status_display.html' import media_status_badge %}
+{% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 
 {% block title %}{{ media.title or media.name }} - Stout Requests{% endblock %}
 
@@ -577,7 +577,7 @@
         <div class="overflow-x-auto">
             <div class="flex space-x-4 pb-2">
                 {% for item in media.similar %}
-                <div id="similar-card-{{ item.id }}" class="movie-card-horizontal group flex-shrink-0 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
+                <div id="media-card-{{ item.id }}" class="movie-card-horizontal group flex-shrink-0 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
                     <div class="relative">
                         {% if item.poster_url %}
                         <img src="{{ item.poster_url }}" alt="{{ item.title or item.name }}" class="w-full h-72 object-cover">
@@ -622,7 +622,9 @@
                                     </div>
                                     
                                     <!-- Action button -->
-                                    {{ media_status_badge(item, style='button', size='md', base_url=base_url) }}
+                                    <div id="button-area-{{ item.id }}">
+                                        {{ multi_instance_request_button(item, None, available_instances, style='button', size='md', base_url=base_url) }}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -630,7 +632,7 @@
                         <!-- Top badges (always visible) -->
                         <div class="absolute top-2 left-2">
                             {% if item.status or item.in_plex %}
-                            {{ media_status_badge(item, style='overlay', size='sm', base_url=base_url) }}
+                            {{ multi_instance_request_button(item, None, available_instances, style='overlay', size='sm', base_url=base_url) }}
                             {% endif %}
                         </div>
                         
@@ -663,7 +665,7 @@
         <div class="overflow-x-auto">
             <div class="flex space-x-4 pb-2">
                 {% for item in media.recommendations %}
-                <div id="recommended-card-{{ item.id }}" class="movie-card-horizontal group flex-shrink-0 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
+                <div id="media-card-{{ item.id }}" class="movie-card-horizontal group flex-shrink-0 relative bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:scale-105">
                     <div class="relative">
                         {% if item.poster_url %}
                         <img src="{{ item.poster_url }}" alt="{{ item.title or item.name }}" class="w-full h-72 object-cover">
@@ -708,7 +710,9 @@
                                     </div>
                                     
                                     <!-- Action button -->
-                                    {{ media_status_badge(item, style='button', size='md', base_url=base_url) }}
+                                    <div id="button-area-{{ item.id }}">
+                                        {{ multi_instance_request_button(item, None, available_instances, style='button', size='md', base_url=base_url) }}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -716,7 +720,7 @@
                         <!-- Top badges (always visible) -->
                         <div class="absolute top-2 left-2">
                             {% if item.status or item.in_plex %}
-                            {{ media_status_badge(item, style='overlay', size='sm', base_url=base_url) }}
+                            {{ multi_instance_request_button(item, None, available_instances, style='overlay', size='sm', base_url=base_url) }}
                             {% endif %}
                         </div>
                         
@@ -942,9 +946,8 @@ document.addEventListener('DOMContentLoaded', function() {
 document.body.addEventListener('refreshStatusBadges', function(event) {
     const { updatedItemId, newStatus } = event.detail;
     
-    // Update the overlay badge for the specific item
-    const similarCard = document.getElementById(`similar-card-${updatedItemId}`);
-    const recommendedCard = document.getElementById(`recommended-card-${updatedItemId}`);
+    // Update the overlay badge for the specific item (now using unified media-card- ID)
+    const mediaCard = document.getElementById(`media-card-${updatedItemId}`);
     
     function updateCardBadge(card, status) {
         if (!card) return;
@@ -957,12 +960,16 @@ document.body.addEventListener('refreshStatusBadges', function(event) {
             } else if (status === 'APPROVED') {
                 badgeHtml = '<span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Approved</span>';
             }
-            badgeContainer.innerHTML = badgeHtml;
+            
+            // Only add badge if there isn't already a status badge (to prevent overwriting "In Plex" badges)
+            const existingStatusBadge = badgeContainer.querySelector('.bg-green-600, .bg-blue-600, .bg-yellow-600');
+            if (!existingStatusBadge && badgeHtml) {
+                badgeContainer.innerHTML = badgeHtml;
+            }
         }
     }
     
-    updateCardBadge(similarCard, newStatus);
-    updateCardBadge(recommendedCard, newStatus);
+    updateCardBadge(mediaCard, newStatus);
 });
 </script>
 {% endblock %}

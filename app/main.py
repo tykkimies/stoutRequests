@@ -18,8 +18,10 @@ from .api.setup import router as setup_router
 from .api.services import router as services_router
 from app.api import setup
 from .models import User, UserCategoryPreferences, UserCustomCategory
+from .models.media_request import MediaType
 from .services.plex_sync_service import PlexSyncService
 from .services.permissions_service import PermissionsService
+from .services.instance_selection_service import get_user_available_instances
 
 
 def convert_rating_to_tmdb_filter(rating_min: str, rating_source: str = None) -> float:
@@ -34,6 +36,39 @@ def convert_rating_to_tmdb_filter(rating_min: str, rating_source: str = None) ->
         return float(rating_min)
     except (ValueError, TypeError):
         return None
+
+
+async def get_instances_for_media_type(user_id: int, media_type: str) -> list:
+    """
+    Helper function to get available instances for a user and media type.
+    Returns empty list if user is None or on error.
+    """
+    if not user_id:
+        return []
+    
+    try:
+        # Convert string media type to MediaType enum
+        if media_type.lower() == 'movie':
+            media_type_enum = MediaType.MOVIE
+        elif media_type.lower() in ['tv', 'show']:
+            media_type_enum = MediaType.TV
+        else:
+            # For mixed content, return both movie and TV instances
+            movie_instances = await get_user_available_instances(user_id, MediaType.MOVIE)
+            tv_instances = await get_user_available_instances(user_id, MediaType.TV)
+            # Return combined list, removing duplicates based on instance ID
+            seen_ids = set()
+            combined = []
+            for instance in movie_instances + tv_instances:
+                if instance.id not in seen_ids:
+                    combined.append(instance)
+                    seen_ids.add(instance.id)
+            return combined
+        
+        return await get_user_available_instances(user_id, media_type_enum)
+    except Exception as e:
+        print(f"Warning: Failed to get available instances for user {user_id}, media_type {media_type}: {e}")
+        return []
 
 
 @asynccontextmanager
@@ -139,17 +174,475 @@ templates = Jinja2Templates(directory="app/templates")
 security = HTTPBearer(auto_error=False)
 
 
+async def get_user_instances_with_session(current_user: User, media_type: str, session: Session) -> list:
+    """Get available instances for a user using an existing session"""
+    if not current_user:
+        return []
+    
+    try:
+        # Use the instance selection service with the provided session
+        from .services.instance_selection_service import InstanceSelectionService
+        service = InstanceSelectionService(session)
+        
+        # Convert media_type string to MediaType enum
+        if media_type == "movie":
+            from app.models.media_request import MediaType
+            mt = MediaType.MOVIE
+        elif media_type == "tv":
+            from app.models.media_request import MediaType
+            mt = MediaType.TV
+        else:
+            # For mixed content, get both movie and TV instances
+            from app.models.media_request import MediaType
+            movie_instances = await service.get_available_instances(current_user.id, MediaType.MOVIE, "standard")
+            tv_instances = await service.get_available_instances(current_user.id, MediaType.TV, "standard")
+            # Return combined list, removing duplicates
+            all_instances = movie_instances + tv_instances
+            seen_ids = set()
+            unique_instances = []
+            for instance in all_instances:
+                if instance.id not in seen_ids:
+                    unique_instances.append(instance)
+                    seen_ids.add(instance.id)
+            return unique_instances
+        
+        return await service.get_available_instances(current_user.id, mt, "standard")
+    except Exception as e:
+        print(f"❌ Error getting user instances with session: {e}")
+        return []
+
+
+async def get_user_instances_for_template_safe(current_user: User, media_type: str) -> list:
+    """Get available instances for a user with proper session management"""
+    if not current_user:
+        return []
+    
+    try:
+        # Create a managed session for this operation
+        from .core.database import engine
+        from sqlmodel import Session
+        
+        with Session(engine) as session:
+            return await get_user_instances_with_session(current_user, media_type, session)
+    except Exception as e:
+        print(f"❌ Error getting user instances safely: {e}")
+        return []
+
+
+async def get_user_instances_for_template(current_user: User, media_type: str) -> list:
+    """Get available instances for a user for template rendering"""
+    if not current_user:
+        return []
+    
+    try:
+        # Set up default permissions for the user if they don't have any
+        from .services.instance_selection_service import get_instance_selection_service
+        service = await get_instance_selection_service()
+        await service.setup_default_user_permissions(current_user.id)
+        
+        # Convert media_type string to MediaType enum
+        if media_type == "movie":
+            mt = MediaType.MOVIE
+        elif media_type == "tv":
+            mt = MediaType.TV
+        else:
+            # For mixed content, get both movie and TV instances
+            movie_instances = await get_user_available_instances(current_user.id, MediaType.MOVIE, "standard")
+            tv_instances = await get_user_available_instances(current_user.id, MediaType.TV, "standard")
+            # Return combined list, removing duplicates
+            all_instances = movie_instances + tv_instances
+            seen_ids = set()
+            unique_instances = []
+            for instance in all_instances:
+                if instance.id not in seen_ids:
+                    unique_instances.append(instance)
+                    seen_ids.add(instance.id)
+            return unique_instances
+        
+        return await get_user_available_instances(current_user.id, mt, "standard")
+    except Exception as e:
+        print(f"❌ Error getting user instances: {e}")
+        return []
+
+
+async def get_user_global_context(current_user: User, session: Session) -> dict:
+    """Get global context data that should be available across all templates"""
+    if not current_user:
+        return {
+            'available_instances': [],
+            'has_multiple_instances': False,
+            'user_is_admin': False,
+            'user_is_server_owner': False
+        }
+    
+    # Load user instances once for the entire session
+    movie_instances = await get_user_instances_with_session(current_user, 'movie', session)
+    tv_instances = await get_user_instances_with_session(current_user, 'tv', session)
+    
+    # Combine and deduplicate instances
+    all_instances = movie_instances + tv_instances
+    seen_ids = set()
+    unique_instances = []
+    for instance in all_instances:
+        if instance.id not in seen_ids:
+            unique_instances.append(instance)
+            seen_ids.add(instance.id)
+    
+    return {
+        'available_instances': unique_instances,
+        'has_multiple_instances': len(unique_instances) > 1,
+        'user_is_admin': current_user.is_admin,
+        'user_is_server_owner': current_user.is_server_owner,
+        'movie_instances': movie_instances,
+        'tv_instances': tv_instances
+    }
+
+
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
-    current_user = context.get('current_user')
-    request = context.get('request')
-    global_context = get_global_template_context(current_user, request)
-    # Merge contexts, with explicit context taking precedence
-    merged_context = {**global_context, **context}
+    # Get the base URL setting for all templates
+    from app.services.settings_service import SettingsService
+    from app.core.database import get_session
+    
+    # Try to get base_url from context first, otherwise load from settings
+    base_url = context.get('base_url')
+    if base_url is None:
+        try:
+            session = next(get_session())
+            base_url = SettingsService.get_base_url(session)
+            session.close()
+        except Exception as e:
+            print(f"⚠️ Could not load base_url in template response: {e}")
+            base_url = ""
+    # Add base_url to context if not already present
+    final_context = {**context, 'base_url': base_url}
+    
     print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Template: {template_name}")
-    print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Global context base_url: '{global_context.get('base_url', 'MISSING')}'")
-    print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Final merged context base_url: '{merged_context.get('base_url', 'MISSING')}'")
-    return templates.TemplateResponse(template_name, merged_context)
+    print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Final context base_url: '{final_context.get('base_url', 'MISSING')}'")
+    
+    return templates.TemplateResponse(template_name, final_context)
+
+
+async def _handle_custom_category_more(
+    request: Request,
+    custom_category_id: str,
+    page: int,
+    limit: int,
+    genres: list[str],
+    rating_source: str,
+    rating_min: str,
+    year_from: str,
+    year_to: str,
+    studios: list[str],
+    streaming: list[str],
+    current_user,
+    session
+):
+    """Handle custom category infinite scroll internally"""
+    from .services.tmdb_service import TMDBService
+    from .services.plex_sync_service import PlexSyncService
+    from .services.settings_service import SettingsService
+    from fastapi.responses import HTMLResponse
+    
+    if not current_user:
+        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
+    
+    try:
+        base_url = SettingsService.get_base_url(session)
+        tmdb_service = TMDBService(session)
+        
+        # Load the custom category
+        stmt = select(UserCustomCategory).where(
+            UserCustomCategory.id == int(custom_category_id),
+            UserCustomCategory.user_id == current_user.id,
+            UserCustomCategory.is_active == True
+        )
+        custom_category = session.exec(stmt).first()
+        
+        if not custom_category:
+            return HTMLResponse('<div class="text-center py-8 text-red-600">Custom category not found</div>')
+        
+        # Get the saved filters from the custom category
+        filters = custom_category.to_category_dict()['filters']
+        
+        # Use the saved filters for TMDB discover
+        custom_media_type = filters.get('media_type')
+        if custom_media_type is None:
+            custom_media_type = 'mixed'
+        elif not custom_media_type:
+            custom_media_type = 'movie'
+        
+        # Build discover parameters from saved filters
+        rating_min_value = convert_rating_to_tmdb_filter(filters.get('rating_min'), filters.get('rating_source'))
+        
+        year_from_value = None
+        year_to_value = None
+        if filters.get('year_from'):
+            try:
+                year_from_value = int(filters.get('year_from'))
+            except (ValueError, TypeError):
+                pass
+        if filters.get('year_to'):
+            try:
+                year_to_value = int(filters.get('year_to'))
+            except (ValueError, TypeError):
+                pass
+        
+        # Execute the appropriate TMDB discovery
+        if custom_media_type == 'movie':
+            results = tmdb_service.discover_movies(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                vote_average_gte=rating_min_value,
+                primary_release_date_gte=year_from_value,
+                primary_release_date_lte=year_to_value,
+                with_companies="|".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers="|".join(filters.get('streaming', [])) if filters.get('streaming') else None,
+                watch_region="US"
+            )
+        elif custom_media_type == 'tv':
+            results = tmdb_service.discover_tv(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=",".join(filters.get('genres', [])) if filters.get('genres') else None,
+                vote_average_gte=rating_min_value,
+                first_air_date_gte=year_from_value,
+                first_air_date_lte=year_to_value,
+                with_companies="|".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_networks="|".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers="|".join(filters.get('streaming', [])) if filters.get('streaming') else None,
+                watch_region="US"
+            )
+        else:
+            # Handle mixed media type
+            genre_filter_str = ",".join(filters.get('genres', [])) if filters.get('genres') else None
+            movie_genre_filter = genre_filter_str
+            tv_genre_filter = genre_filter_str
+            
+            if genre_filter_str:
+                movie_genre_filter, tv_genre_filter = tmdb_service._map_genres_for_mixed_content(genre_filter_str)
+            
+            movie_results = tmdb_service.discover_movies(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=movie_genre_filter,
+                vote_average_gte=rating_min_value,
+                primary_release_date_gte=year_from_value,
+                primary_release_date_lte=year_to_value,
+                with_companies="|".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers="|".join(filters.get('streaming', [])) if filters.get('streaming') else None,
+                watch_region="US"
+            )
+            tv_results = tmdb_service.discover_tv(
+                page=page,
+                sort_by=filters.get('sort_by', 'popularity.desc'),
+                with_genres=tv_genre_filter,
+                vote_average_gte=rating_min_value,
+                first_air_date_gte=year_from_value,
+                first_air_date_lte=year_to_value,
+                with_companies="|".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_networks="|".join(filters.get('studios', [])) if filters.get('studios') else None,
+                with_watch_providers="|".join(filters.get('streaming', [])) if filters.get('streaming') else None,
+                watch_region="US"
+            )
+            
+            # Combine results
+            all_results = []
+            for item in movie_results.get('results', []):
+                item['media_type'] = 'movie'
+                all_results.append(item)
+            for item in tv_results.get('results', []):
+                item['media_type'] = 'tv'
+                all_results.append(item)
+            
+            all_results.sort(key=lambda x: x.get('popularity', 0), reverse=True)
+            
+            results = {
+                'results': all_results,
+                'total_pages': max(movie_results.get('total_pages', 1), tv_results.get('total_pages', 1)),
+                'total_results': movie_results.get('total_results', 0) + tv_results.get('total_results', 0)
+            }
+        
+        limited_results = results.get('results', [])[:limit]
+        has_more = page < results.get('total_pages', 1) and len(limited_results) > 0
+        
+        # Add Plex status and prepare for template
+        sync_service = PlexSyncService(session)
+        
+        # Set media_type for items first
+        for item in limited_results:
+            if custom_media_type != 'mixed':
+                item['media_type'] = custom_media_type
+        
+        # Batch Plex status checking
+        if custom_media_type == 'mixed':
+            movie_ids = [item['id'] for item in limited_results if item.get('media_type') == 'movie']
+            tv_ids = [item['id'] for item in limited_results if item.get('media_type') == 'tv']
+            
+            movie_status = sync_service.check_items_status(movie_ids, 'movie') if movie_ids else {}
+            tv_status = sync_service.check_items_status(tv_ids, 'tv') if tv_ids else {}
+            
+            for item in limited_results:
+                if item.get('media_type') == 'movie':
+                    status = movie_status.get(item['id'], 'available')
+                elif item.get('media_type') == 'tv':
+                    status = tv_status.get(item['id'], 'available')
+                else:
+                    status = 'available'
+                item['status'] = status
+                item['in_plex'] = status == 'in_plex'
+        else:
+            tmdb_ids = [item['id'] for item in limited_results]
+            status_map = sync_service.check_items_status(tmdb_ids, custom_media_type)
+            for item in limited_results:
+                status = status_map.get(item['id'], 'available')
+                item['status'] = status
+                item['in_plex'] = status == 'in_plex'
+        
+        # Add poster URLs and base_url
+        for item in limited_results:
+            if item.get('poster_path'):
+                item['poster_url'] = f"https://image.tmdb.org/t/p/w500{item['poster_path']}"
+            item["base_url"] = base_url
+        
+        # For infinite scroll, we don't need to reload instances - just return the cards
+        context = {
+            "request": request,
+            "current_user": current_user,
+            "results": limited_results,
+            "category": {
+                "type": f"custom_{custom_category_id}",
+                "sort": "user_defined",
+                "title": custom_category.name
+            },
+            "category_title": custom_category.name,
+            "sort_by": "user_defined",
+            "media_type": custom_media_type,
+            "has_more": has_more,
+            "current_page": page,
+            "page": page,
+            "total_pages": results.get('total_pages', 1),
+            "current_query_params": f"media_type={custom_media_type}&custom_category_id={custom_category_id}" + 
+                                   (f"&{'&'.join([f'genres={g}' for g in filters.get('genres', [])])}" if filters.get('genres') else "") +
+                                   (f"&rating_min={filters.get('rating_min')}&rating_source={filters.get('rating_source')}" if filters.get('rating_min') else "") +
+                                   (f"&year_from={filters.get('year_from')}" if filters.get('year_from') else "") +
+                                   (f"&year_to={filters.get('year_to')}" if filters.get('year_to') else "") +
+                                   (f"&{'&'.join([f'studios={s}' for s in filters.get('studios', [])])}" if filters.get('studios') else "") +
+                                   (f"&{'&'.join([f'streaming={s}' for s in filters.get('streaming', [])])}" if filters.get('streaming') else ""),
+            "current_content_sources": filters.get('content_sources', []),
+            "current_genres": filters.get('genres', []),
+            "current_rating_min": filters.get('rating_min', ""),
+            "current_rating_source": filters.get('rating_source', ""),
+            "current_year_from": filters.get('year_from', ""),
+            "current_year_to": filters.get('year_to', ""),
+            "current_studios": filters.get('studios', []),
+            "current_streaming": filters.get('streaming', []),
+            "custom_category_id": custom_category_id,
+            "base_url": base_url
+        }
+        
+        # Use cached instances for infinite scroll - no database calls since instances are cached
+        return await create_template_response_with_instances("components/movie_cards_only.html", context)
+    except Exception as e:
+        print(f"❌ Error handling custom category infinite scroll: {e}")
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(f'<div class="text-center py-8 text-red-600">Error loading more results: {str(e)}</div>')
+
+
+async def create_template_response_with_instances(template_name: str, context: dict):
+    """Create a template response with instance data for multi-instance support"""
+    current_user = context.get('current_user')
+    media_type = context.get('media_type', context.get('current_media_type', 'movie'))
+    request = context.get('request')
+    
+    # Check if instances are already cached in the user's session
+    available_instances = []
+    has_multiple_instances = False
+    
+    if current_user and request:
+        # Try to get cached instances from request state
+        cache_key = f"user_instances_{current_user.id}"
+        cached_instances = getattr(request.state, cache_key, None) if hasattr(request, 'state') else None
+        
+        if cached_instances:
+            print(f"🔧 [MULTI_INSTANCE] Using cached instances for user {current_user.username}")
+            if media_type == 'movie':
+                available_instances = cached_instances.get('movie_instances', [])
+            elif media_type == 'tv':
+                available_instances = cached_instances.get('tv_instances', [])
+            else:
+                # For mixed content, combine both
+                movie_instances = cached_instances.get('movie_instances', [])
+                tv_instances = cached_instances.get('tv_instances', [])
+                all_instances = movie_instances + tv_instances
+                seen_ids = set()
+                available_instances = []
+                for instance in all_instances:
+                    if instance.id not in seen_ids:
+                        available_instances.append(instance)
+                        seen_ids.add(instance.id)
+            
+            has_multiple_instances = len(available_instances) > 1
+        else:
+            # Load instances and cache them
+            print(f"🔧 [MULTI_INSTANCE] Loading and caching instances for user {current_user.username}")
+            session = context.get('session')
+            if session:
+                movie_instances = await get_user_instances_with_session(current_user, 'movie', session)
+                tv_instances = await get_user_instances_with_session(current_user, 'tv', session)
+                
+                # Cache instances in request state
+                if hasattr(request, 'state'):
+                    setattr(request.state, cache_key, {
+                        'movie_instances': movie_instances,
+                        'tv_instances': tv_instances
+                    })
+                
+                # Get instances for this specific media type
+                if media_type == 'movie':
+                    available_instances = movie_instances
+                elif media_type == 'tv':
+                    available_instances = tv_instances
+                else:
+                    # Mixed content
+                    all_instances = movie_instances + tv_instances
+                    seen_ids = set()
+                    available_instances = []
+                    for instance in all_instances:
+                        if instance.id not in seen_ids:
+                            available_instances.append(instance)
+                            seen_ids.add(instance.id)
+                
+                has_multiple_instances = len(available_instances) > 1
+            else:
+                # Fallback - load without caching
+                available_instances = await get_user_instances_for_template_safe(current_user, media_type)
+                has_multiple_instances = len(available_instances) > 1
+    
+    # Add instance data to context - but don't override if already correctly set by endpoint
+    enhanced_context = {
+        **context,
+        'has_multiple_instances': has_multiple_instances
+    }
+    
+    # Only override available_instances if they weren't already set or if we have a better result
+    if 'available_instances' not in context or not context.get('available_instances'):
+        enhanced_context['available_instances'] = available_instances
+    else:
+        # Use the instances that were already correctly set by the endpoint
+        enhanced_context['available_instances'] = context['available_instances']
+        # Update available_instances variable for logging
+        available_instances = context['available_instances']
+    
+    print(f"🔧 [MULTI_INSTANCE] Template: {template_name}, Media: {media_type}, Instances: {len(available_instances)}")
+    if available_instances:
+        print(f"🔧 [MULTI_INSTANCE] Available instances: {[f'{inst.name} ({inst.service_type.value})' for inst in available_instances]}")
+    else:
+        print(f"🔧 [MULTI_INSTANCE] ❌ No instances available for user {current_user.username if current_user else 'None'} and media_type: {media_type}")
+    
+    return create_template_response(template_name, enhanced_context)
 
 
 async def get_current_user_optional(
@@ -210,11 +703,51 @@ async def index(
     # Extract query parameters for initial filter state
     query_params = dict(request.query_params)
     
+    # Create template-friendly permissions object
+    class TemplatePermissions:
+        def __init__(self, user: User, session: Session):
+            self.user = user
+            # Admin/Server Owner users get all permissions
+            if user.is_admin or user.is_server_owner:
+                self.can_manage_settings = True
+                self.can_manage_users = True  
+                self.can_approve_requests = True
+                self.can_library_sync = True
+                self.can_request_movies = True
+                self.can_request_tv = True
+            else:
+                # For regular users, check their role permissions
+                from app.services.permissions_service import PermissionsService
+                permissions_service = PermissionsService(session)
+                user_perms = permissions_service.get_user_permissions(user.id)
+                user_role = permissions_service.get_user_role(user.id)
+                
+                # Default to False, then check role permissions
+                self.can_manage_settings = False
+                self.can_manage_users = False  
+                self.can_approve_requests = False
+                self.can_library_sync = False
+                self.can_request_movies = user_perms.can_request_movies if user_perms and user_perms.can_request_movies is not None else True
+                self.can_request_tv = user_perms.can_request_tv if user_perms and user_perms.can_request_tv is not None else True
+                
+                # Check role permissions for admin functions
+                if user_role:
+                    role_perms = user_role.get_permissions()
+                    from app.models.role import PermissionFlags
+                    self.can_manage_settings = role_perms.get(PermissionFlags.ADMIN_MANAGE_SETTINGS, False)
+                    self.can_manage_users = role_perms.get(PermissionFlags.ADMIN_MANAGE_USERS, False)
+                    self.can_approve_requests = role_perms.get(PermissionFlags.ADMIN_APPROVE_REQUESTS, False)
+                    self.can_library_sync = role_perms.get(PermissionFlags.ADMIN_LIBRARY_SYNC, False)
+    
+    user_permissions = TemplatePermissions(current_user, session)
+    
     return create_template_response(
         "index_categories.html", 
         {
             "request": request, 
-            "current_user": current_user
+            "current_user": current_user,
+            "user_permissions": user_permissions,
+            "session": session  # Add session for instance caching
         }
     )
 
@@ -427,9 +960,12 @@ async def filter_database_category(
         from app.models.media_request import MediaRequest, RequestStatus
         from app.models.user import User
         
+        # Get recent requests from the last 30 days (including available ones to show "In Plex" status)
+        from datetime import datetime, timedelta
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         recent_statement = select(MediaRequest).where(
-            MediaRequest.status != RequestStatus.AVAILABLE
-        ).order_by(MediaRequest.created_at.desc()).limit(100)  # Get more to filter from
+            MediaRequest.created_at >= thirty_days_ago
+        ).order_by(MediaRequest.created_at.desc()).limit(100)
         
         recent_requests = session.exec(recent_statement).all()
         
@@ -557,7 +1093,7 @@ async def filter_database_category(
             # Return appropriate template based on whether this is infinite scroll
             if is_infinite_scroll:
                 # For infinite scroll, return just the movie cards
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "components/movie_cards_only.html",
                     {
                         "request": request,
@@ -568,12 +1104,13 @@ async def filter_database_category(
                         "total_pages": 1000 if has_more else page,
                         "current_query_params": f"media_type={media_type}&db_category_type={db_category_type}&db_category_sort={db_category_sort}" + 
                                                (f"&rating_min={rating_min}&rating_source={rating_source}" if rating_min else ""),
-                        "base_url": SettingsService.get_base_url(session)
+                        "base_url": SettingsService.get_base_url(session),
+                        "available_instances": available_instances
                     }
                 )
             else:
                 # For initial load, return the full expanded view
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "components/expanded_results.html",
                     {
                         "request": request,
@@ -684,7 +1221,7 @@ async def filter_database_category(
     hx_target = request.headers.get("HX-Target", "")
     if request.headers.get("HX-Request"):
         if hx_target == "categories-container":
-            return create_template_response(
+            return await create_template_response_with_instances(
                 "components/expanded_results.html",
                 {
                     "request": request,
@@ -719,7 +1256,7 @@ async def filter_database_category(
                 }
             )
         elif hx_target == "results-grid":
-            return create_template_response(
+            return await create_template_response_with_instances(
                 "components/movie_cards_only.html",
                 {
                     "request": request,
@@ -731,12 +1268,13 @@ async def filter_database_category(
                     "current_media_type": media_type,
                     "current_content_sources": [],
                     "current_genres": genres,
-                    "current_rating_min": rating_min
+                    "current_rating_min": rating_min,
+                    "available_instances": available_instances
                 }
             )
     
     # Full page response (shouldn't normally happen)
-    return create_template_response(
+    return await create_template_response_with_instances(
         "discover_results.html",
         {
             "request": request,
@@ -745,7 +1283,8 @@ async def filter_database_category(
             "media_type": media_type,
             "page": page,
             "total_pages": total_pages,
-            "total_results": total_results
+            "total_results": total_results,
+            "available_instances": available_instances
         }
     )
 
@@ -785,6 +1324,9 @@ async def discover_page(
     plex_service = PlexService(session)
     base_url = SettingsService.get_base_url(session)
     
+    # Get available instances for the user and media type
+    available_instances = await get_instances_for_media_type(current_user.id if current_user else None, media_type)
+    
     try:
         # Handle filtering for database categories (recent requests, recently added, etc.)
         if db_category_type and db_category_sort:
@@ -799,11 +1341,10 @@ async def discover_page(
         # Handle custom user categories
         elif custom_category_id:
             print(f"🔍 DISCOVER DEBUG - Custom category infinite scroll: {custom_category_id}")
-            # Route to the discover_category_more endpoint which has proper custom category handling
-            return await discover_category_more(
-                request, "movie", "trending", [], genres, rating_source, rating_min,
-                year_from, year_to, studios, streaming, page, limit,
-                "", "", custom_category_id, current_user, session
+            # Call the internal function directly with actual session and user objects
+            return await _handle_custom_category_more(
+                request, custom_category_id, page, limit, genres, rating_source, rating_min,
+                year_from, year_to, studios, streaming, current_user, session
             )
             
         # Convert genres list to comma-separated string for TMDB
@@ -1268,7 +1809,7 @@ async def discover_page(
         if request.headers.get("HX-Request"):
             if hx_target in ["discover-results", "content-results", "search-results-content", "filtered-results-content"] or (hx_target == "" and page > 1):
                 # Return only the discover results fragment
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "discover_results.html",
                     {
                         "request": request, 
@@ -1301,12 +1842,13 @@ async def discover_page(
                                                (f"&year_to={year_to}" if year_to else "") +
                                                (f"&{'&'.join([f'studios={s}' for s in studios])}" if studios else "") +
                                                (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else ""),
-                        "base_url": base_url
+                        "base_url": base_url,
+                        "available_instances": available_instances
                     }
                 )
             elif hx_target == "results-grid":
                 # Return only the media cards for infinite scroll
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "components/movie_cards_only.html",
                     {
                         "request": request, 
@@ -1335,13 +1877,14 @@ async def discover_page(
                                                (f"&year_to={year_to}" if year_to else "") +
                                                (f"&{'&'.join([f'studios={s}' for s in studios])}" if studios else "") +
                                                (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else ""),
-                        "base_url": SettingsService.get_base_url(session)
+                        "base_url": SettingsService.get_base_url(session),
+                        "available_instances": available_instances
                     }
                 )
             elif hx_target == "categories-container":
                 # Return expanded category view (filtered) for categories container
                 print(f"🔍 DISCOVER DEBUG - Returning expanded category view for categories-container")
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "components/expanded_results.html",
                     {
                         "request": request, 
@@ -1513,6 +2056,9 @@ async def discover_category(
     tmdb_service = TMDBService(session)
     plex_service = PlexService(session)
     
+    # Get available instances for the user and media type
+    available_instances = await get_instances_for_media_type(current_user.id if current_user else None, type)
+    
     try:
         # Initialize default values for all category types
         has_more = False
@@ -1637,7 +2183,8 @@ async def discover_category(
                 "has_more": has_more,
                 "next_offset": offset + limit,
                 "current_offset": offset,
-                "base_url": base_url
+                "base_url": base_url,
+                "available_instances": available_instances
             }
             
             # Add category object for expanded view
@@ -1660,7 +2207,11 @@ async def discover_category(
                     "current_streaming": []
                 })
             
-            return create_template_response(template_name, context)
+            # Use instance-aware response for templates that need multi-instance support
+            if template_name in ["components/movie_cards_only.html", "discover_results.html", "components/expanded_results.html"]:
+                return await create_template_response_with_instances(template_name, context)
+            else:
+                return create_template_response(template_name, context)
         
         # Handle Recent Requests from database
         elif type == "requests" and sort == "recent":
@@ -1690,20 +2241,24 @@ async def discover_category(
                 # Limit: 20 for horizontal scroll, 40 max for expanded view
                 max_limit = min(limit, 40)  # Cap at 40 for expanded view, 20 for horizontal
                 
+                # Show recent requests from the last 30 days (including available ones to show "In Plex" status)
+                from datetime import datetime, timedelta
+                thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+                
                 if user_is_admin or can_view_all_requests:
-                    # Show all recent requests (excluding fulfilled ones) with user join
+                    # Show all recent requests with user join
                     recent_statement = select(MediaRequest, User).outerjoin(
                         User, MediaRequest.user_id == User.id
                     ).where(
-                        MediaRequest.status != RequestStatus.AVAILABLE  # Exclude items already in Plex
+                        MediaRequest.created_at >= thirty_days_ago
                     ).order_by(MediaRequest.created_at.desc()).limit(max_limit)
                 else:
-                    # Show only user's own requests (excluding fulfilled ones)
+                    # Show only user's own requests
                     recent_statement = select(MediaRequest, User).outerjoin(
                         User, MediaRequest.user_id == User.id
                     ).where(
                         MediaRequest.user_id == current_user.id,
-                        MediaRequest.status != RequestStatus.AVAILABLE  # Exclude items already in Plex
+                        MediaRequest.created_at >= thirty_days_ago
                     ).order_by(MediaRequest.created_at.desc()).limit(max_limit)
                 
                 recent_results = session.exec(recent_statement).all()
@@ -1776,6 +2331,11 @@ async def discover_category(
                             'user': visible_user,
                             'created_at': request_item.created_at,
                             'request_id': request_item.id,
+                            # Add granular request information
+                            'season_number': request_item.season_number,
+                            'episode_number': request_item.episode_number,
+                            'is_season_request': request_item.is_season_request,
+                            'is_episode_request': request_item.is_episode_request,
                             "base_url": base_url,
                         }
                         recent_items.append(item)
@@ -1810,6 +2370,11 @@ async def discover_category(
                             'user': visible_user,
                             'created_at': request_item.created_at,
                             'request_id': request_item.id,
+                            # Add granular request information
+                            'season_number': request_item.season_number,
+                            'episode_number': request_item.episode_number,
+                            'is_season_request': request_item.is_season_request,
+                            'is_episode_request': request_item.is_episode_request,
                             "base_url": base_url,
                         }
                         recent_items.append(item)
@@ -1837,7 +2402,7 @@ async def discover_category(
             # Choose template based on view type - use special template for recent requests
             if view == "expanded" and "expanded-category-content" not in hx_target:
                 # For expanded view (initial load), wrap in the expanded category template
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "components/expanded_category_view.html",
                     {
                         "request": request,
@@ -1856,7 +2421,7 @@ async def discover_category(
             else:
                 template_name = "recent_requests_horizontal.html"  # Use Jellyseerr-style cards for recent requests
             
-            return create_template_response(
+            return await create_template_response_with_instances(
                 template_name,
                 {
                     "request": request, 
@@ -2001,7 +2566,8 @@ async def discover_category(
                     "has_more": has_more,
                     "next_offset": offset + limit,
                     "current_offset": offset,
-                    "base_url": base_url
+                    "base_url": base_url,
+                    "available_instances": available_instances
                 }
                 
                 # Add category object for expanded view
@@ -2026,7 +2592,11 @@ async def discover_category(
                         "current_query_params": f"type={type}&sort={sort}&limit={limit}"
                     })
                 
-                return create_template_response(template_name, context)
+                # Use instance-aware response for templates that need multi-instance support
+                if template_name in ["components/movie_cards_only.html", "discover_results.html", "components/expanded_results.html"]:
+                    return await create_template_response_with_instances(template_name, context)
+                else:
+                    return create_template_response(template_name, context)
                 
             except Exception as rec_error:
                 print(f"❌ Error generating personalized recommendations: {rec_error}")
@@ -2214,7 +2784,8 @@ async def discover_category(
                 else:
                     template_name = "category_horizontal.html"
                 
-                return create_template_response(
+                # Use create_template_response_with_instances to get proper available_instances
+                return await create_template_response_with_instances(
                     template_name,
                     {
                         "request": request,
@@ -2228,7 +2799,8 @@ async def discover_category(
                         "sort_by": sort,
                         "has_more": has_more,
                         "next_offset": offset + limit,
-                        "current_offset": offset
+                        "current_offset": offset,
+                        "media_type": custom_media_type  # Add media type for instance selection
                     }
                 )
                 
@@ -2341,7 +2913,8 @@ async def discover_category(
             "has_more": has_more,
             "next_offset": offset + limit,
             "current_offset": offset,
-            "base_url": base_url
+            "base_url": base_url,
+            "available_instances": available_instances
         }
         
         # Add category object for expanded view
@@ -2364,7 +2937,11 @@ async def discover_category(
                 "current_streaming": []
             })
         
-        return create_template_response(template_name, context)
+        # Use instance-aware response for templates that need multi-instance support
+        if template_name in ["components/movie_cards_only.html", "discover_results.html", "components/expanded_results.html"]:
+            return await create_template_response_with_instances(template_name, context)
+        else:
+            return create_template_response(template_name, context)
         
     except Exception as e:
         print(f"❌ ERROR in discover_category: {e}")
@@ -3412,7 +3989,7 @@ async def discover_category_expanded(
                         item['poster_url'] = f"https://image.tmdb.org/t/p/w500{item['poster_path']}"
                     item["base_url"] = base_url
                 
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "components/expanded_results.html",
                     {
                         "request": request,
@@ -3425,7 +4002,7 @@ async def discover_category_expanded(
                         },
                         "category_title": custom_category.name,
                         "sort_by": "user_defined",
-                        "media_type": custom_media_type if custom_media_type != 'mixed' else 'movie',  # Default for mixed in URL construction
+                        "media_type": custom_media_type,  # Use actual media type, including 'mixed'
                         "has_more": has_more,
                         "current_page": page,
                         "page": page,
@@ -3733,16 +4310,18 @@ async def discover_category_expanded(
                 item['in_plex'] = False
                 item["base_url"] = base_url
         
-        # Debug output for infinite scroll
+        # Debug output for infinite scroll and media types
         print(f"🔍 EXPANDED CONTEXT DEBUG - has_more: {has_more}, page: {page}, total_pages: {results.get('total_pages', 'unknown')}, results_count: {len(limited_results)}")
+        print(f"🔍 MEDIA TYPE DEBUG - type parameter: '{type}', first item media_type: '{limited_results[0].get('media_type') if limited_results else 'none'}'")
         
         # Return expanded grid template
-        return create_template_response(
+        return await create_template_response_with_instances(
             "components/expanded_results.html",
             {
                 "request": request,
                 "current_user": current_user,
                 "results": limited_results,
+                "media_type": type,  # Add media_type for template consistency
                 "category": {
                     "type": type,
                     "sort": sort,
@@ -3913,7 +4492,7 @@ async def discover_expand_category(
     print(f"🔍 EXPAND CATEGORY DEBUG: type='{type}', sort='{sort}', title='{title}'")
     
     # Return the expanded category view that replaces main-content-area
-    return create_template_response(
+    return await create_template_response_with_instances(
         "components/expanded_category_view.html",
         {
             "request": request,
@@ -4235,10 +4814,11 @@ async def discover_category_more(
                         item['poster_url'] = f"https://image.tmdb.org/t/p/w500{item['poster_path']}"
                     item["base_url"] = base_url
                     
-                return create_template_response(
+                return await create_template_response_with_instances(
                     "components/movie_cards_only.html",
                     {
                         "request": request,
+                        "current_user": current_user,  # CRITICAL FIX: Add current_user to context
                         "results": limited_results,
                         "has_more": has_more,
                         "current_page": page,
@@ -4252,7 +4832,9 @@ async def discover_category_more(
                                                (f"&{'&'.join([f'studios={s}' for s in filters.get('studios', [])])}" if filters.get('studios') else "") +
                                                (f"&{'&'.join([f'streaming={s}' for s in filters.get('streaming', [])])}" if filters.get('streaming') else ""),
                         "base_url": base_url,
-                    }
+                        "media_type": custom_media_type  # Add media type for instance selection
+                    },
+                    session
                 )
             except Exception as custom_error:
                 print(f"❌ Error handling custom category infinite scroll: {custom_error}")
@@ -4523,6 +5105,7 @@ async def discover_category_more(
         # Prepare context for template  
         context = {
             "request": request,
+            "current_user": current_user,  # CRITICAL FIX: Add current_user to context
             "results": results,
             "base_url": base_url,
             "has_more": has_more,
@@ -4539,7 +5122,7 @@ async def discover_category_more(
                                    (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else "")
         }
         
-        return templates.TemplateResponse("components/movie_cards_only.html", context)
+        return await create_template_response_with_instances("components/movie_cards_only.html", context)
         
     except Exception as e:
         print(f"❌ ERROR in discover_category_more: {e}")
@@ -4579,7 +5162,7 @@ async def search_page(
         empty_context = {"request": request, "results": [], "query": q, "current_user": current_user}
         # Content negotiation - check if this is an HTMX request
         if request.headers.get("HX-Request"):
-            return create_template_response("search_results.html", empty_context)
+            return await create_template_response_with_instances("search_results.html", {**empty_context, "media_type": "mixed"})
         else:
             return {"results": [], "query": q, "pagination": {"page": 1, "total_pages": 0, "total_results": 0}}
     
@@ -4639,7 +5222,7 @@ async def search_page(
         }
         # Content negotiation for errors
         if request.headers.get("HX-Request"):
-            return create_template_response("search_results.html", error_context)
+            return await create_template_response_with_instances("search_results.html", {**error_context, "media_type": "mixed"})
         else:
             return {"error": "TMDB API error", "message": str(e), "results": [], "query": q}
     
@@ -4661,14 +5244,15 @@ async def search_page(
     # Content negotiation based on client type
     if request.headers.get("HX-Request"):
         # HTMX web client - return HTML fragment
-        return create_template_response(
+        return await create_template_response_with_instances(
             "search_results.html",
             {
                 "request": request,
                 "results": filtered_results,
                 "query": q,
                 "pagination": pagination,
-                "current_user": current_user
+                "current_user": current_user,
+                "media_type": "mixed"  # Search can return both movies and TV
             }
         )
     else:
@@ -4720,7 +5304,13 @@ async def media_detail(
         sync_service = PlexSyncService(session)
         status_map = sync_service.check_items_status([media_id], media_type)
         plex_status = status_map.get(media_id, 'available')
-        is_in_plex = plex_status == 'in_plex'
+        # For TV shows, show watch button for both complete and partial availability
+        is_in_plex = plex_status in ['in_plex', 'partial_plex']
+        
+        print(f"🔍 [PLEX WATCH LINK DEBUG] Media: {media_id} ({media_type})")
+        print(f"🔍 [PLEX WATCH LINK DEBUG] Status map: {status_map}")
+        print(f"🔍 [PLEX WATCH LINK DEBUG] Plex status: {plex_status}")
+        print(f"🔍 [PLEX WATCH LINK DEBUG] Is in Plex: {is_in_plex}")
         
         # Check for existing requests for this media
         from .models.media_request import MediaRequest, RequestStatus
@@ -4799,32 +5389,72 @@ async def media_detail(
             similar = tmdb_service.get_tv_similar(media_id)
             recommendations = tmdb_service.get_tv_recommendations(media_id)
             credits = tmdb_service.get_tv_credits(media_id)
+        
+        # Get trailer/video data for both movies and TV shows
+        videos = tmdb_service.get_media_videos(media_id, media_type)
+        trailer = None
+        if videos.get('results'):
+            # Get the first (highest priority) trailer
+            trailer = videos['results'][0]
             
-            # Fetch detailed episode information for each season
-            if media.get('seasons'):
-                for season in media['seasons']:
-                    # Only fetch details for seasons with episodes (skip specials if episode count is 0)
-                    if season.get('episode_count', 0) > 0:
-                        try:
-                            season_details = tmdb_service.get_tv_season_details(media_id, season['season_number'])
-                            if season_details and season_details.get('episodes'):
-                                # Replace the basic episode count with detailed episode data
-                                season['episodes'] = season_details['episodes']
-                                # Add formatted air dates for easier template use
-                                for episode in season['episodes']:
-                                    if episode.get('air_date'):
-                                        try:
-                                            from datetime import datetime
-                                            air_date = datetime.strptime(episode['air_date'], '%Y-%m-%d')
-                                            episode['formatted_air_date'] = air_date.strftime('%b %d, %Y')
-                                        except ValueError:
-                                            episode['formatted_air_date'] = episode['air_date']
-                                    else:
-                                        episode['formatted_air_date'] = 'TBA'
-                        except Exception as e:
-                            print(f"Could not fetch season {season['season_number']} details: {e}")
-                            # Keep basic episode list if detailed fetch fails
-                            season['episodes'] = None
+        # For TV shows, fetch detailed episode information for each season
+        if media_type == 'tv' and media.get('seasons'):
+            for season in media['seasons']:
+                # Only fetch details for seasons with episodes (skip specials if episode count is 0)
+                if season.get('episode_count', 0) > 0:
+                    try:
+                        season_details = tmdb_service.get_tv_season_details(media_id, season['season_number'])
+                        if season_details and season_details.get('episodes'):
+                            # Replace the basic episode count with detailed episode data
+                            season['episodes'] = season_details['episodes']
+                            # Add formatted air dates for easier template use
+                            for episode in season['episodes']:
+                                if episode.get('air_date'):
+                                    try:
+                                        from datetime import datetime
+                                        air_date = datetime.strptime(episode['air_date'], '%Y-%m-%d')
+                                        episode['formatted_air_date'] = air_date.strftime('%b %d, %Y')
+                                    except ValueError:
+                                        episode['formatted_air_date'] = episode['air_date']
+                                else:
+                                    episode['formatted_air_date'] = 'TBA'
+                    except Exception as e:
+                        print(f"Could not fetch season {season['season_number']} details: {e}")
+                        # Keep basic episode list if detailed fetch fails
+                        season['episodes'] = None
+            
+            # Check episode-level Plex availability for TV shows
+            from .models.plex_tv_item import PlexTVItem
+            
+            # Get all episodes for this show from Plex database
+            plex_episodes_query = select(PlexTVItem).where(
+                PlexTVItem.show_tmdb_id == media_id,
+                PlexTVItem.episode_number.isnot(None)  # Only episode-level entries
+            )
+            plex_episodes = session.exec(plex_episodes_query).all()
+            
+            # Create a lookup for Plex episodes by season and episode number
+            plex_episode_lookup = {}
+            for plex_ep in plex_episodes:
+                key = (plex_ep.season_number, plex_ep.episode_number)
+                plex_episode_lookup[key] = plex_ep
+            
+            # Add Plex status to each episode
+            for season in media['seasons']:
+                if season.get('episodes'):
+                    for episode in season['episodes']:
+                        key = (season['season_number'], episode['episode_number'])
+                        if key in plex_episode_lookup:
+                            episode['in_plex'] = True
+                            # Convert datetime to string for JSON serialization
+                            plex_added = plex_episode_lookup[key].added_at
+                            if plex_added:
+                                episode['plex_added_at'] = plex_added.isoformat()
+                            else:
+                                episode['plex_added_at'] = None
+                        else:
+                            episode['in_plex'] = False
+                            episode['plex_added_at'] = None
             
             # Get episode availability data from Plex
             episode_availability = sync_service.get_tv_episode_availability(media_id)
@@ -4900,7 +5530,7 @@ async def media_detail(
             def __init__(self, permissions_service, user_id):
                 self.can_request_movies = permissions_service.can_request_media_type(user_id, 'movie') if user_id else False
                 self.can_request_tv = permissions_service.can_request_media_type(user_id, 'tv') if user_id else False
-                self.can_request_4k = permissions_service.can_request_4k(user_id) if user_id else False
+                # Legacy 4K permissions removed - use instance-based permissions instead
                 # Add admin navigation permissions needed by base template
                 # Import PermissionFlags to use correct constants
                 from .models.role import PermissionFlags
@@ -4925,6 +5555,81 @@ async def media_detail(
         from .services.settings_service import SettingsService
         base_url = SettingsService.get_base_url(session)
         
+        # Generate Plex watch link if content is available in Plex
+        plex_watch_link = None
+        print(f"🔍 [PLEX WATCH LINK DEBUG] Attempting to generate watch link for {media_type} TMDB ID {media_id}, plex_status: {plex_status}, is_in_plex: {is_in_plex}")
+        if is_in_plex:
+            try:
+                # Get Plex server configuration
+                from .models.settings import Settings
+                settings_statement = select(Settings).limit(1)
+                settings = session.exec(settings_statement).first()
+                
+                print(f"🔍 [PLEX WATCH LINK DEBUG] Settings found: {settings is not None}")
+                print(f"🔍 [PLEX WATCH LINK DEBUG] Plex URL: {settings.plex_url if settings else None}")
+                
+                if settings and settings.plex_url:
+                    # Get the specific Plex library item to get rating_key and machine identifier
+                    from .models.plex_library_item import PlexLibraryItem
+                    from plexapi.server import PlexServer
+                    
+                    plex_item_statement = select(PlexLibraryItem).where(
+                        PlexLibraryItem.tmdb_id == media_id,
+                        PlexLibraryItem.media_type == media_type
+                    )
+                    plex_item = session.exec(plex_item_statement).first()
+                    
+                    print(f"🔍 [PLEX WATCH LINK DEBUG] Plex item found: {plex_item is not None}")
+                    
+                    if plex_item:
+                        print(f"🔍 [PLEX WATCH LINK DEBUG] Found Plex item: {plex_item.title} (Rating Key: {plex_item.rating_key})")
+                        try:
+                            # Connect to Plex to get machine identifier
+                            clean_url = settings.plex_url.strip()
+                            clean_token = settings.plex_token.strip() if settings.plex_token else None
+                            
+                            print(f"🔍 [PLEX WATCH LINK DEBUG] Connecting to Plex server: {clean_url}")
+                            if clean_token:
+                                plex = PlexServer(clean_url, clean_token)
+                                machine_id = plex.machineIdentifier
+                                
+                                print(f"🔍 [PLEX WATCH LINK DEBUG] Connected to Plex, machine ID: {machine_id}")
+                                
+                                # Construct the full rating key path and URL encode it
+                                from urllib.parse import quote
+                                full_rating_key = f"/library/metadata/{plex_item.rating_key}"
+                                encoded_rating_key = quote(full_rating_key, safe='')
+                                
+                                # Generate proper app.plex.tv URL like Jellyseerr  
+                                plex_watch_link = f"https://app.plex.tv/desktop/#!/server/{machine_id}/details?key={encoded_rating_key}"
+                                print(f"✅ [PLEX WATCH LINK DEBUG] Generated app.plex.tv link: {plex_watch_link}")
+                                print(f"🔍 [PLEX WATCH LINK DEBUG] Full rating key path: {full_rating_key}")
+                                print(f"🔍 [PLEX WATCH LINK DEBUG] Encoded rating key: {encoded_rating_key}")
+                            else:
+                                print(f"❌ [PLEX WATCH LINK DEBUG] No Plex token available")
+                                plex_watch_link = None
+                        except Exception as plex_error:
+                            print(f"❌ [PLEX WATCH LINK DEBUG] Error connecting to Plex: {plex_error}")
+                            # Fallback to search URL
+                            plex_base_url = settings.plex_url.rstrip('/')
+                            plex_watch_link = f"{plex_base_url}/web/index.html#!/search?query=tmdb-{media_id}"
+                            print(f"🔍 [PLEX WATCH LINK DEBUG] Using fallback search link: {plex_watch_link}")
+                    else:
+                        print(f"🔍 [PLEX WATCH LINK DEBUG] No Plex item found in database for TMDB {media_id}")
+                        plex_watch_link = None
+                else:
+                    print(f"🔍 [PLEX WATCH LINK DEBUG] No Plex server URL configured")
+            except Exception as e:
+                print(f"❌ [PLEX WATCH LINK DEBUG] Error generating Plex watch link: {e}")
+                import traceback
+                print(f"❌ [PLEX WATCH LINK DEBUG] Full traceback: {traceback.format_exc()}")
+                plex_watch_link = None
+        else:
+            print(f"🔍 [PLEX WATCH LINK DEBUG] Media not in Plex, skipping watch link generation")
+        
+        # Get available instances for this user and media type
+        available_instances = await get_instances_for_media_type(current_user.id if current_user else None, media_type)
+        
         context = {
             "request": request,
             "current_user": current_user,
@@ -4945,16 +5650,39 @@ async def media_detail(
             "similar": similar.get('results', [])[:12] if similar else [],
             "recommendations": recommendations.get('results', [])[:12] if recommendations else [],
             "cast": credits.get('cast', [])[:10] if credits else [],
-            "crew": credits.get('crew', []) if credits else []
+            "crew": credits.get('crew', []) if credits else [],
+            "trailer": trailer,
+            "plex_watch_link": plex_watch_link,
+            "available_instances": available_instances
         }
         
-        return create_template_response("media_detail_simple.html", context)
+        return await create_template_response_with_instances("media_detail_simple.html", {**context, "media_type": media_type})
         
     except Exception as e:
         print(f"Error loading media details: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Create minimal user permissions for error template
+        class ErrorUserPermissions:
+            def __init__(self):
+                self.can_manage_settings = False
+                self.can_manage_users = False
+                self.can_approve_requests = False
+                self.can_library_sync = False
+        
+        # Get base URL for error template
+        try:
+            from .services.settings_service import SettingsService
+            error_base_url = SettingsService.get_base_url(session)
+        except:
+            error_base_url = ""
+            
         context = {
             "request": request,
             "current_user": current_user,
+            "user_permissions": ErrorUserPermissions(),
+            "base_url": error_base_url,
             "error_message": f"Error loading media details: {str(e)}"
         }
         return create_template_response("error.html", context)
@@ -5089,7 +5817,6 @@ async def person_detail(
         tv_status = sync_service.check_items_status(tv_ids, 'tv') if tv_ids else {}
         
         # Check for existing requests by current user
-        from sqlmodel import select
         from .models.media_request import MediaRequest, MediaType, RequestStatus
         
         # Get all request IDs for this user and these items
@@ -5138,7 +5865,7 @@ async def person_detail(
         if person.get('profile_path'):
             person['profile_url'] = f"https://image.tmdb.org/t/p/w500{person['profile_path']}"
         
-        return create_template_response(
+        return await create_template_response_with_instances(
             "person_detail.html",
             {
                 "request": request,
@@ -5234,7 +5961,6 @@ async def debug_user_status(
         return {"error": "Not authenticated"}
     
     # Get all users for debugging
-    from sqlmodel import select
     all_users = session.exec(select(User)).all()
     admin_users = session.exec(select(User).where(User.is_admin == True)).all()
     
@@ -5269,7 +5995,6 @@ async def make_current_user_admin(
         return {"error": "Not authenticated"}
     
     # Check if any admin exists
-    from sqlmodel import select
     admin_users = session.exec(select(User).where(User.is_admin == True)).all()
     
     if len(admin_users) == 0:

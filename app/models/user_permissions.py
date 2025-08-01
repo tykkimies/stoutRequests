@@ -19,7 +19,10 @@ class UserPermissions(SQLModel, table=True):
     # Media type permissions
     can_request_movies: Optional[bool] = Field(default=None)  # None = use role default
     can_request_tv: Optional[bool] = Field(default=None)
-    can_request_4k: Optional[bool] = Field(default=None)
+    can_request_4k: Optional[bool] = Field(default=None)  # DEPRECATED: Use instance-based permissions instead
+    
+    # Instance-based permissions (JSON field)
+    instance_permissions: Optional[str] = Field(default=None, max_length=2000)  # JSON field for granular instance access
     
     # Quality profile overrides (for Radarr/Sonarr integration)
     movie_quality_profile_id: Optional[int] = Field(default=None)
@@ -92,6 +95,64 @@ class UserPermissions(SQLModel, table=True):
         """Reset current request count to 0"""
         self.current_request_count = 0
     
+    def get_instance_permissions(self) -> dict:
+        """Get instance permissions as a dictionary"""
+        if not self.instance_permissions:
+            return {}
+        try:
+            return json.loads(self.instance_permissions)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    
+    def set_instance_permissions(self, permissions_dict: dict) -> None:
+        """Set instance permissions from a dictionary"""
+        self.instance_permissions = json.dumps(permissions_dict) if permissions_dict else None
+    
+    def has_instance_access(self, instance_id: int) -> bool:
+        """Check if user has access to specific instance"""
+        perms = self.get_instance_permissions()
+        # Check specific instance access
+        instance_access = perms.get(f"instance_{instance_id}")
+        if instance_access is not None:
+            return instance_access
+        
+        # If no specific permission set, deny access by default
+        # Users must be explicitly granted instance permissions
+        return False
+    
+    def has_category_access(self, category: str) -> bool:
+        """Check if user has access to instances in a specific category"""
+        perms = self.get_instance_permissions()
+        category_access = perms.get(f"category_{category}")
+        if category_access is not None:
+            return category_access
+        
+        return False  # Default to denying access - users must be explicitly granted category permissions
+    
+    def add_instance_permission(self, instance_id: int, enabled: bool = True) -> None:
+        """Add or update permission for a specific instance"""
+        perms = self.get_instance_permissions()
+        perms[f"instance_{instance_id}"] = enabled
+        self.set_instance_permissions(perms)
+    
+    def add_category_permission(self, category: str, enabled: bool = True) -> None:
+        """Add or update permission for a category of instances"""
+        perms = self.get_instance_permissions()
+        perms[f"category_{category}"] = enabled
+        self.set_instance_permissions(perms)
+    
+    def remove_instance_permission(self, instance_id: int) -> None:
+        """Remove permission override for a specific instance"""
+        perms = self.get_instance_permissions()
+        perms.pop(f"instance_{instance_id}", None)
+        self.set_instance_permissions(perms)
+    
+    def remove_category_permission(self, category: str) -> None:
+        """Remove permission override for a category"""
+        perms = self.get_instance_permissions()
+        perms.pop(f"category_{category}", None)
+        self.set_instance_permissions(perms)
+    
     def get_effective_media_permissions(self, role_permissions: dict = None) -> dict:
         """Get effective media type permissions considering role defaults and user overrides"""
         if role_permissions is None:
@@ -105,9 +166,5 @@ class UserPermissions(SQLModel, table=True):
             'can_request_tv': (
                 self.can_request_tv if self.can_request_tv is not None 
                 else role_permissions.get('request.tv', True)
-            ),
-            'can_request_4k': (
-                self.can_request_4k if self.can_request_4k is not None 
-                else role_permissions.get('request.4k', False)
             ),
         }

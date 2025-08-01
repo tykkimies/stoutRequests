@@ -122,11 +122,11 @@ class PermissionsService:
     
     def has_permission(self, user_id: int, permission: str) -> bool:
         """Check if user has a specific permission"""
-        # Check if user is legacy admin
+        # Check if user is admin or server owner
         user_statement = select(User).where(User.id == user_id)
         user = self.session.exec(user_statement).first()
-        if user and user.is_admin:
-            return True  # Legacy admins have all permissions
+        if user and (user.is_admin or user.is_server_owner):
+            return True  # Admins and server owners have all permissions
         
         user_perms = self.get_user_permissions(user_id)
         if not user_perms:

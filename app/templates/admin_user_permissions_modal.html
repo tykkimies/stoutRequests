@@ -163,25 +163,9 @@
                         <div class="flex items-center">
                             <input 
                                 type="checkbox" 
-                                name="can_request_4k" 
-                                id="can_request_4k"
-                                value="true"
-                                {% if template_effective_permissions.can_request_4k %}checked{% endif %}
-                                class="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                            >
-                            <label for="can_request_4k" class="ml-2 text-sm text-gray-700 flex items-center">
-                                <svg class="w-4 h-4 text-yellow-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
-                                </svg>
-                                Can request 4K content
-                            </label>
-                        </div>
-                        
-                        <div class="flex items-center">
-                            <input 
-                                type="checkbox" 
                                 name="can_view_other_users_requests" 
                                 id="can_view_other_users_requests"
+                                value="true"
                                 {% if user_permissions and user_permissions.get_custom_permissions().get('can_view_other_users_requests') %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
@@ -198,6 +182,7 @@
                                 type="checkbox" 
                                 name="can_see_requester_username" 
                                 id="can_see_requester_username"
+                                value="true"
                                 {% if user_permissions and user_permissions.get_custom_permissions().get('can_see_requester_username') %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
@@ -228,6 +213,131 @@
                 </div>
             </div>
 
+            <!-- Instance Access Permissions -->
+            <div class="mb-6">
+                <h5 class="text-sm font-medium text-gray-800 mb-3 flex items-center">
+                    <svg class="w-4 h-4 text-orange-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h6m-6 8a2 2 0 01-2 2v4a2 2 0 012 2h6m0-16a2 2 0 012 2v4a2 2 0 01-2 2m0 0v4a2 2 0 01-2 2H9"></path>
+                    </svg>
+                    Service Instance Access
+                </h5>
+                <p class="text-xs text-gray-600 mb-3">
+                    🎯 Control access to specific Radarr/Sonarr instances. Admins have access to all instances by default.
+                </p>
+                
+                <!-- Category-based Access -->
+                <div class="mb-4">
+                    <h6 class="text-xs font-medium text-gray-700 mb-2">Category Access</h6>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                name="category_4k" 
+                                id="category_4k"
+                                {% if user_permissions and user_permissions.get_instance_permissions().get('category_4k') %}checked{% endif %}
+                                class="h-4 w-4 text-orange-600 border-gray-300 rounded"
+                            >
+                            <label for="category_4k" class="ml-2 text-sm text-gray-700">4K Content</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                name="category_anime" 
+                                id="category_anime"
+                                {% if user_permissions and user_permissions.get_instance_permissions().get('category_anime') %}checked{% endif %}
+                                class="h-4 w-4 text-orange-600 border-gray-300 rounded"
+                            >
+                            <label for="category_anime" class="ml-2 text-sm text-gray-700">Anime</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                name="category_foreign" 
+                                id="category_foreign"
+                                {% if user_permissions and user_permissions.get_instance_permissions().get('category_foreign') %}checked{% endif %}
+                                class="h-4 w-4 text-orange-600 border-gray-300 rounded"
+                            >
+                            <label for="category_foreign" class="ml-2 text-sm text-gray-700">Foreign Content</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Specific Instance Access -->
+                {% if available_service_instances %}
+                <div class="space-y-3">
+                    {% set radarr_instances = available_service_instances | selectattr("service_type", "equalto", "radarr") | list %}
+                    {% set sonarr_instances = available_service_instances | selectattr("service_type", "equalto", "sonarr") | list %}
+                    
+                    {% if radarr_instances %}
+                    <div>
+                        <h6 class="text-xs font-medium text-gray-700 mb-2">Movie Services (Radarr)</h6>
+                        <div class="space-y-2">
+                            {% for instance in radarr_instances %}
+                            <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                <div class="flex items-center">
+                                    <input 
+                                        type="checkbox" 
+                                        name="instance_{{ instance.id }}" 
+                                        id="instance_{{ instance.id }}"
+                                        {% if user_permissions and user_permissions.get_instance_permissions().get('instance_' + instance.id|string) %}checked{% endif %}
+                                        class="h-4 w-4 text-orange-600 border-gray-300 rounded"
+                                    >
+                                    <label for="instance_{{ instance.id }}" class="ml-2 text-sm text-gray-700">{{ instance.name }}</label>
+                                </div>
+                                <div class="flex space-x-1">
+                                    {% if instance.is_default_movie %}
+                                        <span class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded">Default</span>
+                                    {% endif %}
+                                    {% if instance.is_4k_default %}
+                                        <span class="text-xs px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded">4K</span>
+                                    {% endif %}
+                                    {% if instance.instance_category %}
+                                        <span class="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded">{{ instance.instance_category|title }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if sonarr_instances %}
+                    <div>
+                        <h6 class="text-xs font-medium text-gray-700 mb-2">TV Services (Sonarr)</h6>
+                        <div class="space-y-2">
+                            {% for instance in sonarr_instances %}
+                            <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                <div class="flex items-center">
+                                    <input 
+                                        type="checkbox" 
+                                        name="instance_{{ instance.id }}" 
+                                        id="instance_{{ instance.id }}"
+                                        {% if user_permissions and user_permissions.get_instance_permissions().get('instance_' + instance.id|string) %}checked{% endif %}
+                                        class="h-4 w-4 text-orange-600 border-gray-300 rounded"
+                                    >
+                                    <label for="instance_{{ instance.id }}" class="ml-2 text-sm text-gray-700">{{ instance.name }}</label>
+                                </div>
+                                <div class="flex space-x-1">
+                                    {% if instance.is_default_tv %}
+                                        <span class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded">Default</span>
+                                    {% endif %}
+                                    {% if instance.is_4k_default %}
+                                        <span class="text-xs px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded">4K</span>
+                                    {% endif %}
+                                    {% if instance.instance_category %}
+                                        <span class="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded">{{ instance.instance_category|title }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500 italic">No service instances configured yet.</p>
+                {% endif %}
+            </div>
 
             <!-- Notification Settings -->
             <div class="mb-6">

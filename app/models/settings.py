@@ -37,6 +37,9 @@ class Settings(SQLModel, table=True):
     # Library Sync Preferences (JSON field storing list of library names)
     sync_library_preferences: Optional[str] = Field(default=None, max_length=2000)
     
+    # Background Job Settings (JSON field storing job configuration)
+    background_job_settings: Optional[str] = Field(default=None, max_length=2000)
+    
     # Theme Settings
     site_theme: str = Field(default="default", max_length=50)
     
@@ -187,3 +190,16 @@ class Settings(SQLModel, table=True):
         if not preferences:
             return True
         return library_name in preferences
+    
+    def get_background_job_settings(self) -> dict:
+        """Get background job settings"""
+        if not self.background_job_settings:
+            return {}
+        try:
+            return json.loads(self.background_job_settings)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    
+    def set_background_job_settings(self, settings: dict) -> None:
+        """Set background job settings"""
+        self.background_job_settings = json.dumps(settings) if settings else None

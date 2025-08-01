@@ -82,9 +82,31 @@ def get_global_template_context(current_user=None, request=None) -> dict:
                     from ..core.permission_decorators import check_request_permissions
                     from ..services.permissions_service import PermissionsService
                     from ..models.role import PermissionFlags
+                    from ..models.user_permissions import UserPermissions
                     
-                    user_is_admin = is_user_admin(current_user, session)
-                    user_permissions = check_request_permissions(current_user, session)
+                    # Server admin and admin users get universal permissions
+                    is_server_admin = getattr(current_user, 'is_server_owner', False)
+                    is_regular_admin = getattr(current_user, 'is_admin', False)
+                    
+                    user_is_admin = is_user_admin(current_user, session) or is_server_admin or is_regular_admin
+                    
+                    if is_server_admin or is_regular_admin:
+                        # Server admin and admin users get all permissions
+                        user_permissions = {
+                            'can_request_movies': True,
+                            'can_request_tv': True,
+                            'can_request_4k': True,
+                            'can_approve_requests': True,
+                            'can_manage_settings': True,
+                            'can_manage_users': True,
+                            'can_view_all_requests': True,
+                            'can_manage_all_requests': True,
+                            'can_library_sync': True,
+                            'can_view_other_users_requests': True,
+                            'can_see_requester_username': True,
+                        }
+                    else:
+                        user_permissions = check_request_permissions(current_user, session)
                     
                     # Add specific permission checks for templates
                     permissions_service = PermissionsService(session)

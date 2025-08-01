@@ -157,6 +157,7 @@
                         <h1 class="text-xl font-bold text-white text-shadow">🍺 Stout Requests</h1>
                     </div>
                     {% if current_user %}
+                    <!-- Desktop Navigation -->
                     <div class="hidden md:block">
                         <div class="ml-10 flex items-baseline space-x-4">
                             <a href="{{ base_url }}/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Search</a>
@@ -170,7 +171,8 @@
                 </div>
                 <div class="flex items-center">
                     {% if current_user %}
-                    <div class="flex items-center space-x-4">
+                    <!-- Desktop User Info -->
+                    <div class="hidden md:flex items-center space-x-4">
                         <span class="text-gray-300 text-sm">Welcome, {{ current_user.full_name or current_user.username }}</span>
                         {% if user_is_admin %}
                         <span class="bg-yellow-600 text-white px-2 py-1 rounded text-xs">Admin</span>
@@ -181,6 +183,24 @@
                         {% endif %}
                         <a href="{{ base_url }}/logout" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Logout</a>
                     </div>
+                    
+                    <!-- Mobile Hamburger Menu Button -->
+                    <div class="md:hidden">
+                        <button 
+                            id="mobile-nav-toggle"
+                            onclick="toggleMobileNavigation()"
+                            class="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded-md transition-colors"
+                            aria-label="Toggle navigation menu"
+                            aria-expanded="false"
+                        >
+                            <svg id="nav-hamburger-icon" class="w-5 h-5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                            </svg>
+                            <svg id="nav-close-icon" class="w-5 h-5 hidden transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
                     {% else %}
                     <a href="{{ base_url }}/login" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-md text-sm font-medium">
                         Login with Plex
@@ -188,6 +208,39 @@
                     {% endif %}
                 </div>
             </div>
+            
+            {% if current_user %}
+            <!-- Mobile Navigation Menu -->
+            <div 
+                id="mobile-nav-menu"
+                class="md:hidden hidden bg-gray-800 border-t border-gray-700 pb-3 pt-2"
+            >
+                <div class="px-2 space-y-1">
+                    <a href="{{ base_url }}/" class="text-gray-300 hover:text-white hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Search</a>
+                    <a href="{{ base_url }}/requests/" class="text-gray-300 hover:text-white hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Requests</a>
+                    {% if user_permissions.can_manage_settings or user_permissions.can_manage_users or user_permissions.can_approve_requests or user_permissions.can_library_sync %}
+                    <a href="{{ base_url }}/admin/" class="text-gray-300 hover:text-white hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">⚙️ Admin</a>
+                    {% endif %}
+                </div>
+                
+                <!-- Mobile User Info -->
+                <div class="pt-4 pb-3 border-t border-gray-700 mt-3">
+                    <div class="px-3 text-gray-300 text-sm mb-2">Welcome, {{ current_user.full_name or current_user.username }}</div>
+                    <div class="px-3 flex flex-wrap gap-2 mb-3">
+                        {% if user_is_admin %}
+                        <span class="bg-yellow-600 text-white px-2 py-1 rounded text-xs">Admin</span>
+                        {% endif %}
+                        {% if current_user.plex_id and current_user.plex_id < 0 %}
+                        <span class="bg-purple-600 text-white px-2 py-1 rounded text-xs">Test User</span>
+                        <a href="{{ base_url }}/admin" class="bg-primary-600 hover:bg-primary-700 text-white px-2 py-1 rounded text-xs">Return to Admin</a>
+                        {% endif %}
+                    </div>
+                    <div class="px-2">
+                        <a href="{{ base_url }}/logout" class="text-gray-300 hover:text-white hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Logout</a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </nav>
 
@@ -572,6 +625,368 @@
                 }, 1000);
             }
         });
+
+        // Simple and reliable dropdown positioning
+        window.toggleDropdownMenu = function(button) {
+            const dropdown = button.nextElementSibling;
+            const isHidden = dropdown.classList.contains('hidden');
+            
+            // Close all other dropdowns first
+            document.querySelectorAll('.dropdown-menu').forEach(function(d) {
+                if (d !== dropdown) {
+                    d.classList.add('hidden');
+                }
+            });
+            
+            if (isHidden) {
+                // Move dropdown to body to completely escape all container constraints
+                if (dropdown.parentNode !== document.body) {
+                    // Store original parent and position for cleanup
+                    dropdown._originalParent = dropdown.parentNode;
+                    dropdown._originalNextSibling = dropdown.nextSibling;
+                    document.body.appendChild(dropdown);
+                }
+                
+                // Show dropdown and position it
+                dropdown.classList.remove('hidden');
+                
+                // Get button position relative to viewport
+                const buttonRect = button.getBoundingClientRect();
+                const viewportHeight = window.innerHeight;
+                const viewportWidth = window.innerWidth;
+                
+                // Position dropdown with fixed positioning
+                dropdown.style.position = 'fixed';
+                dropdown.style.zIndex = '2147483647'; // Maximum z-index
+                
+                // Set minimum width to match button, but allow it to be wider if needed
+                const minWidth = Math.max(buttonRect.width, 160);
+                dropdown.style.minWidth = minWidth + 'px';
+                
+                // Calculate horizontal position (prefer left-aligned with button)
+                let leftPos = buttonRect.left;
+                
+                // If dropdown would go off right edge, adjust position
+                if (leftPos + minWidth > viewportWidth - 20) {
+                    leftPos = Math.max(20, viewportWidth - minWidth - 20);
+                }
+                
+                dropdown.style.left = leftPos + 'px';
+                
+                // Calculate vertical position (prefer below button)
+                let topPos = buttonRect.bottom + 4;
+                
+                // If dropdown would go off bottom edge, show above button instead
+                const dropdownHeight = dropdown.offsetHeight || 200; // estimate if not measured yet
+                if (topPos + dropdownHeight > viewportHeight - 20 && buttonRect.top > dropdownHeight + 20) {
+                    topPos = buttonRect.top - dropdownHeight - 4;
+                }
+                
+                dropdown.style.top = Math.max(20, topPos) + 'px';
+                
+            } else {
+                // Hide dropdown and return to original position
+                dropdown.classList.add('hidden');
+                
+                // Return dropdown to its original parent if it was moved
+                if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                    if (dropdown._originalNextSibling) {
+                        dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                    } else {
+                        dropdown._originalParent.appendChild(dropdown);
+                    }
+                }
+            }
+        };
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            // Check if the click is outside all dropdown triggers and menus
+            if (!event.target.closest('button[onclick*="toggleDropdownMenu"]') && 
+                !event.target.closest('.dropdown-menu')) {
+                document.querySelectorAll('.dropdown-menu').forEach(function(dropdown) {
+                    dropdown.classList.add('hidden');
+                    
+                    // Return dropdown to its original parent if it was moved to body
+                    if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                        if (dropdown._originalNextSibling) {
+                            dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                        } else {
+                            dropdown._originalParent.appendChild(dropdown);
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Close dropdowns on scroll to prevent positioning issues
+        document.addEventListener('scroll', function() {
+            document.querySelectorAll('.dropdown-menu').forEach(function(dropdown) {
+                dropdown.classList.add('hidden');
+                
+                // Return dropdown to its original parent if it was moved to body
+                if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                    if (dropdown._originalNextSibling) {
+                        dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                    } else {
+                        dropdown._originalParent.appendChild(dropdown);
+                    }
+                }
+            });
+        }, true);
+        
+        // Global function to close all dropdowns (used by dropdown buttons)
+        window.closeAllDropdowns = function() {
+            document.querySelectorAll('.dropdown-menu').forEach(function(dropdown) {
+                dropdown.classList.add('hidden');
+                
+                // Return dropdown to its original parent if it was moved to body
+                if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                    if (dropdown._originalNextSibling) {
+                        dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                    } else {
+                        dropdown._originalParent.appendChild(dropdown);
+                    }
+                }
+            });
+        };
+
+        // Mobile navigation functionality
+        window.toggleMobileNavigation = function() {
+            const mobileMenu = document.getElementById('mobile-nav-menu');
+            const toggleBtn = document.getElementById('mobile-nav-toggle');
+            const hamburgerIcon = document.getElementById('nav-hamburger-icon');
+            const closeIcon = document.getElementById('nav-close-icon');
+            
+            if (mobileMenu && toggleBtn && hamburgerIcon && closeIcon) {
+                const isHidden = mobileMenu.classList.contains('hidden');
+                
+                if (isHidden) {
+                    // Show mobile menu
+                    mobileMenu.classList.remove('hidden');
+                    hamburgerIcon.classList.add('hidden');
+                    closeIcon.classList.remove('hidden');
+                    toggleBtn.setAttribute('aria-expanded', 'true');
+                } else {
+                    // Hide mobile menu
+                    mobileMenu.classList.add('hidden');
+                    hamburgerIcon.classList.remove('hidden');
+                    closeIcon.classList.add('hidden');
+                    toggleBtn.setAttribute('aria-expanded', 'false');
+                }
+            }
+        };
+
+        // Close mobile navigation when window is resized to desktop
+        window.addEventListener('resize', function() {
+            if (window.innerWidth >= 768) { // md breakpoint
+                const mobileMenu = document.getElementById('mobile-nav-menu');
+                const toggleBtn = document.getElementById('mobile-nav-toggle');
+                const hamburgerIcon = document.getElementById('nav-hamburger-icon');
+                const closeIcon = document.getElementById('nav-close-icon');
+                
+                if (mobileMenu && toggleBtn && hamburgerIcon && closeIcon) {
+                    mobileMenu.classList.add('hidden');
+                    hamburgerIcon.classList.remove('hidden');
+                    closeIcon.classList.add('hidden');
+                    toggleBtn.setAttribute('aria-expanded', 'false');
+                }
+            }
+        });
     </script>
+    
+    <!-- Enhanced dropdown styling to match site aesthetic -->
+    <style>
+        /* Force dropdown menus to appear above all other content with beautiful styling */  
+        .dropdown-menu {
+            position: fixed !important;
+            z-index: 2147483647 !important; /* Maximum possible z-index */
+            
+            /* Enhanced visual styling */
+            background: linear-gradient(135deg, #ffffff 0%, #fafafa 100%) !important;
+            border: 1px solid rgba(59, 130, 246, 0.15) !important;
+            border-radius: 12px !important;
+            box-shadow: 
+                0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                0 10px 10px -5px rgba(0, 0, 0, 0.04),
+                0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+            
+            /* Animation and transitions */
+            opacity: 0 !important;
+            transform: translateY(-8px) scale(0.95) !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            backdrop-filter: blur(8px) !important;
+            
+            /* Typography */
+            font-family: system-ui, -apple-system, sans-serif !important;
+        }
+        
+        /* Show animation for dropdown */
+        .dropdown-menu:not(.hidden) {
+            opacity: 1 !important;
+            transform: translateY(0) scale(1) !important;
+        }
+        
+        /* Enhanced dropdown button styling within dropdown */
+        .dropdown-menu button {
+            transition: all 0.15s ease !important;
+            border-radius: 8px !important;
+            margin: 2px !important;
+            font-weight: 500 !important;
+            position: relative !important;
+            overflow: hidden !important;
+        }
+        
+        .dropdown-menu button:hover {
+            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+            color: white !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 8px 15px -3px rgba(249, 115, 22, 0.3) !important;
+        }
+        
+        .dropdown-menu button:active {
+            transform: translateY(0) !important;
+            box-shadow: 0 4px 8px -2px rgba(249, 115, 22, 0.4) !important;
+        }
+        
+        /* Quality tier and category badges in dropdown */
+        .dropdown-menu .bg-blue-100 {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%) !important;
+            color: #1e40af !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+            border: 1px solid rgba(59, 130, 246, 0.2) !important;
+        }
+        
+        .dropdown-menu .bg-gray-100 {
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%) !important;
+            color: #374151 !important;
+            font-weight: 500 !important;
+            border-radius: 6px !important;
+            border: 1px solid rgba(107, 114, 128, 0.15) !important;
+        }
+        
+        /* Ensure dropdown triggers have appropriate stacking and enhanced styling */
+        button[onclick*="toggleDropdownMenu"] {
+            position: relative !important;
+            z-index: 10 !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        button[onclick*="toggleDropdownMenu"]:hover {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 8px 15px -3px rgba(249, 115, 22, 0.4) !important;
+        }
+        
+        button[onclick*="toggleDropdownMenu"]:active {
+            transform: translateY(0) !important;
+        }
+        
+        /* Prevent any overflow hidden from affecting dropdowns */
+        .media-card,
+        .movie-card-horizontal,
+        [data-dropdown-boundary] {
+            overflow: visible !important;
+        }
+        
+        /* Ensure containers don't create new stacking contexts that interfere */
+        .flex[style*="overflow-x"],  
+        .grid {
+            contain: layout style !important;
+        }
+        
+        /* Add subtle loading state for dropdown items */
+        .dropdown-menu form {
+            position: relative !important;
+        }
+        
+        .dropdown-menu form::after {
+            content: '' !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            background: linear-gradient(90deg, transparent, rgba(249, 115, 22, 0.1), transparent) !important;
+            transform: translateX(-100%) !important;
+            transition: transform 0.6s ease !important;
+            pointer-events: none !important;
+            opacity: 0 !important;
+        }
+        
+        .dropdown-menu form:hover::after {
+            transform: translateX(100%) !important;
+            opacity: 1 !important;
+        }
+        
+        /* Mobile Navigation Styling */
+        #mobile-nav-menu {
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        #mobile-nav-menu.hidden {
+            animation: slideUp 0.3s ease-in;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+        }
+        
+        /* Ensure mobile nav links have proper touch targets */
+        #mobile-nav-menu a {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+        
+        #mobile-nav-menu a:hover {
+            background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+            transform: translateX(4px);
+        }
+
+        /* Responsive adjustments for mobile */
+        @media (max-width: 640px) {
+            .dropdown-menu {
+                max-width: calc(100vw - 40px) !important;
+                left: 20px !important;
+                right: 20px !important;
+                width: auto !important;
+                border-radius: 16px !important;
+            }
+            
+            .dropdown-menu button {
+                padding: 12px 16px !important;
+                font-size: 16px !important;
+            }
+        }
+        
+        /* Dark mode compatibility (if ever implemented) */
+        @media (prefers-color-scheme: dark) {
+            .dropdown-menu {
+                background: linear-gradient(135deg, #1f2937 0%, #111827 100%) !important;
+                border-color: rgba(75, 85, 99, 0.3) !important;
+                color: #f9fafb !important;
+            }
+        }
+    </style>
 </body>
 </html>

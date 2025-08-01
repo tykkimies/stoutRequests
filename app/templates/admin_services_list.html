@@ -371,6 +371,11 @@ async function editServiceInstance(instanceId) {
         document.getElementById('edit-service-api-key').placeholder = 'API key is saved - leave blank to keep current';
         document.getElementById('edit-service-enabled').checked = instance.is_enabled;
         
+        // Populate default instance checkboxes
+        document.getElementById('edit-service-default-movie').checked = instance.is_default_movie || false;
+        document.getElementById('edit-service-default-tv').checked = instance.is_default_tv || false;
+        document.getElementById('edit-service-4k-default').checked = instance.is_4k_default || false;
+        
         // Parse URL to components if possible
         try {
             const url = new URL(instance.url);

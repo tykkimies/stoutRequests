@@ -761,6 +761,10 @@ class PlexSyncService:
                 PlexLibraryItem.media_type == media_type
             )
             plex_items = {item.tmdb_id for item in self.session.exec(plex_statement)}
+            # Only show debug for single item checks to reduce noise
+            if len(tmdb_ids) == 1:
+                print(f"🔍 [PLEX STATUS DEBUG] Checking {len(tmdb_ids)} {media_type} items: {tmdb_ids}")
+                print(f"🔍 [PLEX STATUS DEBUG] Found {len(plex_items)} items in Plex: {plex_items}")
             
             # For TV shows, check if they're partial
             if media_type == 'tv':
@@ -790,8 +794,14 @@ class PlexSyncService:
                 for tmdb_id in tmdb_ids:
                     if tmdb_id in plex_items:
                         status_map[tmdb_id] = 'in_plex'
+                        # Only show debug for single item checks to reduce noise
+                        if len(tmdb_ids) == 1:
+                            print(f"🔍 [PLEX STATUS DEBUG] Movie {tmdb_id} found in Plex library")
                     else:
                         status_map[tmdb_id] = 'available'  # Default
+                        # Only show debug for single item checks to reduce noise
+                        if len(tmdb_ids) == 1:
+                            print(f"🔍 [PLEX STATUS DEBUG] Movie {tmdb_id} NOT found in Plex library")
             
             # Check which items have been requested
             request_statement = select(MediaRequest).where(

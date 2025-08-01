@@ -1,5 +1,5 @@
 <!-- Recent Requests Expanded Content - Grid Layout -->
-{% from 'macros/status_display.html' import media_status_badge %}
+{% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 {% if results %}
 <div class="w-full">
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7 gap-4" id="results-grid">
@@ -23,7 +23,13 @@
                         <div>
                             <!-- Title and metadata -->
                             <h3 class="text-white font-semibold text-sm mb-1 line-clamp-2">
-                                {{ item.title or item.name }}
+                                {% if item.is_episode_request and item.season_number and item.episode_number %}
+                                    {{ item.title or item.name }} - S{{ "%02d"|format(item.season_number) }}E{{ "%02d"|format(item.episode_number) }}
+                                {% elif item.is_season_request and item.season_number %}
+                                    {{ item.title or item.name }} - Season {{ item.season_number }}
+                                {% else %}
+                                    {{ item.title or item.name }}
+                                {% endif %}
                             </h3>
                             
                             <!-- Metadata row with proper alignment -->
@@ -59,7 +65,7 @@
                             
                             <!-- Status badge button -->
                             <div id="status-badge-{{ item.request_id }}">
-                                {{ media_status_badge(item, style='button', size='md') }}
+                                {{ multi_instance_request_button(item, None, available_instances, style='button', size='md', base_url=base_url) }}
                             </div>
                         </div>
                     </div>
@@ -68,7 +74,7 @@
                 <!-- Top badges (always visible) -->
                 <div class="absolute top-2 left-2">
                     {% if item.status and item.status != 'available' %}
-                    {{ media_status_badge(item, style='overlay', size='sm') }}
+                    {{ multi_instance_request_button(item, None, available_instances, style='overlay', size='sm', base_url=base_url) }}
                     {% endif %}
                 </div>
                 

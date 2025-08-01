@@ -1,4 +1,4 @@
-{% from 'macros/status_display.html' import media_status_badge %}
+{% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 {% if results %}
     {% for item in results %}
         {% if item.media_type in ['movie', 'tv'] %}
@@ -61,7 +61,7 @@
                         <div class="ml-4 flex-shrink-0">
                             {% set status = item.get('status', 'available') %}
                             {% if status != 'not_media' %}
-                            {{ media_status_badge(item, style='search', size='md', status=status, base_url=base_url) }}
+                            {{ multi_instance_request_button(item, None, available_instances, style='search', size='md', status=status, base_url=base_url) }}
                             {% endif %}
                         </div>
                     </div>

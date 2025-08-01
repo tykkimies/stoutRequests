@@ -24,6 +24,13 @@ class ServiceInstance(SQLModel, table=True):
     # Service settings
     is_enabled: bool = Field(default=True)
     
+    # Multi-instance configuration
+    is_default_movie: bool = Field(default=False)  # Default instance for movie requests
+    is_default_tv: bool = Field(default=False)  # Default instance for TV requests
+    is_4k_default: bool = Field(default=False)  # Default instance for 4K requests
+    instance_category: Optional[str] = Field(default=None, max_length=50)  # e.g., "4k", "anime", "foreign"
+    quality_tier: Optional[str] = Field(default="standard", max_length=20)  # "standard", "4k", "hdr"
+    
     # Radarr/Sonarr specific settings (stored as JSON for flexibility)
     settings: Optional[str] = Field(default=None, max_length=2000)  # JSON field
     
@@ -62,6 +69,39 @@ class ServiceInstance(SQLModel, table=True):
         """Set connection test result"""
         self.last_test_result = json.dumps(result)
         self.last_tested_at = datetime.utcnow()
+    
+    def get_effective_category(self) -> str:
+        """Get effective category for this instance"""
+        if self.instance_category:
+            return self.instance_category
+        if self.is_4k_default:
+            return "4k"
+        return "standard"
+    
+    def supports_media_type(self, media_type: str) -> bool:
+        """Check if this instance supports the given media type"""
+        if media_type.lower() == "movie":
+            return self.service_type == ServiceType.RADARR
+        elif media_type.lower() == "tv":
+            return self.service_type == ServiceType.SONARR
+        return False
+    
+    def is_default_for_media_type(self, media_type: str) -> bool:
+        """Check if this is the default instance for the given media type"""
+        if media_type.lower() == "movie":
+            return self.is_default_movie
+        elif media_type.lower() == "tv":
+            return self.is_default_tv
+        return False
+    
+    def get_quality_tier_priority(self) -> int:
+        """Get priority order for quality tiers (higher = better quality)"""
+        tier_priorities = {
+            "standard": 1,
+            "4k": 2,
+            "hdr": 3
+        }
+        return tier_priorities.get(self.quality_tier or "standard", 1)
     
     def mask_sensitive_data(self) -> dict:
         """Return instance dict with masked API key"""
@@ -262,7 +302,6 @@ SONARR_DEFAULT_SETTINGS = {
     # Automation Settings  
     "monitored": True,
     "season_folder": True,
-    "search_for_missing_episodes": True,  # Enable Automatic Search
     "enable_scan": True,  # Enable Scan - refreshes metadata and checks for files
     "enable_automatic_search": True,  # Enable Automatic Search for new releases
     "enable_integration": True  # Enable automatic integration when requests are approved
