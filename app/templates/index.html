@@ -132,46 +132,30 @@
                     <div class="p-6">
                         <!-- Container for search/filter results with infinite scroll support -->
                         <div id="search-results-container">
-                            <div id="search-results-content">
+                            <div id="search-results-content" class="space-y-4">
                                 <!-- Search results loaded here via HTMX -->
                             </div>
                             
-                            <!-- Infinite Scroll Elements for Search/Filter Results -->
-                            <div id="discover-sentinel" class="h-20 flex items-center justify-center">
-                                <!-- This element triggers infinite scroll when it comes into view -->
-                            </div>
-                            
-                            <!-- Loading indicator for infinite scroll -->
-                            <div id="discover-loading" class="htmx-indicator text-center py-8">
-                                <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-                                <p class="text-sm text-gray-500">Loading more results...</p>
+                            <!-- Loading indicator for search infinite scroll -->
+                            <div id="search-loading" class="htmx-indicator text-center py-8">
+                                <div class="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                                <p class="text-sm text-gray-500">Loading more search results...</p>
                                 <div class="mt-2 text-xs text-gray-400">Please wait while we fetch more content</div>
                             </div>
                             
-                            <!-- Error state for infinite scroll -->
-                            <div id="discover-error" class="text-center py-8 hidden">
+                            <!-- Error state for search infinite scroll -->
+                            <div id="search-error" class="text-center py-8 hidden">
                                 <div class="text-red-500 mb-4">
                                     <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
-                                    <p class="text-sm font-medium">Failed to load more content</p>
+                                    <p class="text-sm font-medium">Failed to load more search results</p>
                                 </div>
                                 <button 
-                                    onclick="retryInfiniteScroll()"
-                                    class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                                    onclick="retrySearchInfiniteScroll()"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
                                     Try Again
                                 </button>
-                            </div>
-                            
-                            <!-- End of results indicator -->
-                            <div id="discover-end" class="text-center py-8 text-gray-500 text-sm hidden">
-                                <div class="bg-gray-50 rounded-lg p-6 inline-block">
-                                    <svg class="w-8 h-8 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                    </svg>
-                                    <p class="font-medium text-gray-600">You've reached the end!</p>
-                                    <p class="text-xs text-gray-400 mt-1">All available results have been loaded</p>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -284,18 +268,43 @@ function retryInfiniteScroll() {
     }
 }
 
+// Retry function for search infinite scroll failures
+function retrySearchInfiniteScroll() {
+    const errorDiv = document.getElementById('search-error');
+    const loadingDiv = document.getElementById('search-loading');
+    
+    if (errorDiv) errorDiv.classList.add('hidden');
+    if (loadingDiv) loadingDiv.classList.remove('hidden');
+    
+    // Retry the last search infinite scroll trigger if available
+    if (lastInfiniteScrollTrigger) {
+        htmx.trigger(lastInfiniteScrollTrigger, 'intersect');
+    }
+}
+
 // Enhanced infinite scroll error handling
 document.addEventListener('htmx:responseError', function(event) {
     // Check if this is an infinite scroll request that failed
-    if (event.detail.target && event.detail.target.id && event.detail.target.id.startsWith('load-more-trigger')) {
-        const errorDiv = document.getElementById('discover-error');
-        const loadingDiv = document.getElementById('discover-loading');
-        
-        if (errorDiv) errorDiv.classList.remove('hidden');
-        if (loadingDiv) loadingDiv.classList.add('hidden');
-        
-        // Store the trigger for retry functionality
-        lastInfiniteScrollTrigger = event.detail.target;
+    if (event.detail.target && event.detail.target.id) {
+        if (event.detail.target.id.startsWith('load-more-trigger')) {
+            const errorDiv = document.getElementById('discover-error');
+            const loadingDiv = document.getElementById('discover-loading');
+            
+            if (errorDiv) errorDiv.classList.remove('hidden');
+            if (loadingDiv) loadingDiv.classList.add('hidden');
+            
+            // Store the trigger for retry functionality
+            lastInfiniteScrollTrigger = event.detail.target;
+        } else if (event.detail.target.id.startsWith('search-load-more-trigger')) {
+            const errorDiv = document.getElementById('search-error');
+            const loadingDiv = document.getElementById('search-loading');
+            
+            if (errorDiv) errorDiv.classList.remove('hidden');
+            if (loadingDiv) loadingDiv.classList.add('hidden');
+            
+            // Store the trigger for retry functionality
+            lastInfiniteScrollTrigger = event.detail.target;
+        }
     }
 });
 
@@ -370,6 +379,32 @@ function clearFilters() {
     const form = document.getElementById('discover-filter-form');
     form.reset();
 }
+
+// Auto-refresh functionality for search results status updates
+document.addEventListener('refreshStatusBadges', function(event) {
+    const updatedItemId = event.detail.updatedItemId;
+    const newStatus = event.detail.newStatus;
+    
+    // Find and update search result cards
+    const searchCard = document.getElementById(`search-result-${updatedItemId}-movie`) || 
+                      document.getElementById(`search-result-${updatedItemId}-tv`);
+    
+    if (searchCard) {
+        // Update the request button area to show new status
+        const buttonArea = searchCard.querySelector(`#button-area-${updatedItemId}`);
+        if (buttonArea && newStatus) {
+            let statusHtml;
+            if (newStatus === 'PENDING') {
+                statusHtml = '<div class="bg-yellow-600 text-white px-3 py-1 rounded text-xs font-medium">⏳ Pending</div>';
+            } else if (newStatus === 'APPROVED') {
+                statusHtml = '<div class="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium">✓ Approved</div>';
+            }
+            if (statusHtml) {
+                buttonArea.innerHTML = statusHtml;
+            }
+        }
+    }
+});
 
 // Auto-expand category if specified in context (for direct URL access)
 {% if expand_category %}

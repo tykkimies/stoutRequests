@@ -92,7 +92,7 @@
     <!-- Infinite Scroll Trigger for first page -->
     {% if has_more %}
     <div id="load-more-trigger-page-1"
-        hx-get="{{ base_url|default('') }}{% if current_query_params and current_query_params.startswith('media_type=') %}/discover?{{ current_query_params }}&page=2{% else %}/discover/category/more?{% if custom_category_id %}custom_category_id={{ custom_category_id }}&type={{ media_type|default('movie') }}&page=2{% elif current_db_category_type %}db_category_type={{ current_db_category_type }}&db_category_sort={{ current_db_category_sort }}&type={{ category.type|default('movie') }}&page=2{% if current_rating_min %}&rating_min={{ current_rating_min }}&rating_source={{ current_rating_source }}{% endif %}{% else %}type={{ category.type|default('movie') }}&sort={{ category.sort|default('trending') }}&page=2{% endif %}&limit=40{% endif %}"
+        hx-get="{{ base_url|default('') }}/discover/category/more?{{ current_query_params|default('media_type=movie&type=movie&sort=trending') }}&page=2"
         hx-target="#results-grid"
         hx-swap="beforeend"
         hx-trigger="intersect threshold:0.1 once"

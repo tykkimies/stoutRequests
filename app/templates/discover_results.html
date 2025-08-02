@@ -79,7 +79,7 @@
     <!-- HTMX-based Infinite scroll trigger for continued loading -->
     {% if has_more %}
     <div id="load-more-trigger-page-{{ current_page|default(page) }}"
-        hx-get="{{ base_url }}{% if current_query_params.startswith('media_type=') %}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}{% else %}/discover/category/more?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}{% endif %}"
+        hx-get="{{ base_url }}/discover/category/more?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}"
         hx-target="#results-grid"
         hx-swap="beforeend" 
         hx-trigger="intersect threshold:0.3 once"
@@ -107,7 +107,7 @@
             
             {% if (current_page|default(page)) < total_pages %}
             <button 
-                hx-get="{{ base_url }}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}"
+                hx-get="{{ base_url }}/discover/category/more?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}"
                 hx-target="#discover-results"
                 class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 Next
@@ -156,7 +156,7 @@
                     
                     {% if (current_page|default(page)) < total_pages %}
                     <button 
-                        hx-get="{{ base_url }}/discover?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}"
+                        hx-get="{{ base_url }}/discover/category/more?{{ current_query_params }}&page={{ (current_page|default(page)) + 1 }}"
                         hx-target="#discover-results"
                         class="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0">
                         <span class="sr-only">Next</span>

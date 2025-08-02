@@ -5496,11 +5496,8 @@ async def start_scheduler(
     try:
         from ..services.background_jobs import background_jobs
         
-        # Stop and restart the scheduler to ensure clean state
-        if background_jobs.running:
-            background_jobs.stop()
-        
-        background_jobs.start()
+        # Restart the scheduler with a clean executor
+        background_jobs.restart()
         
         if request.headers.get("HX-Request"):
             return HTMLResponse(f'''

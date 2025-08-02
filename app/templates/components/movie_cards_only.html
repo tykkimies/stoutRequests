@@ -79,7 +79,7 @@
 <!-- Infinite scroll trigger for continued loading -->
 {% if has_more %}
 <div id="load-more-trigger-page-{{ current_page|default(1) }}"
-    hx-get="{{ base_url|default('') }}{% if current_query_params and current_query_params.startswith('media_type=') %}/discover?{{ current_query_params }}&page={{ (current_page|default(1)) + 1 }}{% else %}/discover/category/more?{{ current_query_params|default('type=movie&sort=trending') }}&page={{ (current_page|default(1)) + 1 }}{% endif %}"
+    hx-get="{{ base_url|default('') }}/discover/category/more?{{ current_query_params|default('media_type=' + (media_type|default('movie')) + '&sort=trending') }}&page={{ (current_page|default(1)) + 1 }}"
     hx-target="#results-grid"
     hx-swap="beforeend" 
     hx-trigger="intersect threshold:0.3 once"

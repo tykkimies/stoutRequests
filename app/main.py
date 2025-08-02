@@ -38,6 +38,81 @@ def convert_rating_to_tmdb_filter(rating_min: str, rating_source: str = None) ->
         return None
 
 
+def build_discover_query_params(
+    media_type: str = "movie",
+    content_sources: list = None,
+    genres: list = None,
+    rating_source: str = "tmdb",
+    rating_min: str = "",
+    year_from: str = "",
+    year_to: str = "",
+    studios: list = None,
+    streaming: list = None,
+    custom_category_id: str = "",
+    db_category_type: str = "",
+    db_category_sort: str = "",
+    type: str = "",
+    sort: str = "",
+    limit: int = 20
+) -> str:
+    """
+    Standardized function to build query parameters for infinite scroll pagination.
+    Ensures all filter parameters are consistently included and properly formatted.
+    """
+    params = []
+    
+    # Always include media_type as the first parameter
+    if media_type:
+        params.append(f"media_type={media_type}")
+    
+    # Handle different content source types
+    if custom_category_id:
+        params.append(f"custom_category_id={custom_category_id}")
+    elif db_category_type and db_category_sort:
+        params.append(f"db_category_type={db_category_type}")
+        params.append(f"db_category_sort={db_category_sort}")
+    elif type and sort:
+        params.append(f"type={type}")
+        params.append(f"sort={sort}")
+    
+    # Add content sources
+    if content_sources:
+        for cs in content_sources:
+            params.append(f"content_sources={cs}")
+    
+    # Add genres
+    if genres:
+        for g in genres:
+            params.append(f"genres={g}")
+    
+    # Add rating filter
+    if rating_min:
+        params.append(f"rating_min={rating_min}")
+        params.append(f"rating_source={rating_source}")
+    
+    # Add year filters
+    if year_from:
+        params.append(f"year_from={year_from}")
+    if year_to:
+        params.append(f"year_to={year_to}")
+    
+    # Add studios
+    if studios:
+        for s in studios:
+            params.append(f"studios={s}")
+    
+    # Add streaming services
+    if streaming:
+        for stream in streaming:
+            params.append(f"streaming={stream}")
+    
+    # Add limit if specified
+    if limit and limit != 20:  # Only add if different from default
+        params.append(f"limit={limit}")
+    
+    return "&".join(params)
+
+
 async def get_instances_for_media_type(user_id: int, media_type: str) -> list:
     """
     Helper function to get available instances for a user and media type.
@@ -523,13 +598,17 @@ async def _handle_custom_category_more(
             "current_page": page,
             "page": page,
             "total_pages": results.get('total_pages', 1),
-            "current_query_params": f"media_type={custom_media_type}&custom_category_id={custom_category_id}" + 
-                                   (f"&{'&'.join([f'genres={g}' for g in filters.get('genres', [])])}" if filters.get('genres') else "") +
-                                   (f"&rating_min={filters.get('rating_min')}&rating_source={filters.get('rating_source')}" if filters.get('rating_min') else "") +
-                                   (f"&year_from={filters.get('year_from')}" if filters.get('year_from') else "") +
-                                   (f"&year_to={filters.get('year_to')}" if filters.get('year_to') else "") +
-                                   (f"&{'&'.join([f'studios={s}' for s in filters.get('studios', [])])}" if filters.get('studios') else "") +
-                                   (f"&{'&'.join([f'streaming={s}' for s in filters.get('streaming', [])])}" if filters.get('streaming') else ""),
+            "current_query_params": build_discover_query_params(
+                media_type=custom_media_type,
+                genres=filters.get('genres', []),
+                rating_source=filters.get('rating_source', 'tmdb'),
+                rating_min=filters.get('rating_min', ''),
+                year_from=filters.get('year_from', ''),
+                year_to=filters.get('year_to', ''),
+                studios=filters.get('studios', []),
+                streaming=filters.get('streaming', []),
+                custom_category_id=custom_category_id
+            ),
             "current_content_sources": filters.get('content_sources', []),
             "current_genres": filters.get('genres', []),
             "current_rating_min": filters.get('rating_min', ""),
@@ -1102,8 +1181,13 @@ async def filter_database_category(
                         "current_page": page,
                         "page": page,
                         "total_pages": 1000 if has_more else page,
-                        "current_query_params": f"media_type={media_type}&db_category_type={db_category_type}&db_category_sort={db_category_sort}" + 
-                                               (f"&rating_min={rating_min}&rating_source={rating_source}" if rating_min else ""),
+                        "current_query_params": build_discover_query_params(
+                            media_type=media_type,
+                            rating_source=rating_source,
+                            rating_min=rating_min,
+                            db_category_type=db_category_type,
+                            db_category_sort=db_category_sort
+                        ),
                         "base_url": SettingsService.get_base_url(session),
                         "available_instances": available_instances
                     }
@@ -1327,6 +1411,19 @@ async def discover_page(
     # Get available instances for the user and media type
     available_instances = await get_instances_for_media_type(current_user.id if current_user else None, media_type)
     
+    # CRITICAL FIX: Define actual_media_type variable and handle "all" conversion
+    # Convert "all" media type to "mixed" for internal processing
+    if media_type == "all":
+        actual_media_type = "mixed"
+    else:
+        actual_media_type = media_type
+    print(f"🎯 PAGE DEBUG: page={page}, media_type='{media_type}', actual_media_type='{actual_media_type}', HX-Request={request.headers.get('HX-Request')}")
+    print(f"🔍 FILTER BAR DEBUG: content_sources={content_sources}, genres={genres}")
+    if page > 1:
+        print(f"🔍 INFINITE SCROLL DEBUG: This is page {page}, checking why media_type={media_type} instead of mixed")
+    else:
+        print(f"🔍 FIRST PAGE DEBUG: This is page 1, should generate correct infinite scroll URL with media_type={actual_media_type}")
+    
     try:
         # Handle filtering for database categories (recent requests, recently added, etc.)
         if db_category_type and db_category_sort:
@@ -1448,7 +1545,7 @@ async def discover_page(
             print(f"🔍 Using TMDB Discover endpoint (no content sources) - Genres: {genres}, Rating: {rating_filter}")
             
             # Use TMDB discover endpoint with all filters - this searches ALL content, not just popular
-            if media_type == "mixed":
+            if actual_media_type == "mixed":
                 # For mixed media type, fetch BOTH movies and TV shows, then combine and sort by rating
                 print(f"🎯 Mixed media: fetching both movies and TV for page {page}")
                 
@@ -1569,7 +1666,7 @@ async def discover_page(
             else:
                 # Single media type - normal pagination
                 try:
-                    if media_type == "movie":
+                    if actual_media_type == "movie":
                         print(f"🎯 Single movie mode: Calling discover_movies with vote_average_gte={rating_filter}")
                         discover_results = tmdb_service.discover_movies(
                             page=page,
@@ -1669,7 +1766,7 @@ async def discover_page(
                     return {"results": [], "total_pages": 1, "total_results": 0}
             
             # Determine which media types to fetch
-            media_types_to_fetch = ["movie", "tv"] if media_type == "mixed" else [media_type]
+            media_types_to_fetch = ["movie", "tv"] if actual_media_type == "mixed" else [actual_media_type]
             
             # Fetch from each selected content source
             seen_ids = set()  # For deduplication
@@ -1773,7 +1870,7 @@ async def discover_page(
             sync_service = PlexSyncService(session)
             
             # For mixed content, we need to check each item's media_type individually
-            if media_type == "mixed":
+            if actual_media_type == "mixed":
                 for item in results.get('results', []):
                     item_media_type = item.get('media_type')
                     # Check status for this specific item and media type
@@ -1784,12 +1881,12 @@ async def discover_page(
             else:
                 # For single media type, batch check all items
                 tmdb_ids = [item['id'] for item in results.get('results', [])]
-                status_map = sync_service.check_items_status(tmdb_ids, media_type)
+                status_map = sync_service.check_items_status(tmdb_ids, actual_media_type)
                 
                 # Add status information to each item
                 for item in results.get('results', []):
                     if 'media_type' not in item:
-                        item['media_type'] = media_type  # Ensure media_type is set
+                        item['media_type'] = actual_media_type  # Ensure media_type is set
                     status = status_map.get(item['id'], 'available')
                     item['status'] = status
                     item['in_plex'] = status == 'in_plex'
@@ -1797,7 +1894,7 @@ async def discover_page(
             print(f"Warning: Fast status check failed, falling back to old method: {sync_error}")
             # Fallback to the old method for now
             for item in results.get('results', []):
-                item_media_type = item.get('media_type', media_type)
+                item_media_type = item.get('media_type', actual_media_type)
                 if 'media_type' not in item:
                     item['media_type'] = item_media_type
                 item['in_plex'] = plex_service.check_media_in_library(item['id'], item_media_type)
@@ -1833,15 +1930,21 @@ async def discover_page(
                         "current_year_to": year_to,
                         "current_studios": studios,
                         "current_streaming": streaming,
-                        # Build query params for infinite scroll - same as movie_cards_only.html
-                        "current_query_params": f"media_type={media_type}" + 
-                                               (f"&{'&'.join([f'content_sources={cs}' for cs in content_sources])}" if content_sources else "") +
-                                               (f"&{'&'.join([f'genres={g}' for g in genres])}" if genres else "") +
-                                               (f"&rating_min={rating_min}&rating_source={rating_source}" if rating_min else "") +
-                                               (f"&year_from={year_from}" if year_from else "") +
-                                               (f"&year_to={year_to}" if year_to else "") +
-                                               (f"&{'&'.join([f'studios={s}' for s in studios])}" if studios else "") +
-                                               (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else ""),
+                        # Build query params for infinite scroll using standardized function
+                        "current_query_params": (lambda params: (print(f"🔍 QUERY PARAMS DEBUG: {params}"), params)[1])(
+                            build_discover_query_params(
+                                media_type=actual_media_type,
+                                content_sources=content_sources,
+                                genres=genres,
+                                rating_source=rating_source,
+                                rating_min=rating_min,
+                                year_from=year_from,
+                                year_to=year_to,
+                                studios=studios,
+                                streaming=streaming,
+                                limit=limit
+                            )
+                        ),
                         "base_url": base_url,
                         "available_instances": available_instances
                     }
@@ -1868,15 +1971,21 @@ async def discover_page(
                         "current_year_to": year_to,
                         "current_studios": studios,
                         "current_streaming": streaming,
-                        # Build query params for infinite scroll
-                        "current_query_params": f"media_type={media_type}" + 
-                                               (f"&{'&'.join([f'content_sources={cs}' for cs in content_sources])}" if content_sources else "") +
-                                               (f"&{'&'.join([f'genres={g}' for g in genres])}" if genres else "") +
-                                               (f"&rating_min={rating_min}&rating_source={rating_source}" if rating_min else "") +
-                                               (f"&year_from={year_from}" if year_from else "") +
-                                               (f"&year_to={year_to}" if year_to else "") +
-                                               (f"&{'&'.join([f'studios={s}' for s in studios])}" if studios else "") +
-                                               (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else ""),
+                        # Build query params for infinite scroll using standardized function
+                        "current_query_params": (lambda params: (print(f"🔍 QUERY PARAMS DEBUG: {params}"), params)[1])(
+                            build_discover_query_params(
+                                media_type=actual_media_type,
+                                content_sources=content_sources,
+                                genres=genres,
+                                rating_source=rating_source,
+                                rating_min=rating_min,
+                                year_from=year_from,
+                                year_to=year_to,
+                                studios=studios,
+                                streaming=streaming,
+                                limit=limit
+                            )
+                        ),
                         "base_url": SettingsService.get_base_url(session),
                         "available_instances": available_instances
                     }
@@ -1913,15 +2022,21 @@ async def discover_page(
                         "current_year_to": year_to,
                         "current_studios": studios,
                         "current_streaming": streaming,
-                        # Build query params for infinite scroll
-                        "current_query_params": f"media_type={media_type}" + 
-                                               (f"&{'&'.join([f'content_sources={cs}' for cs in content_sources])}" if content_sources else "") +
-                                               (f"&{'&'.join([f'genres={g}' for g in genres])}" if genres else "") +
-                                               (f"&rating_min={rating_min}&rating_source={rating_source}" if rating_min else "") +
-                                               (f"&year_from={year_from}" if year_from else "") +
-                                               (f"&year_to={year_to}" if year_to else "") +
-                                               (f"&{'&'.join([f'studios={s}' for s in studios])}" if studios else "") +
-                                               (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else ""),
+                        # Build query params for infinite scroll using standardized function
+                        "current_query_params": (lambda params: (print(f"🔍 QUERY PARAMS DEBUG: {params}"), params)[1])(
+                            build_discover_query_params(
+                                media_type=actual_media_type,
+                                content_sources=content_sources,
+                                genres=genres,
+                                rating_source=rating_source,
+                                rating_min=rating_min,
+                                year_from=year_from,
+                                year_to=year_to,
+                                studios=studios,
+                                streaming=streaming,
+                                limit=limit
+                            )
+                        ),
                         "base_url": base_url
                     }
                 )
@@ -2589,7 +2704,11 @@ async def discover_category(
                         "current_studios": [],
                         "current_streaming": [],
                         # Add query params for infinite scroll URL consistency
-                        "current_query_params": f"type={type}&sort={sort}&limit={limit}"
+                        "current_query_params": build_discover_query_params(
+                            type=type,
+                            sort=sort,
+                            limit=limit
+                        )
                     })
                 
                 # Use instance-aware response for templates that need multi-instance support
@@ -4007,13 +4126,17 @@ async def discover_category_expanded(
                         "current_page": page,
                         "page": page,
                         "total_pages": results.get('total_pages', 1),
-                        "current_query_params": f"media_type={custom_media_type}&custom_category_id={custom_category_id}" + 
-                                               (f"&{'&'.join([f'genres={g}' for g in filters.get('genres', [])])}" if filters.get('genres') else "") +
-                                               (f"&rating_min={filters.get('rating_min')}&rating_source={filters.get('rating_source')}" if filters.get('rating_min') else "") +
-                                               (f"&year_from={filters.get('year_from')}" if filters.get('year_from') else "") +
-                                               (f"&year_to={filters.get('year_to')}" if filters.get('year_to') else "") +
-                                               (f"&{'&'.join([f'studios={s}' for s in filters.get('studios', [])])}" if filters.get('studios') else "") +
-                                               (f"&{'&'.join([f'streaming={s}' for s in filters.get('streaming', [])])}" if filters.get('streaming') else ""),
+                        "current_query_params": build_discover_query_params(
+                            media_type=custom_media_type,
+                            genres=filters.get('genres', []),
+                            rating_source=filters.get('rating_source', 'tmdb'),
+                            rating_min=filters.get('rating_min', ''),
+                            year_from=filters.get('year_from', ''),
+                            year_to=filters.get('year_to', ''),
+                            studios=filters.get('studios', []),
+                            streaming=filters.get('streaming', []),
+                            custom_category_id=custom_category_id
+                        ),
                         # Add infinite scroll context for custom categories with actual saved filters
                         "current_content_sources": filters.get('content_sources', []),
                         "current_genres": filters.get('genres', []),
@@ -4320,6 +4443,7 @@ async def discover_category_expanded(
             {
                 "request": request,
                 "current_user": current_user,
+                "session": session,  # Add session for instance caching
                 "results": limited_results,
                 "media_type": type,  # Add media_type for template consistency
                 "category": {
@@ -4561,6 +4685,7 @@ async def discover_custom_category_route(
 async def discover_category_more(
     request: Request,
     type: str = "movie",
+    media_type: str = "",  # Support both type and media_type for backwards compatibility
     sort: str = "trending",
     content_sources: list[str] = Query(default=[]),
     genres: list[str] = Query(default=[]),
@@ -4617,11 +4742,24 @@ async def discover_category_more(
             print(f"❌ Template error in discover_category_more: {template_error}")
             return HTMLResponse('<div class="text-center py-8 text-red-600">Template service temporarily unavailable.</div>')
         
+        # CRITICAL FIX: Handle media_type parameter precedence
+        # If media_type is provided, use it; otherwise fall back to type parameter
+        actual_media_type = media_type if media_type else type
+        print(f"🔍 CATEGORY MORE DEBUG - type='{type}', media_type='{media_type}', actual='{actual_media_type}', page={page}")
+        
+        print(f"🔍 INFINITE SCROLL MEDIA TYPE DEBUG:")
+        print(f"  - Received media_type parameter: '{media_type}'") 
+        print(f"  - Received type parameter: '{type}'")
+        print(f"  - Final actual_media_type: '{actual_media_type}'")
+        print(f"  - Is mixed content? {actual_media_type == 'mixed'}")
+        print(f"  - Page: {page}")
+        print(f"  - Applied filters: genres={genres}, rating_min={rating_min}, year_from={year_from}, year_to={year_to}")
+        
         # Handle different category types first (same as expanded endpoint)
         if db_category_type and db_category_sort:
             # Database categories (recent requests, recommendations, recently added)
             return await filter_database_category(
-                request, db_category_type, db_category_sort, type, 
+                request, db_category_type, db_category_sort, actual_media_type, 
                 genres, rating_min, page, limit,
                 current_user, session, tmdb_service,
                 rating_source, year_from, year_to, studios, streaming,
@@ -4762,7 +4900,9 @@ async def discover_category_more(
                         'total_results': movie_results.get('total_results', 0) + tv_results.get('total_results', 0)
                     }
             
-                limited_results = results.get('results', [])[:limit]
+                # CRITICAL FIX: Don't artificially limit results - TMDB already paginates properly
+                # The results from TMDB are already limited to ~20 items per page by the API
+                limited_results = results.get('results', [])
                 has_more = page < results.get('total_pages', 1) and len(limited_results) > 0
                 
                 print(f"✅ Custom category infinite scroll success:")
@@ -4824,13 +4964,17 @@ async def discover_category_more(
                         "current_page": page,
                         "page": page,
                         "total_pages": results.get('total_pages', 1),
-                        "current_query_params": f"media_type={custom_media_type}&custom_category_id={custom_category_id}" + 
-                                               (f"&{'&'.join([f'genres={g}' for g in filters.get('genres', [])])}" if filters.get('genres') else "") +
-                                               (f"&rating_min={filters.get('rating_min')}&rating_source={filters.get('rating_source')}" if filters.get('rating_min') else "") +
-                                               (f"&year_from={filters.get('year_from')}" if filters.get('year_from') else "") +
-                                               (f"&year_to={filters.get('year_to')}" if filters.get('year_to') else "") +
-                                               (f"&{'&'.join([f'studios={s}' for s in filters.get('studios', [])])}" if filters.get('studios') else "") +
-                                               (f"&{'&'.join([f'streaming={s}' for s in filters.get('streaming', [])])}" if filters.get('streaming') else ""),
+                        "current_query_params": build_discover_query_params(
+                            media_type=custom_media_type,
+                            genres=filters.get('genres', []),
+                            rating_source=filters.get('rating_source', 'tmdb'),
+                            rating_min=filters.get('rating_min', ''),
+                            year_from=filters.get('year_from', ''),
+                            year_to=filters.get('year_to', ''),
+                            studios=filters.get('studios', []),
+                            streaming=filters.get('streaming', []),
+                            custom_category_id=custom_category_id
+                        ),
                         "base_url": base_url,
                         "media_type": custom_media_type  # Add media type for instance selection
                     },
@@ -4867,12 +5011,12 @@ async def discover_category_more(
         total_pages = 1
         
         # Get results based on category type (SAME LOGIC AS MAIN CATEGORY ENDPOINT)
-        if type in ['recently-added', 'recent-requests']:
+        if actual_media_type in ['recently-added', 'recent-requests']:
             # Database categories - get from Plex sync data
             plex_sync_service = PlexSyncService(session)
-            if type == 'recently-added':
+            if actual_media_type == 'recently-added':
                 results = plex_sync_service.get_recently_added_media(limit=limit, offset=(page-1)*limit)
-            elif type == 'recent-requests':
+            elif actual_media_type == 'recent-requests':
                 # Get recent requests from database
                 from sqlmodel import select
                 from .models.request import Request as MediaRequest
@@ -4881,7 +5025,7 @@ async def discover_category_more(
                 results = [{'id': r.tmdb_id, 'title': r.title, 'media_type': r.media_type} for r in db_results]
             # For database results, estimate has_more based on result count
             total_pages = 1000 if len(results) >= limit else page
-        elif type == 'recommendations' and sort == 'personalized':
+        elif actual_media_type == 'recommendations' and sort == 'personalized':
             # Handle personalized recommendations for infinite scroll
             try:
                 # Use the same logic as discover_category_expanded but with pagination
@@ -5014,29 +5158,40 @@ async def discover_category_more(
             
             try:
                 # CRITICAL FIX: Added debug logging for pure category call
-                print(f"🔍 PURE CATEGORY DEBUG - Pure category {sort} for {type}")
+                print(f"🔍 PURE CATEGORY DEBUG - Pure category {sort} for {actual_media_type}")
                 print(f"🔍 PURE CATEGORY DEBUG - Year filters: {year_from_filter} to {year_to_filter}")
                 
                 # CRITICAL FIX: Handle mixed media type correctly for date parameters
                 # For mixed media, we need to pass BOTH movie and TV date parameters
-                if type == "mixed":
+                if actual_media_type == "mixed":
                     movie_date_gte = year_from_filter
                     movie_date_lte = year_to_filter
                     tv_date_gte = year_from_filter
                     tv_date_lte = year_to_filter
-                elif type == "movie":
+                elif actual_media_type == "movie":
                     movie_date_gte = year_from_filter
                     movie_date_lte = year_to_filter
                     tv_date_gte = None
                     tv_date_lte = None
-                else:  # type == "tv"
+                else:  # actual_media_type == "tv"
                     movie_date_gte = None
                     movie_date_lte = None
                     tv_date_gte = year_from_filter
                     tv_date_lte = year_to_filter
                 
+                print(f"🔍 CALLING get_category_content with:")
+                print(f"  - media_type='{actual_media_type}'")
+                print(f"  - category='{sort}'")
+                print(f"  - page={page}")
+                print(f"  - with_genres='{genre_filter}'")
+                print(f"  - rating_filter={rating_filter}")
+                print(f"  - company_filter='{company_filter}'")
+                print(f"  - streaming_filter='{streaming_filter}'")
+                print(f"  - movie_date_gte={movie_date_gte}, movie_date_lte={movie_date_lte}")
+                print(f"  - tv_date_gte={tv_date_gte}, tv_date_lte={tv_date_lte}")
+                
                 data = tmdb_service.get_category_content(
-                    media_type=type,
+                    media_type=actual_media_type,
                     category=sort,
                     page=page,
                     with_genres=genre_filter,
@@ -5049,32 +5204,52 @@ async def discover_category_more(
                     first_air_date_gte=tv_date_gte,
                     first_air_date_lte=tv_date_lte
                 )
+                
+                print(f"🔍 get_category_content RESPONSE:")
+                print(f"  - Total results: {len(data.get('results', []))}")
+                if data.get('results'):
+                    movie_count = len([r for r in data.get('results', []) if r.get('media_type') == 'movie' or ('title' in r and 'release_date' in r)])
+                    tv_count = len([r for r in data.get('results', []) if r.get('media_type') == 'tv' or ('name' in r and 'first_air_date' in r)])
+                    print(f"  - Movies: {movie_count}")
+                    print(f"  - TV shows: {tv_count}")
+                    print(f"  - First 3 items:")
+                    for i, item in enumerate(data.get('results', [])[:3]):
+                        title = item.get('title', item.get('name', 'Unknown'))
+                        media_type = item.get('media_type', 'NOT SET')
+                        has_title = 'title' in item
+                        has_name = 'name' in item
+                        print(f"    [{i+1}] {title} -> media_type: {media_type}, has_title: {has_title}, has_name: {has_name}")
             except ValueError as e:
                 print(f"🔍 EXPANDED: Category '{sort}' not found in unified system, falling back to popular")
                 # Fallback for unknown categories
                 # CRITICAL FIX: Added debug logging for fallback in pure category
-                print(f"🔍 PURE CATEGORY FALLBACK DEBUG - Falling back to popular for {type}")
+                print(f"🔍 PURE CATEGORY FALLBACK DEBUG - Falling back to popular for {actual_media_type}")
                 print(f"🔍 PURE CATEGORY FALLBACK DEBUG - Year filters: {year_from_filter} to {year_to_filter}")
                 
                 # CRITICAL FIX: Handle mixed media type correctly for date parameters in fallback too
-                if type == "mixed":
+                if actual_media_type == "mixed":
                     movie_date_gte = year_from_filter
                     movie_date_lte = year_to_filter
                     tv_date_gte = year_from_filter
                     tv_date_lte = year_to_filter
-                elif type == "movie":
+                elif actual_media_type == "movie":
                     movie_date_gte = year_from_filter
                     movie_date_lte = year_to_filter
                     tv_date_gte = None
                     tv_date_lte = None
-                else:  # type == "tv"
+                else:  # actual_media_type == "tv"
                     movie_date_gte = None
                     movie_date_lte = None
                     tv_date_gte = year_from_filter
                     tv_date_lte = year_to_filter
                 
+                print(f"🔍 FALLBACK CALLING get_category_content with:")
+                print(f"  - media_type='{actual_media_type}'")
+                print(f"  - category='popular' (fallback)")
+                print(f"  - page={page}")
+                
                 data = tmdb_service.get_category_content(
-                    media_type=type,
+                    media_type=actual_media_type,
                     category="popular",
                     page=page,
                     with_genres=genre_filter,
@@ -5087,15 +5262,57 @@ async def discover_category_more(
                     first_air_date_gte=tv_date_gte,
                     first_air_date_lte=tv_date_lte
                 )
+                
+                print(f"🔍 FALLBACK get_category_content RESPONSE:")
+                print(f"  - Total results: {len(data.get('results', []))}")
+                if data.get('results'):
+                    movie_count = len([r for r in data.get('results', []) if r.get('media_type') == 'movie' or ('title' in r and 'release_date' in r)])
+                    tv_count = len([r for r in data.get('results', []) if r.get('media_type') == 'tv' or ('name' in r and 'first_air_date' in r)])
+                    print(f"  - Movies: {movie_count}")
+                    print(f"  - TV shows: {tv_count}")
             
             results = data.get('results', [])
             total_pages = data.get('total_pages', 1)
         
-        # Add media_type to all results for consistency
+        print(f"🔍 MIXED CONTENT RESULTS DEBUG:")
+        print(f"  - Raw results from tmdb_service: {len(results)}")
+        if results:
+            pre_movie_count = len([r for r in results if r.get('media_type') == 'movie' or ('title' in r and 'release_date' in r)])
+            pre_tv_count = len([r for r in results if r.get('media_type') == 'tv' or ('name' in r and 'first_air_date' in r)])
+            print(f"  - Before processing - Movies: {pre_movie_count}, TV shows: {pre_tv_count}")
+        
+        # Add media_type to all results for consistency and fix missing media_type issue
         for item in results:
-            if 'media_type' not in item:
-                item['media_type'] = type
-            # Skip Plex checks for performance
+            if 'media_type' not in item or item.get('media_type') is None:
+                # CRITICAL FIX: Ensure all items have proper media_type set
+                if actual_media_type == "mixed":
+                    # For mixed content, determine media_type from TMDB data structure
+                    if 'title' in item and 'release_date' in item:
+                        item['media_type'] = 'movie'
+                        print(f"  - Setting media_type=movie for: {item.get('title', 'Unknown')}")
+                    elif 'name' in item and 'first_air_date' in item:
+                        item['media_type'] = 'tv'
+                        print(f"  - Setting media_type=tv for: {item.get('name', 'Unknown')}")
+                    else:
+                        # Fallback based on which fields are present
+                        item['media_type'] = 'movie' if 'title' in item else 'tv'
+                        print(f"  - Fallback media_type={item['media_type']} for: {item.get('title', item.get('name', 'Unknown'))}")
+                else:
+                    item['media_type'] = actual_media_type
+                    print(f"  - Setting media_type={actual_media_type} for: {item.get('title', item.get('name', 'Unknown'))}")
+        
+        print(f"🔍 FINAL MIXED CONTENT RESULTS:")
+        print(f"  - Total results: {len(results)}")
+        if results:
+            final_movie_count = len([r for r in results if r.get('media_type') == 'movie'])
+            final_tv_count = len([r for r in results if r.get('media_type') == 'tv'])
+            print(f"  - Final count - Movies: {final_movie_count}, TV shows: {final_tv_count}")
+            print(f"  - Sample results:")
+            for i, item in enumerate(results[:5]):
+                title = item.get('title', item.get('name', 'Unknown'))
+                media_type = item.get('media_type', 'NOT SET')
+                print(f"    [{i+1}] {title} -> {media_type}")
+            # Skip Plex checks for performance in infinite scroll
             item['in_plex'] = False
         
         # Check if there are more results available using TMDB pagination
@@ -5106,21 +5323,41 @@ async def discover_category_more(
         context = {
             "request": request,
             "current_user": current_user,  # CRITICAL FIX: Add current_user to context
+            "session": session,  # CRITICAL FIX: Add session for instance loading
+            "media_type": actual_media_type,  # CRITICAL FIX: Add media_type for instance selection
             "results": results,
             "base_url": base_url,
             "has_more": has_more,
             "current_page": page,
             "called_from_expanded": False,  # Allow infinite scroll trigger in movie_cards_only.html
-            # Pass all filter parameters for the next page
-            "current_query_params": f"type={type}&sort={sort}&limit={limit}" + 
-                                   (f"&{'&'.join([f'content_sources={cs}' for cs in content_sources])}" if content_sources else "") +
-                                   (f"&{'&'.join([f'genres={g}' for g in genres])}" if genres else "") +
-                                   (f"&rating_min={rating_min}&rating_source={rating_source}" if rating_min else "") +
-                                   (f"&year_from={year_from}" if year_from else "") +
-                                   (f"&year_to={year_to}" if year_to else "") +
-                                   (f"&{'&'.join([f'studios={s}' for s in studios])}" if studios else "") +
-                                   (f"&{'&'.join([f'streaming={s}' for s in streaming])}" if streaming else "")
+            # Pass all filter parameters for the next page using standardized function
+            "current_query_params": build_discover_query_params(
+                media_type=actual_media_type,  # Use actual_media_type for consistency
+                type=type,  # Keep original type parameter for backwards compatibility
+                sort=sort,
+                content_sources=content_sources,
+                genres=genres,
+                rating_source=rating_source,
+                rating_min=rating_min,
+                year_from=year_from,
+                year_to=year_to,
+                studios=studios,
+                streaming=streaming,
+                limit=limit
+            )
         }
+        
+        # Add debugging for query params
+        query_params = context.get("current_query_params", "")
+        print(f"🔍 INFINITE SCROLL QUERY PARAMS DEBUG:")
+        print(f"  - actual_media_type: '{actual_media_type}'")
+        print(f"  - Generated query params: '{query_params}'")
+        print(f"  - Contains media_type=mixed: {'media_type=mixed' in query_params}")
+        print(f"  - Query params length: {len(query_params)}")
+        print(f"🔍 FULL TEMPLATE CONTEXT:")
+        print(f"  - has_more: {context.get('has_more')}")
+        print(f"  - current_page: {context.get('current_page')}")
+        print(f"  - Template will receive current_query_params: '{query_params}'")
         
         return await create_template_response_with_instances("components/movie_cards_only.html", context)
         
@@ -5146,6 +5383,7 @@ async def search_page(
     request: Request,
     q: str = "",
     page: int = 1,
+    offset: int = 0,
     current_user: User | None = Depends(get_current_user_optional),
     session: Session = Depends(get_session)
 ):
@@ -5176,8 +5414,24 @@ async def search_page(
     plex_service = PlexService(session)
     
     try:
+        # For infinite scroll, convert offset to page number (TMDB uses page-based pagination)
+        # TMDB typically returns 20 results per page, but let's be more robust
+        if offset > 0:
+            # Calculate which page we need based on offset
+            # Assume 20 results per page (TMDB standard)
+            page = (offset // 20) + 1
+        
+        print(f"🔍 SEARCH DEBUG: q='{q}', offset={offset}, calculated_page={page}")
+        
         # Search TMDB
         search_results = tmdb_service.search_multi(q, page)
+        
+        print(f"🔍 SEARCH DEBUG: TMDB returned {len(search_results.get('results', []))} results, page {search_results.get('page', 1)} of {search_results.get('total_pages', 1)}")
+        print(f"🔍 SEARCH DEBUG: First few result IDs: {[item.get('id') for item in search_results.get('results', [])][:3]}")
+        
+        # Debug: Check if we're actually getting different results
+        if offset > 0:
+            print(f"🔍 SEARCH DEBUG: This should be page {page}, expecting different results from page 1")
         
         # Fast status check using database lookup for movies and TV shows with fallback
         try:
@@ -5244,17 +5498,41 @@ async def search_page(
     # Content negotiation based on client type
     if request.headers.get("HX-Request"):
         # HTMX web client - return HTML fragment
-        return await create_template_response_with_instances(
-            "search_results.html",
-            {
-                "request": request,
-                "results": filtered_results,
-                "query": q,
-                "pagination": pagination,
-                "current_user": current_user,
-                "media_type": "mixed"  # Search can return both movies and TV
-            }
-        )
+        # For infinite scroll (offset > 0), return only the new cards
+        if offset > 0:
+            # Calculate if there are more results based on TMDB pagination, not filtered count
+            current_page = pagination['page']
+            total_pages = pagination['total_pages']
+            has_more = current_page < total_pages
+            # Calculate next offset based on TMDB page size (20 per page)
+            next_offset = current_page * 20 if has_more else None
+            
+            return await create_template_response_with_instances(
+                "components/search_results_cards.html",
+                {
+                    "request": request,
+                    "results": filtered_results,
+                    "query": q,
+                    "offset": offset,
+                    "has_more": has_more,
+                    "next_offset": next_offset,
+                    "current_user": current_user,
+                    "media_type": "mixed"
+                }
+            )
+        else:
+            # Initial search results with full template
+            return await create_template_response_with_instances(
+                "search_results.html",
+                {
+                    "request": request,
+                    "results": filtered_results,
+                    "query": q,
+                    "pagination": pagination,
+                    "current_user": current_user,
+                    "media_type": "mixed"  # Search can return both movies and TV
+                }
+            )
     else:
         # API client (mobile, etc.) - return JSON
         return {

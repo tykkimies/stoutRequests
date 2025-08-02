@@ -762,6 +762,14 @@ class TMDBService:
         Makes separate API calls for movies and TV shows, then combines and sorts the results.
         CRITICAL FIX: Properly maps date parameters between movie and TV API calls.
         """
+        print(f"🔍 _GET_MIXED_CONTENT DEBUG:")
+        print(f"  - category: '{category}'")
+        print(f"  - page: {page}")
+        print(f"  - with_genres: '{with_genres}'")
+        print(f"  - vote_average_gte: {vote_average_gte}")
+        print(f"  - primary_release_date_gte/lte: {primary_release_date_gte}/{primary_release_date_lte}")
+        print(f"  - first_air_date_gte/lte: {first_air_date_gte}/{first_air_date_lte}")
+        
         try:
             # Ensure both media types support this category
             if category not in self.category_mappings.get('movie', {}):
@@ -800,11 +808,16 @@ class TMDBService:
             print(f"🔍 MIXED CONTENT DEBUG - Movie dates: {movie_primary_release_date_gte} to {movie_primary_release_date_lte}")
             print(f"🔍 MIXED CONTENT DEBUG - TV dates: {tv_first_air_date_gte} to {tv_first_air_date_lte}")
             
-            # Calculate pages for each media type to get roughly equal representation
-            # For page 1, get 10 items from each. For page 2+, alternate or split accordingly
-            items_per_type = 10  # 10 movies + 10 TV shows = 20 total per page
+            # CRITICAL FIX: Proper pagination for mixed content
+            # Each page should fetch the same page from both movie and TV APIs
+            # This ensures consistent pagination throughout infinite scroll
             
-            # Get movie results
+            # Get movie results using the same page number
+            print(f"🎬 CALLING movie get_category_content:")
+            print(f"  - media_type: 'movie'")
+            print(f"  - category: '{category}'")
+            print(f"  - page: {page}")
+            print(f"  - with_genres: '{movie_genres}'")
             try:
                 movie_results = self.get_category_content(
                     "movie", category, page=page,
@@ -818,11 +831,18 @@ class TMDBService:
                 # Ensure each movie has media_type set
                 for movie in movies:
                     movie['media_type'] = 'movie'
+                print(f"🔍 MIXED CONTENT: Page {page} - Got {len(movies)} movies")
             except Exception as e:
                 print(f"Error fetching movies for mixed content: {e}")
                 movies = []
+                movie_results = {'total_pages': 1, 'total_results': 0}
             
-            # Get TV results
+            # Get TV results using the same page number
+            print(f"📺 CALLING TV get_category_content:")
+            print(f"  - media_type: 'tv'")
+            print(f"  - category: '{category}'")
+            print(f"  - page: {page}")
+            print(f"  - with_genres: '{tv_genres}'")
             try:
                 tv_results = self.get_category_content(
                     "tv", category, page=page,
@@ -837,40 +857,50 @@ class TMDBService:
                 # Ensure each TV show has media_type set
                 for show in tv_shows:
                     show['media_type'] = 'tv'
+                print(f"🔍 MIXED CONTENT: Page {page} - Got {len(tv_shows)} TV shows")
             except Exception as e:
                 print(f"Error fetching TV shows for mixed content: {e}")
                 tv_shows = []
+                tv_results = {'total_pages': 1, 'total_results': 0}
             
-            # Combine results
+            # Combine results by interleaving movies and TV shows
+            # CRITICAL FIX: Don't artificially limit to 20 items - let TMDB pagination work
             combined_results = []
-            
-            # Take up to items_per_type from each, interleaving them
             max_items = max(len(movies), len(tv_shows))
             for i in range(max_items):
                 if i < len(movies):
                     combined_results.append(movies[i])
                 if i < len(tv_shows):
                     combined_results.append(tv_shows[i])
-                    
-                # Stop when we have enough items for this page
-                if len(combined_results) >= 20:
-                    break
             
-            # Sort combined results by popularity (descending) for better mixing
+            # Sort combined results by popularity for better mixing
             def get_popularity(item):
                 return item.get('popularity', 0)
             
             combined_results.sort(key=get_popularity, reverse=True)
             
-            # Calculate total pages based on the maximum of the two result sets
-            movie_total_pages = movie_results.get('total_pages', 1) if movies else 1
-            tv_total_pages = tv_results.get('total_pages', 1) if tv_shows else 1
+            # CRITICAL FIX: Correct pagination calculation
+            # Use the MAXIMUM total pages from both APIs to ensure all content is accessible
+            movie_total_pages = movie_results.get('total_pages', 1)
+            tv_total_pages = tv_results.get('total_pages', 1)
+            # Use the maximum to ensure we can access all content from both APIs
             max_total_pages = max(movie_total_pages, tv_total_pages)
             
             # Calculate total results 
-            movie_total_results = movie_results.get('total_results', 0) if movies else 0
-            tv_total_results = tv_results.get('total_results', 0) if tv_shows else 0
+            movie_total_results = movie_results.get('total_results', 0)
+            tv_total_results = tv_results.get('total_results', 0)
             total_results = movie_total_results + tv_total_results
+            
+            print(f"🔍 MIXED CONTENT FINAL RESULTS:")
+            print(f"  - Page {page}/{max_total_pages} - Combined {len(combined_results)} items")
+            print(f"  - Movie total pages: {movie_total_pages}, TV total pages: {tv_total_pages}")
+            print(f"  - Movie total results: {movie_total_results}, TV total results: {tv_total_results}")
+            print(f"  - Combined total results: {total_results}")
+            print(f"  - Final breakdown:")
+            final_movie_count = len([r for r in combined_results if r.get('media_type') == 'movie'])
+            final_tv_count = len([r for r in combined_results if r.get('media_type') == 'tv'])
+            print(f"    - Movies: {final_movie_count}")
+            print(f"    - TV shows: {final_tv_count}")
             
             return {
                 'results': combined_results,

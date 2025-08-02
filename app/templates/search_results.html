@@ -2,7 +2,8 @@
 {% if results %}
     {% for item in results %}
         {% if item.media_type in ['movie', 'tv'] %}
-        <div class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+        <div class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow"
+             id="search-result-{{ item.id }}-{{ item.media_type }}">
             <div class="flex">
                 <!-- Poster -->
                 <div class="flex-shrink-0">
@@ -58,10 +59,10 @@
                         </div>
                         
                         <!-- Request button with status -->
-                        <div class="ml-4 flex-shrink-0">
+                        <div class="ml-4 flex-shrink-0" id="button-area-{{ item.id }}">
                             {% set status = item.get('status', 'available') %}
                             {% if status != 'not_media' %}
-                            {{ multi_instance_request_button(item, None, available_instances, style='search', size='md', status=status, base_url=base_url) }}
+                            {{ multi_instance_request_button(item, None, available_instances, style='search', size='md', status=status, media_type=item.media_type, base_url=base_url) }}
                             {% endif %}
                         </div>
                     </div>
@@ -71,33 +72,27 @@
         {% endif %}
     {% endfor %}
     
-    {% if pagination and pagination.total_pages > 1 %}
-    <div class="flex justify-center mt-6">
-        <nav class="flex space-x-2">
-            {% if pagination.page > 1 %}
-            <button 
-                class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-                hx-get="{{ base_url }}/search?q={{ query }}&page={{ pagination.page - 1 }}"
-                hx-target="#search-results"
-            >
-                Previous
-            </button>
-            {% endif %}
-            
-            <span class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 border border-gray-300 rounded-md">
-                Page {{ pagination.page }} of {{ pagination.total_pages }}
-            </span>
-            
-            {% if pagination.page < pagination.total_pages %}
-            <button 
-                class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-                hx-get="{{ base_url }}/search?q={{ query }}&page={{ pagination.page + 1 }}"
-                hx-target="#search-results"
-            >
-                Next
-            </button>
-            {% endif %}
-        </nav>
+    <!-- Infinite scroll elements for initial load -->
+    {% if pagination and pagination.page < pagination.total_pages %}
+    <div id="search-load-more-trigger-{{ pagination.page * 20 }}" 
+         class="h-1 opacity-0"
+         hx-get="{{ base_url }}/search?q={{ query }}&offset={{ pagination.page * 20 }}"
+         hx-target="#search-results-content"
+         hx-swap="beforeend"
+         hx-trigger="intersect once"
+         hx-indicator="#search-loading">
+        <!-- This element triggers the next load when it comes into view -->
+    </div>
+    {% else %}
+    <!-- End of results for initial load -->
+    <div class="text-center py-8 text-gray-500 text-sm">
+        <div class="bg-gray-50 rounded-lg p-6 inline-block">
+            <svg class="w-8 h-8 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+            <p class="font-medium text-gray-600">End of search results</p>
+            <p class="text-xs text-gray-400 mt-1">Found {{ pagination.total_results if pagination else results|length }} results total</p>
+        </div>
     </div>
     {% endif %}
 {% elif tmdb_not_configured %}

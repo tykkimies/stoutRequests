@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Any, List
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -9,6 +9,41 @@ import time
 from ..services.plex_sync_service import PlexSyncService
 from ..core.database import get_session
 from ..models.job_execution import JobExecution
+
+def get_utc_now():
+    """Get current UTC time with timezone awareness"""
+    return datetime.now(timezone.utc)
+
+def format_datetime_local(dt):
+    """Format a UTC datetime for local display"""
+    if dt is None:
+        return "Never"
+    
+    # Ensure datetime is timezone-aware (convert from naive UTC)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    
+    # Convert to local time for display (system local time)
+    try:
+        # Try to use zoneinfo for Python 3.9+ (built-in)
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo('America/New_York')  # TODO: Make this configurable
+        local_dt = dt.astimezone(local_tz)
+        return local_dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+    except ImportError:
+        # Fallback: just show UTC time with clear label
+        return dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+def format_datetime_utc(dt):
+    """Format a datetime as UTC for consistent storage/comparison"""
+    if dt is None:
+        return None
+    
+    # Ensure datetime is timezone-aware
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    
+    return dt.astimezone(timezone.utc)
 
 # tracker:task("Add accessibility to modal")
 class BackgroundJobManager:
@@ -64,12 +99,25 @@ class BackgroundJobManager:
             print("🛑 Shutting down thread pool executor...")
             self._executor.shutdown(wait=True, cancel_futures=True)
             print("✅ Thread pool executor shutdown complete")
-                
-        print("🛑 Background job manager and scheduler stopped")
+    
+    def restart(self):
+        """Restart the scheduler with a fresh executor"""
+        print("🔄 Restarting background job scheduler...")
+        
+        # Stop current scheduler
+        self.stop()
+        
+        # Create a new executor
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bg_job")
+        
+        # Start fresh
+        self.start()
+        
+        print("✅ Background job scheduler restarted successfully")
     
     def _calculate_next_runs(self):
         """Calculate next run times for all jobs"""
-        now = datetime.utcnow()
+        now = get_utc_now()
         with self._lock:
             for job_name, job in self.jobs.items():
                 if job.get('enabled', True) and job.get('auto_run', True):
@@ -116,7 +164,7 @@ class BackgroundJobManager:
     
     def _check_and_run_scheduled_jobs(self):
         """Check if any jobs need to run and execute them"""
-        now = datetime.utcnow()
+        now = get_utc_now()
         
         with self._lock:
             jobs_to_run = []
@@ -170,7 +218,7 @@ class BackgroundJobManager:
     
     def _run_job_sync(self, job_name: str):
         """Run a specific job synchronously (called from scheduler thread)"""
-        start_time = datetime.utcnow()
+        start_time = get_utc_now()
         loop = None
         try:
             # Check if scheduler is still running before creating event loop
@@ -193,6 +241,11 @@ class BackgroundJobManager:
                     result = loop.run_until_complete(self._run_download_status_check_async())
                     success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
                     print(f"✅ Scheduled download status check completed: {success}")
+                elif job_name == 'request_submission':
+                    # Run the job directly without trigger method to avoid double execution tracking
+                    result = loop.run_until_complete(self._process_approved_requests())
+                    success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
+                    print(f"✅ Scheduled request submission completed: {success}")
                 else:
                     print(f"⚠️ Unknown job type: {job_name}")
                     result = {'success': False, 'error': f'Unknown job type: {job_name}'}
@@ -205,7 +258,7 @@ class BackgroundJobManager:
                         job_name=job_name,
                         triggered_by="scheduler",
                         started_at=start_time,
-                        completed_at=datetime.utcnow(),
+                        completed_at=get_utc_now(),
                         success=success,
                         result_data=result if isinstance(result, dict) else {'result': str(result)},
                         error_message=result.get('error') if isinstance(result, dict) else None
@@ -229,7 +282,7 @@ class BackgroundJobManager:
                         job_name=job_name,
                         triggered_by="scheduler", 
                         started_at=start_time,
-                        completed_at=datetime.utcnow(),
+                        completed_at=get_utc_now(),
                         success=False,
                         error_message=str(e)
                     )
@@ -273,7 +326,7 @@ class BackgroundJobManager:
                     if job['last_run']:
                         job['next_run'] = job['last_run'] + timedelta(seconds=job['interval_seconds'])
                     else:
-                        job['next_run'] = datetime.utcnow() + timedelta(seconds=30)
+                        job['next_run'] = get_utc_now() + timedelta(seconds=30)
                 else:
                     job['next_run'] = None
                 
@@ -325,7 +378,7 @@ class BackgroundJobManager:
         # Mark job as running
         with self._lock:
             self.jobs['library_sync']['running'] = True
-            self.jobs['library_sync']['last_run'] = datetime.utcnow()
+            self.jobs['library_sync']['last_run'] = get_utc_now()
         
         # Trigger HTMX update to show job started
         self._trigger_status_update('library_sync')
@@ -363,10 +416,10 @@ class BackgroundJobManager:
             # Update job status
             with self._lock:
                 self.jobs['library_sync']['stats'] = result
-                self.last_library_sync = datetime.utcnow()
+                self.last_library_sync = get_utc_now()
                 # Update next run time if auto-scheduling is enabled
                 if self.jobs['library_sync'].get('enabled', True) and self.jobs['library_sync'].get('auto_run', True):
-                    self.jobs['library_sync']['next_run'] = datetime.utcnow() + timedelta(seconds=self.jobs['library_sync']['interval_seconds'])
+                    self.jobs['library_sync']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['library_sync']['interval_seconds'])
             
             # Trigger HTMX update for any connected clients
             self._trigger_status_update('library_sync')
@@ -442,7 +495,7 @@ class BackgroundJobManager:
             # Mark job as running
             with self._lock:
                 self.jobs['library_sync']['running'] = True
-                self.jobs['library_sync']['last_run'] = datetime.utcnow()
+                self.jobs['library_sync']['last_run'] = get_utc_now()
             
             # Run the sync in thread pool
             loop = asyncio.get_event_loop()
@@ -463,10 +516,10 @@ class BackgroundJobManager:
             # Update job status  
             with self._lock:
                 self.jobs['library_sync']['stats'] = result
-                self.last_library_sync = datetime.utcnow()
+                self.last_library_sync = get_utc_now()
                 # Update next run time if auto-scheduling is enabled
                 if self.jobs['library_sync'].get('enabled', True) and self.jobs['library_sync'].get('auto_run', True):
-                    self.jobs['library_sync']['next_run'] = datetime.utcnow() + timedelta(seconds=self.jobs['library_sync']['interval_seconds'])
+                    self.jobs['library_sync']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['library_sync']['interval_seconds'])
             
             return result
             
@@ -484,7 +537,7 @@ class BackgroundJobManager:
             # Mark job as running
             with self._lock:
                 self.jobs['download_status_check']['running'] = True
-                self.jobs['download_status_check']['last_run'] = datetime.utcnow()
+                self.jobs['download_status_check']['last_run'] = get_utc_now()
             
             # Run the check in thread pool
             loop = asyncio.get_event_loop()
@@ -505,10 +558,10 @@ class BackgroundJobManager:
             # Update job status
             with self._lock:
                 self.jobs['download_status_check']['stats'] = result
-                self.last_download_check = datetime.utcnow()
+                self.last_download_check = get_utc_now()
                 # Update next run time if auto-scheduling is enabled
                 if self.jobs['download_status_check'].get('enabled', True) and self.jobs['download_status_check'].get('auto_run', True):
-                    self.jobs['download_status_check']['next_run'] = datetime.utcnow() + timedelta(seconds=self.jobs['download_status_check']['interval_seconds'])
+                    self.jobs['download_status_check']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['download_status_check']['interval_seconds'])
             
             return result
             
@@ -542,7 +595,7 @@ class BackgroundJobManager:
         # Mark job as running
         with self._lock:
             self.jobs['download_status_check']['running'] = True
-            self.jobs['download_status_check']['last_run'] = datetime.utcnow()
+            self.jobs['download_status_check']['last_run'] = get_utc_now()
         
         try:
             print("🔄 Starting background download status check...")
@@ -577,10 +630,10 @@ class BackgroundJobManager:
             # Update job status
             with self._lock:
                 self.jobs['download_status_check']['stats'] = result
-                self.last_download_check = datetime.utcnow()
+                self.last_download_check = get_utc_now()
                 # Update next run time if auto-scheduling is enabled
                 if self.jobs['download_status_check'].get('enabled', True) and self.jobs['download_status_check'].get('auto_run', True):
-                    self.jobs['download_status_check']['next_run'] = datetime.utcnow() + timedelta(seconds=self.jobs['download_status_check']['interval_seconds'])
+                    self.jobs['download_status_check']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['download_status_check']['interval_seconds'])
             
             # Trigger HTMX update for any connected clients
             self._trigger_status_update('download_status_check')
@@ -669,6 +722,17 @@ class BackgroundJobManager:
                 'stats': {},
                 'enabled': False,  # Will be overridden by persisted settings
                 'auto_run': False
+            },
+            'request_submission': {
+                'name': 'Request Submission',
+                'description': 'Submits approved requests to Radarr/Sonarr services',
+                'last_run': None,
+                'next_run': None,
+                'running': False,
+                'interval_seconds': 300,  # 5 minutes
+                'stats': {},
+                'enabled': False,  # Will be overridden by persisted settings
+                'auto_run': False
             }
         }
 
@@ -713,7 +777,7 @@ class BackgroundJobManager:
             with Session(engine) as session:
                 execution = JobExecution(
                     job_name=job_name,
-                    started_at=datetime.utcnow(),
+                    started_at=get_utc_now(),
                     status="running",
                     triggered_by=triggered_by
                 )
@@ -777,18 +841,27 @@ class BackgroundJobManager:
         except Exception as e:
             print(f"⚠️ Error updating job execution record: {e}")
     
-    def get_job_execution_history(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent job execution history (only completed/failed jobs)"""
+    def get_job_execution_history(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+        """Get paginated job execution history (only completed/failed jobs)"""
         try:
-            from sqlmodel import Session, select
+            from sqlmodel import Session, select, func
             from ..core.database import engine
             
             with Session(engine) as session:
+                # Get total count
+                count_statement = (
+                    select(func.count(JobExecution.id))
+                    .where(JobExecution.status.in_(["success", "failed"]))
+                )
+                total_count = session.exec(count_statement).first()
+                
+                # Get paginated results
                 statement = (
                     select(JobExecution)
                     .where(JobExecution.status.in_(["success", "failed"]))
                     .order_by(JobExecution.started_at.desc())
                     .limit(limit)
+                    .offset(offset)
                 )
                 executions = session.exec(statement).all()
                 
@@ -797,8 +870,8 @@ class BackgroundJobManager:
                     history.append({
                         "id": execution.id,
                         "job_name": execution.job_name,
-                        "started_at": execution.started_at,
-                        "completed_at": execution.completed_at,
+                        "started_at": format_datetime_local(execution.started_at),
+                        "completed_at": format_datetime_local(execution.completed_at),
                         "status": execution.status,
                         "result_data": execution.result_data or {},
                         "error_message": execution.error_message,
@@ -806,10 +879,65 @@ class BackgroundJobManager:
                         "duration_seconds": execution.duration_seconds
                     })
                 
-                return history
+                return {
+                    "history": history,
+                    "total_count": total_count or 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": (offset + len(history)) < (total_count or 0)
+                }
         except Exception as e:
             print(f"⚠️ Error getting job execution history: {e}")
-            return []
+            return {
+                "history": [],
+                "total_count": 0,
+                "limit": limit,
+                "offset": offset,
+                "has_more": False
+            }
+    
+    def clear_job_execution_history(self, keep_recent_days: int = 7) -> Dict[str, Any]:
+        """Clear job execution history older than specified days"""
+        try:
+            from sqlmodel import Session, select, func
+            from ..core.database import engine
+            
+            cutoff_date = get_utc_now() - timedelta(days=keep_recent_days)
+            
+            with Session(engine) as session:
+                # Count records to be deleted
+                count_statement = (
+                    select(func.count(JobExecution.id))
+                    .where(JobExecution.started_at < cutoff_date)
+                )
+                delete_count = session.exec(count_statement).first() or 0
+                
+                # Delete old records
+                delete_statement = (
+                    select(JobExecution)
+                    .where(JobExecution.started_at < cutoff_date)
+                )
+                old_executions = session.exec(delete_statement).all()
+                
+                for execution in old_executions:
+                    session.delete(execution)
+                
+                session.commit()
+                
+                print(f"🗑️ Cleared {delete_count} job execution records older than {keep_recent_days} days")
+                
+                return {
+                    "success": True,
+                    "deleted_count": delete_count,
+                    "cutoff_date": format_datetime_local(cutoff_date)
+                }
+        except Exception as e:
+            print(f"⚠️ Error clearing job execution history: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "deleted_count": 0
+            }
 
     def _save_job_settings(self):
         """Save current job settings to database"""
@@ -830,13 +958,140 @@ class BackgroundJobManager:
                 # Get settings object and update background job settings
                 settings = SettingsService.get_settings(session)
                 settings.set_background_job_settings(settings_to_save)
-                settings.updated_at = datetime.utcnow()
+                settings.updated_at = get_utc_now()
                 session.add(settings)
                 session.commit()
                 print(f"💾 Saved job settings to database: {settings_to_save}")
                 
         except Exception as e:
             print(f"❌ Error saving job settings: {e}")
+    
+    async def trigger_request_submission(self) -> Dict[str, Any]:
+        """Manually trigger request submission job"""
+        return await self._execute_job_with_tracking(
+            job_name='request_submission',
+            job_function=self._run_request_submission_sync,
+            triggered_by='manual'
+        )
+    
+    def _run_request_submission_sync(self) -> Dict[str, Any]:
+        """
+        Synchronous wrapper for the async request submission.
+        This runs in a thread pool.
+        """
+        try:
+            print("🔄 Creating new event loop for background request submission...")
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                print("🔄 Starting request submission check...")
+                result = loop.run_until_complete(self._process_approved_requests())
+                
+                print(f"🔄 Request submission completed with result: {result}")
+                return result
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            print(f"❌ Error in _run_request_submission_sync: {e}")
+            # Return error result
+            return {
+                'success': False,
+                'error': str(e),
+                'processed_count': 0
+            }
+    
+    async def _process_approved_requests(self) -> Dict[str, Any]:
+        """Process approved requests and submit them to appropriate services"""
+        print("🎬 Starting approved request submission job...")
+        
+        try:
+            from sqlmodel import Session, select
+            from ..core.database import engine
+            from ..models.media_request import MediaRequest, RequestStatus
+            from ..services.multi_instance_integration_service import MultiInstanceIntegrationService
+            
+            submitted_count = 0
+            errors = []
+            
+            with Session(engine) as session:
+                # Get all approved requests that haven't been submitted to services yet
+                statement = (
+                    select(MediaRequest)
+                    .where(MediaRequest.status == RequestStatus.APPROVED)
+                    .where(MediaRequest.service_submitted == False)  # Not yet submitted
+                )
+                
+                pending_requests = session.exec(statement).all()
+                
+                print(f"🎬 Found {len(pending_requests)} approved requests to process")
+                
+                integration_service = MultiInstanceIntegrationService(session)
+                
+                for request in pending_requests:
+                    try:
+                        print(f"🎬 Processing request {request.id}: {request.title} ({request.media_type.value})")
+                        
+                        # Check if the selected instance is still enabled
+                        if request.selected_instance_id:
+                            result = await integration_service.submit_to_service(
+                                request=request,
+                                instance_id=request.selected_instance_id
+                            )
+                            
+                            if result.get('success'):
+                                # Mark as submitted
+                                request.service_submitted = True
+                                request.updated_at = get_utc_now()
+                                session.add(request)
+                                submitted_count += 1
+                                print(f"✅ Successfully submitted request {request.id} to service")
+                            else:
+                                error_msg = result.get('error', 'Unknown error')
+                                errors.append(f"Request {request.id}: {error_msg}")
+                                print(f"❌ Failed to submit request {request.id}: {error_msg}")
+                        else:
+                            error_msg = "No instance selected for request"
+                            errors.append(f"Request {request.id}: {error_msg}")
+                            print(f"⚠️ Request {request.id} has no selected instance")
+                            
+                    except Exception as e:
+                        error_msg = f"Error processing request {request.id}: {str(e)}"
+                        errors.append(error_msg)
+                        print(f"❌ {error_msg}")
+                
+                # Commit all changes
+                session.commit()
+            
+            result = {
+                'success': True,
+                'submitted_count': submitted_count,
+                'total_processed': len(pending_requests),
+                'errors': errors
+            }
+            
+            # Update job stats
+            with self._lock:
+                self.jobs['request_submission']['stats'] = result
+                self.jobs['request_submission']['last_run'] = get_utc_now()
+                # Update next run time if auto-scheduling is enabled
+                if self.jobs['request_submission'].get('enabled', True) and self.jobs['request_submission'].get('auto_run', True):
+                    self.jobs['request_submission']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['request_submission']['interval_seconds'])
+            
+            print(f"✅ Request submission job completed: {submitted_count} submitted, {len(errors)} errors")
+            return result
+            
+        except Exception as e:
+            print(f"❌ Error in request submission job: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'submitted_count': 0,
+                'total_processed': 0,
+                'errors': [str(e)]
+            }
 
 
 # Global instance
