@@ -264,6 +264,7 @@ class PermissionFlags:
             cls.REQUEST_TV,
             cls.REQUEST_MANAGE_OWN,
             cls.REQUEST_VIEW_DETAILS,
+            cls.REQUEST_VIEW_ALL,  # Can view other users' requests
             
             # Basic discovery
             cls.DISCOVER_BROWSE,

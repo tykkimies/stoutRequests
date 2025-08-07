@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 
-{% block title %}{{ media.title or media.name }} - Stout Requests{% endblock %}
+{% block title %}{{ media.title or media.name }} - CuePlex{% endblock %}
 
 {% block content %}
 <div class="min-h-screen bg-gray-50">
@@ -33,7 +33,7 @@
                         <h1 class="text-4xl lg:text-5xl font-bold">{{ media.title or media.name }}</h1>
                         
                         <!-- Request Status Badge (only show if not fully in Plex) -->
-                        {% if not (plex_status == 'in_plex' or is_in_plex) %}
+                        {% if plex_status != 'in_plex' %}
                         <div id="request-status-badge">
                             {% include 'components/status_badge.html' %}
                         </div>
@@ -124,19 +124,7 @@
                     </div>
 
                     <!-- Plex Status Information -->
-                    {% if plex_status == 'in_plex' or is_in_plex %}
-                    <div class="bg-black bg-opacity-50 rounded-lg p-4 mb-6">
-                        <div class="flex items-center space-x-3">
-                            <div class="flex items-center text-green-400">
-                                <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                                </svg>
-                                <span class="font-semibold">Available in Plex</span>
-                            </div>
-                            <span class="text-gray-300">This content is ready to watch in your Plex library.</span>
-                        </div>
-                    </div>
-                    {% elif plex_status == 'partial_plex' %}
+                    {% if plex_status == 'partial_plex' %}
                     <div class="bg-black bg-opacity-50 rounded-lg p-4 mb-6">
                         <div class="flex items-center space-x-3">
                             <div class="flex items-center text-yellow-400">
@@ -146,6 +134,18 @@
                                 <span class="font-semibold">Partially Available</span>
                             </div>
                             <span class="text-gray-300">Some seasons or episodes are available in Plex.</span>
+                        </div>
+                    </div>
+                    {% elif plex_status == 'in_plex' %}
+                    <div class="bg-black bg-opacity-50 rounded-lg p-4 mb-6">
+                        <div class="flex items-center space-x-3">
+                            <div class="flex items-center text-green-400">
+                                <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                </svg>
+                                <span class="font-semibold">Available in Plex</span>
+                            </div>
+                            <span class="text-gray-300">This content is ready to watch in your Plex library.</span>
                         </div>
                     </div>
                     {% endif %}
@@ -961,9 +961,9 @@ document.body.addEventListener('refreshStatusBadges', function(event) {
                 badgeHtml = '<span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Approved</span>';
             }
             
-            // Only add badge if there isn't already a status badge (to prevent overwriting "In Plex" badges)
-            const existingStatusBadge = badgeContainer.querySelector('.bg-green-600, .bg-blue-600, .bg-yellow-600');
-            if (!existingStatusBadge && badgeHtml) {
+            // Only add badge if there isn't an "In Plex" badge (preserve Plex status, update request status)
+            const existingPlexBadge = badgeContainer.querySelector('.bg-green-600');
+            if (!existingPlexBadge && badgeHtml) {
                 badgeContainer.innerHTML = badgeHtml;
             }
         }

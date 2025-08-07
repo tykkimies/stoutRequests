@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Stout Requests{% endblock %}</title>
+    <title>{% block title %}CuePlex{% endblock %}</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -11,9 +11,12 @@
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
     
-    <!-- HTMX HTTPS Fix -->
+    <!-- Modern Dark Mode CSS -->
+    <link rel="stylesheet" href="{{ base_url }}/static/css/dark-mode-modern.css">
+    
+    <!-- HTMX HTTPS Fix and Authentication -->
     <script>
-        // Fix HTMX mixed content issues by ensuring all HTMX requests use the current protocol
+        // Fix HTMX mixed content issues and ensure proper authentication
         document.addEventListener('htmx:configRequest', function(evt) {
             // Get the current URL and check if it starts with a relative path
             let url = evt.detail.path;
@@ -33,6 +36,18 @@
                 const newUrl = window.location.origin + url;
                 evt.detail.path = newUrl;
             }
+            
+            // Ensure credentials are included in HTMX requests for authentication
+            evt.detail.xhr.withCredentials = true;
+            
+            // Add debug logging for authentication issues
+            if (evt.detail.path.includes('/discover/category/more')) {
+                console.log('🔍 HTMX Request Config:', {
+                    url: evt.detail.path,
+                    withCredentials: evt.detail.xhr.withCredentials,
+                    headers: evt.detail.headers
+                });
+            }
         });
     </script>
     
@@ -43,6 +58,16 @@
         }
         .text-shadow {
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        /* Logo styling - no filters, keep original colors */
+        .navbar-logo {
+            transition: opacity 0.3s ease;
+        }
+        
+        /* Logo hover effect */
+        .navbar-logo:hover {
+            opacity: 0.9;
         }
         
         /* Theme Variables */
@@ -58,75 +83,6 @@
             --primary-800: 154, 52, 18;
             --primary-900: 124, 45, 18;
         }
-        
-        /* Blue Theme */
-        body.theme-blue {
-            --primary-50: 239, 246, 255;
-            --primary-100: 219, 234, 254;
-            --primary-200: 191, 219, 254;
-            --primary-300: 147, 197, 253;
-            --primary-400: 96, 165, 250;
-            --primary-500: 59, 130, 246;
-            --primary-600: 37, 99, 235;
-            --primary-700: 29, 78, 216;
-            --primary-800: 30, 64, 175;
-            --primary-900: 30, 58, 138;
-        }
-        
-        /* Green Theme */
-        body.theme-green {
-            --primary-50: 240, 253, 244;
-            --primary-100: 220, 252, 231;
-            --primary-200: 187, 247, 208;
-            --primary-300: 134, 239, 172;
-            --primary-400: 74, 222, 128;
-            --primary-500: 34, 197, 94;
-            --primary-600: 22, 163, 74;
-            --primary-700: 21, 128, 61;
-            --primary-800: 22, 101, 52;
-            --primary-900: 20, 83, 45;
-        }
-        
-        /* Purple Theme */
-        body.theme-purple {
-            --primary-50: 250, 245, 255;
-            --primary-100: 243, 232, 255;
-            --primary-200: 233, 213, 255;
-            --primary-300: 196, 181, 253;
-            --primary-400: 147, 125, 250;
-            --primary-500: 99, 102, 241;
-            --primary-600: 79, 70, 229;
-            --primary-700: 67, 56, 202;
-            --primary-800: 55, 48, 163;
-            --primary-900: 49, 46, 129;
-        }
-        
-        /* Dark Theme */
-        body.theme-dark {
-            background-color: #1f2937;
-            color: #f9fafb;
-            --primary-50: 55, 65, 81;
-            --primary-100: 75, 85, 99;
-            --primary-200: 107, 114, 128;
-            --primary-300: 156, 163, 175;
-            --primary-400: 209, 213, 219;
-            --primary-500: 229, 231, 235;
-            --primary-600: 243, 244, 246;
-            --primary-700: 249, 250, 251;
-            --primary-800: 255, 255, 255;
-            --primary-900: 255, 255, 255;
-        }
-        
-        body.theme-dark .bg-white { background-color: #374151 !important; }
-        body.theme-dark .bg-gray-50 { background-color: #4b5563 !important; }
-        body.theme-dark .bg-gray-100 { background-color: #1f2937 !important; }
-        body.theme-dark .text-gray-900 { color: #f9fafb !important; }
-        body.theme-dark .text-gray-800 { color: #e5e7eb !important; }
-        body.theme-dark .text-gray-700 { color: #d1d5db !important; }
-        body.theme-dark .text-gray-600 { color: #9ca3af !important; }
-        body.theme-dark .text-gray-500 { color: #6b7280 !important; }
-        body.theme-dark .border-gray-200 { border-color: #4b5563 !important; }
-        body.theme-dark .border-gray-300 { border-color: #6b7280 !important; }
         
         /* Dynamic Primary Colors */
         .bg-primary-500 { background-color: rgb(var(--primary-500)); }
@@ -147,14 +103,14 @@
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen {% if current_user %}flex flex-col{% endif %} {% if site_theme and site_theme != 'default' %}theme-{{ site_theme }}{% endif %}">
+<body class="bg-gray-100 min-h-screen {% if current_user %}flex flex-col{% endif %} {% if dark_mode %}theme-dark{% endif %}">
     <!-- Navigation -->
     <nav class="bg-gradient-dark shadow-lg sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center">
-                    <div class="flex-shrink-0">
-                        <h1 class="text-xl font-bold text-white text-shadow">🍺 Stout Requests</h1>
+                    <div class="flex-shrink-0 flex items-center">
+                        <img src="{{ base_url }}/static/cueplex_logo_white.png" alt="CuePlex" class="h-12 w-auto object-contain navbar-logo" />
                     </div>
                     {% if current_user %}
                     <!-- Desktop Navigation -->
@@ -171,6 +127,23 @@
                 </div>
                 <div class="flex items-center">
                     {% if current_user %}
+                    <!-- Dark Mode Toggle -->
+                    <button 
+                        onclick="toggleDarkMode()"
+                        class="text-gray-300 hover:text-white p-2 rounded-md text-sm font-medium transition-colors duration-200 mr-2"
+                        title="Toggle dark mode"
+                    >
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            {% if dark_mode %}
+                            <!-- Sun icon for dark mode (to switch to light) -->
+                            <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"></path>
+                            {% else %}
+                            <!-- Moon icon for light mode (to switch to dark) -->
+                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
+                            {% endif %}
+                        </svg>
+                    </button>
+                    
                     <!-- Desktop User Info -->
                     <div class="hidden md:flex items-center space-x-4">
                         <span class="text-gray-300 text-sm">Welcome, {{ current_user.full_name or current_user.username }}</span>
@@ -259,6 +232,16 @@
                         {% endif %}
                     </div>
                     <div class="px-2">
+                        <button 
+                            onclick="toggleDarkMode()"
+                            class="text-gray-300 hover:text-white hover:bg-gray-700 block px-3 py-3 rounded-md text-base font-medium transition-all duration-200 min-h-[44px] flex items-center w-full text-left"
+                        >
+                            {% if dark_mode %}
+                            ☀️ Light Mode
+                            {% else %}
+                            🌙 Dark Mode
+                            {% endif %}
+                        </button>
                         <a href="{{ base_url }}/logout" 
                            onclick="closeMobileNavigation()" 
                            class="text-gray-300 hover:text-white hover:bg-gray-700 block px-3 py-3 rounded-md text-base font-medium transition-all duration-200 min-h-[44px] flex items-center">
@@ -339,6 +322,23 @@
 
         // HTMX event listeners
         document.addEventListener('htmx:responseError', function(event) {
+            const response = event.detail.xhr;
+            
+            // Handle 401 Unauthorized (token expired/invalid)
+            if (response.status === 401) {
+                // Clear expired tokens
+                localStorage.removeItem('access_token');
+                document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+                
+                // Show specific message and redirect to login
+                showToast('Your session has expired. Please log in again.', 'warning');
+                setTimeout(() => {
+                    window.location.href = '{{ base_url }}/login';
+                }, 2000);
+                return;
+            }
+            
+            // Generic error handling for other status codes
             showToast('An error occurred. Please try again.', 'error');
         });
         
@@ -438,7 +438,7 @@
             } else {
                 // Content source categories (trending, popular, top_rated, upcoming)
                 // For these, type is actually the media_type (movie/tv)
-                let expandUrl = baseUrl + '/discover/category/expanded?type=' + type + '&sort=' + sort + '&limit=40&page=1';
+                let expandUrl = baseUrl + '/discover/category/expanded?type=' + type + '&media_type=' + type + '&sort=' + sort + '&limit=40&page=1';
                 expandUrl += '&content_sources=' + sort;
                 let filterUrl = baseUrl + '/discover/filters?media_type=' + type;
                 filterUrl += '&content_sources=' + sort;
@@ -748,7 +748,22 @@
         
         // Close dropdowns on scroll to prevent positioning issues
         document.addEventListener('scroll', function() {
+            // Close generic dropdowns
             document.querySelectorAll('.dropdown-menu').forEach(function(dropdown) {
+                dropdown.classList.add('hidden');
+                
+                // Return dropdown to its original parent if it was moved to body
+                if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                    if (dropdown._originalNextSibling) {
+                        dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                    } else {
+                        dropdown._originalParent.appendChild(dropdown);
+                    }
+                }
+            });
+            
+            // Close approval dropdowns
+            document.querySelectorAll('[id^="approval-dropdown-"]').forEach(function(dropdown) {
                 dropdown.classList.add('hidden');
                 
                 // Return dropdown to its original parent if it was moved to body
@@ -764,7 +779,22 @@
         
         // Global function to close all dropdowns (used by dropdown buttons)
         window.closeAllDropdowns = function() {
+            // Close generic dropdowns
             document.querySelectorAll('.dropdown-menu').forEach(function(dropdown) {
+                dropdown.classList.add('hidden');
+                
+                // Return dropdown to its original parent if it was moved to body
+                if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                    if (dropdown._originalNextSibling) {
+                        dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                    } else {
+                        dropdown._originalParent.appendChild(dropdown);
+                    }
+                }
+            });
+            
+            // Close approval dropdowns
+            document.querySelectorAll('[id^="approval-dropdown-"]').forEach(function(dropdown) {
                 dropdown.classList.add('hidden');
                 
                 // Return dropdown to its original parent if it was moved to body
@@ -859,12 +889,144 @@
                 }
             }
         });
+
+        // Dark mode toggle function
+        async function toggleDarkMode() {
+            try {
+                const response = await fetch('{{ base_url }}/user/toggle-dark-mode', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + (localStorage.getItem('access_token') || ''),
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Refresh the page to apply the new theme
+                    window.location.reload();
+                } else {
+                    showToast(result.error || 'Failed to toggle dark mode', 'error');
+                }
+            } catch (error) {
+                showToast('Error toggling dark mode', 'error');
+                console.error('Dark mode toggle error:', error);
+            }
+        }
+
+        // Approval dropdown toggle function - uses same robust positioning as generic dropdowns
+        window.toggleApprovalDropdown = function(requestId) {
+            const dropdown = document.getElementById('approval-dropdown-' + requestId);
+            const button = event.target.closest('button');
+            const isHidden = dropdown.classList.contains('hidden');
+            
+            // Close all other approval dropdowns first
+            document.querySelectorAll('[id^="approval-dropdown-"]').forEach(function(d) {
+                if (d !== dropdown) {
+                    d.classList.add('hidden');
+                    // Return dropdown to original position if it was moved
+                    if (d._originalParent && d.parentNode === document.body) {
+                        if (d._originalNextSibling) {
+                            d._originalParent.insertBefore(d, d._originalNextSibling);
+                        } else {
+                            d._originalParent.appendChild(d);
+                        }
+                    }
+                }
+            });
+            
+            if (isHidden) {
+                // Move dropdown to body to completely escape all container constraints
+                if (dropdown.parentNode !== document.body) {
+                    // Store original parent and position for cleanup
+                    dropdown._originalParent = dropdown.parentNode;
+                    dropdown._originalNextSibling = dropdown.nextSibling;
+                    document.body.appendChild(dropdown);
+                }
+                
+                // Show dropdown and position it
+                dropdown.classList.remove('hidden');
+                
+                // Get button position relative to viewport
+                const buttonRect = button.getBoundingClientRect();
+                const viewportHeight = window.innerHeight;
+                const viewportWidth = window.innerWidth;
+                
+                // Position dropdown with fixed positioning
+                dropdown.style.position = 'fixed';
+                dropdown.style.zIndex = '2147483647'; // Maximum z-index
+                
+                // Set width to match expected dropdown width (w-72 = 288px)
+                const dropdownWidth = 288;
+                dropdown.style.width = dropdownWidth + 'px';
+                
+                // Calculate horizontal position (prefer right-aligned with button for approval dropdown)
+                let leftPos = buttonRect.right - dropdownWidth;
+                
+                // If dropdown would go off left edge, align with left edge of button
+                if (leftPos < 20) {
+                    leftPos = buttonRect.left;
+                }
+                
+                // If still going off right edge, position as far right as possible
+                if (leftPos + dropdownWidth > viewportWidth - 20) {
+                    leftPos = Math.max(20, viewportWidth - dropdownWidth - 20);
+                }
+                
+                dropdown.style.left = leftPos + 'px';
+                
+                // Calculate vertical position (prefer below button)
+                let topPos = buttonRect.bottom + 4;
+                
+                // If dropdown would go off bottom edge, show above button instead
+                const dropdownHeight = dropdown.offsetHeight || 200; // estimate if not measured yet
+                if (topPos + dropdownHeight > viewportHeight - 20 && buttonRect.top > dropdownHeight + 20) {
+                    topPos = buttonRect.top - dropdownHeight - 4;
+                }
+                
+                dropdown.style.top = Math.max(20, topPos) + 'px';
+                
+            } else {
+                // Hide dropdown and return to original position
+                dropdown.classList.add('hidden');
+                
+                // Return dropdown to its original parent if it was moved
+                if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                    if (dropdown._originalNextSibling) {
+                        dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                    } else {
+                        dropdown._originalParent.appendChild(dropdown);
+                    }
+                }
+            }
+        }
+
+        // Close approval dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('[id^="approval-dropdown-"]') && 
+                !event.target.closest('button[onclick*="toggleApprovalDropdown"]')) {
+                document.querySelectorAll('[id^="approval-dropdown-"]').forEach(function(dropdown) {
+                    dropdown.classList.add('hidden');
+                    
+                    // Return dropdown to its original parent if it was moved to body
+                    if (dropdown._originalParent && dropdown.parentNode === document.body) {
+                        if (dropdown._originalNextSibling) {
+                            dropdown._originalParent.insertBefore(dropdown, dropdown._originalNextSibling);
+                        } else {
+                            dropdown._originalParent.appendChild(dropdown);
+                        }
+                    }
+                });
+            }
+        });
     </script>
     
     <!-- Enhanced dropdown styling to match site aesthetic -->
     <style>
         /* Force dropdown menus to appear above all other content with beautiful styling */  
-        .dropdown-menu {
+        .dropdown-menu,
+        [id^="approval-dropdown-"] {
             position: fixed !important;
             z-index: 2147483647 !important; /* Maximum possible z-index */
             
@@ -888,13 +1050,15 @@
         }
         
         /* Show animation for dropdown */
-        .dropdown-menu:not(.hidden) {
+        .dropdown-menu:not(.hidden),
+        [id^="approval-dropdown-"]:not(.hidden) {
             opacity: 1 !important;
             transform: translateY(0) scale(1) !important;
         }
         
         /* Enhanced dropdown button styling within dropdown */
-        .dropdown-menu button {
+        .dropdown-menu button,
+        [id^="approval-dropdown-"] button {
             transition: all 0.15s ease !important;
             border-radius: 8px !important;
             margin: 2px !important;
@@ -903,20 +1067,23 @@
             overflow: hidden !important;
         }
         
-        .dropdown-menu button:hover {
+        .dropdown-menu button:hover,
+        [id^="approval-dropdown-"] button:hover {
             background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
             color: white !important;
             transform: translateY(-1px) !important;
             box-shadow: 0 8px 15px -3px rgba(249, 115, 22, 0.3) !important;
         }
         
-        .dropdown-menu button:active {
+        .dropdown-menu button:active,
+        [id^="approval-dropdown-"] button:active {
             transform: translateY(0) !important;
             box-shadow: 0 4px 8px -2px rgba(249, 115, 22, 0.4) !important;
         }
         
         /* Quality tier and category badges in dropdown */
-        .dropdown-menu .bg-blue-100 {
+        .dropdown-menu .bg-blue-100,
+        [id^="approval-dropdown-"] .bg-blue-100 {
             background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%) !important;
             color: #1e40af !important;
             font-weight: 600 !important;
@@ -924,7 +1091,8 @@
             border: 1px solid rgba(59, 130, 246, 0.2) !important;
         }
         
-        .dropdown-menu .bg-gray-100 {
+        .dropdown-menu .bg-gray-100,
+        [id^="approval-dropdown-"] .bg-gray-100 {
             background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%) !important;
             color: #374151 !important;
             font-weight: 500 !important;
@@ -962,11 +1130,13 @@
         }
         
         /* Add subtle loading state for dropdown items */
-        .dropdown-menu form {
+        .dropdown-menu form,
+        [id^="approval-dropdown-"] form {
             position: relative !important;
         }
         
-        .dropdown-menu form::after {
+        .dropdown-menu form::after,
+        [id^="approval-dropdown-"] form::after {
             content: '' !important;
             position: absolute !important;
             top: 0 !important;
@@ -980,7 +1150,8 @@
             opacity: 0 !important;
         }
         
-        .dropdown-menu form:hover::after {
+        .dropdown-menu form:hover::after,
+        [id^="approval-dropdown-"] form:hover::after {
             transform: translateX(100%) !important;
             opacity: 1 !important;
         }
@@ -1085,7 +1256,8 @@
 
         /* Responsive adjustments for mobile */
         @media (max-width: 640px) {
-            .dropdown-menu {
+            .dropdown-menu,
+            [id^="approval-dropdown-"] {
                 max-width: calc(100vw - 40px) !important;
                 left: 20px !important;
                 right: 20px !important;
@@ -1093,7 +1265,8 @@
                 border-radius: 16px !important;
             }
             
-            .dropdown-menu button {
+            .dropdown-menu button,
+            [id^="approval-dropdown-"] button {
                 padding: 12px 16px !important;
                 font-size: 16px !important;
             }
@@ -1101,7 +1274,8 @@
         
         /* Dark mode compatibility (if ever implemented) */
         @media (prefers-color-scheme: dark) {
-            .dropdown-menu {
+            .dropdown-menu,
+            [id^="approval-dropdown-"] {
                 background: linear-gradient(135deg, #1f2937 0%, #111827 100%) !important;
                 border-color: rgba(75, 85, 99, 0.3) !important;
                 color: #f9fafb !important;

@@ -620,7 +620,45 @@ class TMDBService:
         """
         Unified method to get category content consistently for both horizontal scroll and expanded views.
         Maps category names to appropriate TMDB API calls with consistent parameters.
+        
+        Uses cache for page 1 requests without filters for performance optimization.
         """
+        # Check if this request can use cache (page 1, no filters, cacheable category)
+        has_filters = any([
+            with_genres, vote_average_gte, with_companies, with_networks,
+            with_watch_providers, primary_release_date_gte, primary_release_date_lte,
+            first_air_date_gte, first_air_date_lte
+        ])
+        
+        cacheable_categories = ['popular', 'top_rated', 'upcoming', 'on_the_air', 'trending']
+        can_use_cache = (
+            page == 1 and 
+            not has_filters and 
+            category in cacheable_categories and
+            media_type in ['movie', 'tv']  # Only cache single media types
+        )
+        
+        if can_use_cache:
+            try:
+                from ..services.category_cache_service import CategoryCacheService
+                cache_service = CategoryCacheService(self.session)
+                cached_data = cache_service.get_cached_category(
+                    media_type=media_type,
+                    category=category,
+                    page=page,
+                    fallback_to_api=False  # Let this method handle the fallback
+                )
+                
+                if cached_data:
+                    # Cache hit - return cached data
+                    return cached_data
+                    
+            except Exception as e:
+                # Log cache error but continue with API fallback
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Cache lookup failed for {media_type}/{category}: {e}")
+        
         # Handle mixed media type by combining movie and TV results
         if media_type == "mixed":
             return self._get_mixed_content(

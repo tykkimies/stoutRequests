@@ -1,5 +1,5 @@
 """
-Global template context processor for Stout Requests
+Global template context processor for CuePlex
 """
 
 from sqlmodel import Session
@@ -134,12 +134,12 @@ def get_global_template_context(current_user=None, request=None) -> dict:
                     user_permissions = {'is_admin': user_is_admin}
             
             result = {
-                "site_theme": settings.site_theme,
                 "app_name": settings.app_name,
                 "base_url": base_url,
                 "url_for": url_for_with_base,
                 "user_is_admin": user_is_admin,
-                "user_permissions": user_permissions
+                "user_permissions": user_permissions,
+                "dark_mode": getattr(current_user, 'dark_mode', False) if current_user else False
             }
             return result
     except Exception as e:
@@ -149,10 +149,10 @@ def get_global_template_context(current_user=None, request=None) -> dict:
             return url_for(path, "")
         
         return {
-            "site_theme": "default",
-            "app_name": "Stout Requests",
+            "app_name": "CuePlex",
             "base_url": "",
             "url_for": fallback_url_for,
             "user_is_admin": False,
-            "user_permissions": {}
+            "user_permissions": {},
+            "dark_mode": False
         }

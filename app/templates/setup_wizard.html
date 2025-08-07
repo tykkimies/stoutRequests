@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Setup - Stout Requests</title>
+    <title>Setup - CuePlex</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -30,6 +30,16 @@
             background-color: #e5e7eb;
             color: #6b7280;
         }
+        
+        /* Logo styling - no filters, keep original colors */
+        .navbar-logo {
+            transition: opacity 0.3s ease;
+        }
+        
+        /* Logo hover effect */
+        .navbar-logo:hover {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -37,7 +47,9 @@
     <div class="bg-gradient-dark shadow-lg">
         <div class="max-w-4xl mx-auto px-4 py-6">
             <div class="text-center">
-                <h1 class="text-3xl font-bold text-white">🍺 Stout Requests</h1>
+                <div class="flex items-center justify-center">
+                    <img src="{{ base_url }}/static/cueplex_logo_white.png" alt="CuePlex" class="h-20 w-auto navbar-logo">
+                </div>
                 <p class="text-gray-300 mt-2">First-time setup wizard</p>
             </div>
         </div>
@@ -46,27 +58,35 @@
     <div class="max-w-4xl mx-auto px-4 py-8">
         <!-- Step Indicator -->
         <div class="flex justify-center mb-8">
-            <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2">
                 <div class="flex items-center">
                     <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
-                        {% if step == '1' %}step-active{% elif step in ['2', '3'] %}step-completed{% else %}step-pending{% endif %}">
+                        {% if step == '1' or step == '1.5' %}step-active{% elif step in ['2', '3', '4'] %}step-completed{% else %}step-pending{% endif %}">
                         1
                     </div>
                     <span class="ml-2 text-sm font-medium text-gray-700">Plex Setup</span>
                 </div>
-                <div class="w-8 h-px bg-gray-300"></div>
+                <div class="w-6 h-px bg-gray-300"></div>
                 <div class="flex items-center">
                     <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
-                        {% if step == '2' %}step-active{% elif step == '3' %}step-completed{% else %}step-pending{% endif %}">
+                        {% if step == '2' %}step-active{% elif step in ['3', '4'] %}step-completed{% else %}step-pending{% endif %}">
                         2
                     </div>
                     <span class="ml-2 text-sm font-medium text-gray-700">Optional Config</span>
                 </div>
-                <div class="w-8 h-px bg-gray-300"></div>
+                <div class="w-6 h-px bg-gray-300"></div>
                 <div class="flex items-center">
                     <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
-                        {% if step == '3' %}step-active{% else %}step-pending{% endif %}">
+                        {% if step == '3' %}step-active{% elif step == '4' %}step-completed{% else %}step-pending{% endif %}">
                         3
+                    </div>
+                    <span class="ml-2 text-sm font-medium text-gray-700">Initial Sync</span>
+                </div>
+                <div class="w-6 h-px bg-gray-300"></div>
+                <div class="flex items-center">
+                    <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium
+                        {% if step == '4' %}step-active{% else %}step-pending{% endif %}">
+                        4
                     </div>
                     <span class="ml-2 text-sm font-medium text-gray-700">Complete</span>
                 </div>
@@ -128,17 +148,17 @@
         </div>
         {% endif %}
         
-        <!-- Step 1.5: Server Selection -->
+        <!-- Step 1.5: Server and Library Selection -->
         {% if step == '1.5' %}
         <div class="bg-white rounded-lg shadow-lg p-8">
             <div class="text-center mb-8">
-                <h2 class="text-2xl font-bold text-gray-900">Choose Your Plex Server</h2>
-                <p class="text-gray-600 mt-2">Select which Plex server you'd like to use with Stout Requests.<br>
-                That's it - your app will be ready to use!</p>
+                <h2 class="text-2xl font-bold text-gray-900">Choose Your Plex Server & Libraries</h2>
+                <p class="text-gray-600 mt-2">Select which Plex server you'd like to use and which libraries to sync.<br>
+                You can configure Radarr/Sonarr for automatic downloads, or skip and set them up later.</p>
             </div>
 
             {% if request.query_params.get('session_id') %}
-            <form method="post" action="{{ base_url }}/setup/select-server" class="space-y-6">
+            <form method="post" action="{{ base_url }}/setup/select-server" class="space-y-6" id="setup-form">
                 <input type="hidden" name="session_id" value="{{ request.query_params.get('session_id') }}">
                 
                 <!-- Server Selection -->
@@ -152,6 +172,29 @@
                     </div>
                 </div>
 
+                <!-- Library Selection (hidden initially) -->
+                <div id="library-selection" class="border border-gray-200 rounded-lg p-6 hidden">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Select Libraries to Sync</h3>
+                    <p class="text-sm text-gray-600 mb-4">Choose which Plex libraries you want to sync. If none are selected, all libraries will be synced.</p>
+                    
+                    <div id="library-list" class="space-y-3">
+                        <div class="text-center py-4">
+                            <div class="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto"></div>
+                            <p class="text-sm text-gray-500 mt-2">Loading libraries...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-700">Library Selection:</span>
+                            <div class="space-x-2">
+                                <button type="button" onclick="selectAllLibraries()" class="text-sm text-orange-600 hover:text-orange-500">Select All</button>
+                                <button type="button" onclick="selectNoneLibraries()" class="text-sm text-gray-600 hover:text-gray-500">Select None</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Success Message -->
                 <div class="border border-green-200 rounded-lg p-6 bg-green-50">
                     <h3 class="text-lg font-semibold text-green-900 mb-2 flex items-center">
@@ -161,8 +204,8 @@
                         Ready to Go!
                     </h3>
                     <p class="text-sm text-green-700">
-                        <strong>Movie & TV search is ready!</strong> Stout Requests includes built-in access to movie and TV metadata, just like Ombi. 
-                        You can configure Radarr/Sonarr for automatic downloads and other advanced settings later in Admin Settings.
+                        <strong>Movie & TV search is ready!</strong> CuePlex includes built-in access to movie and TV metadata, just like Ombi.<br><br>
+                        <strong>Next:</strong> Configure Radarr/Sonarr now for automatic downloads, or skip and set them up later in Admin Settings.
                     </p>
                 </div>
 
@@ -170,12 +213,26 @@
                     <a href="{{ base_url }}/setup?step=1" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-md text-sm font-medium">
                         ← Back to Plex Login
                     </a>
-                    <button 
-                        type="submit"
-                        class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                    >
-                        Complete Setup →
-                    </button>
+                    <div class="flex space-x-3">
+                        <button 
+                            type="submit"
+                            id="configure-btn"
+                            formaction="{{ base_url }}/setup/select-server"
+                            disabled
+                            class="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        >
+                            <span class="configure-btn-text">Select Server First</span>
+                        </button>
+                        <button 
+                            type="submit"
+                            id="skip-btn"
+                            formaction="{{ base_url }}/setup/select-server-skip"
+                            disabled
+                            class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        >
+                            <span class="skip-btn-text">Select Server First</span>
+                        </button>
+                    </div>
                 </div>
             </form>
             {% else %}
@@ -198,34 +255,176 @@
             </div>
 
             <form method="post" action="{{ base_url }}/setup/step2" class="space-y-6">
+                {% if request.query_params.get('session_id') %}
+                <input type="hidden" name="session_id" value="{{ request.query_params.get('session_id') }}">
+                {% endif %}
                 <!-- Radarr Configuration -->
                 <div class="border border-gray-200 rounded-lg p-6">
                     <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                        <svg class="w-6 h-6 mr-2 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
+                        <svg class="w-6 h-6 mr-2 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 4v8a1 1 0 001 1h8a1 1 0 001-1v-8M7 8h10"></path>
                         </svg>
                         Radarr (Movies) - Optional
                     </h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label for="radarr_url" class="block text-sm font-medium text-gray-700 mb-2">Radarr URL</label>
-                            <input 
-                                type="url" 
-                                id="radarr_url"
-                                name="radarr_url"
-                                placeholder="http://your-radarr-instance:7878"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                            >
+                    
+                    <!-- Instance Name -->
+                    <div class="mb-4">
+                        <label for="radarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                        <input type="text" name="radarr_name" id="radarr_name" 
+                               placeholder="e.g., Radarr Movies"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                        <p class="mt-1 text-xs text-gray-500">Friendly name to identify this instance</p>
+                    </div>
+                    
+                    <!-- Connection Settings -->
+                    <div class="space-y-4">
+                        <h5 class="text-md font-semibold text-gray-900">Connection Settings</h5>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="radarr_hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                                <input type="text" name="radarr_hostname" id="radarr_hostname" 
+                                       placeholder="172.20.0.11 or localhost"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                <p class="mt-1 text-xs text-gray-500">Server hostname or IP address</p>
+                            </div>
+                            
+                            <div>
+                                <label for="radarr_port" class="block text-sm font-medium text-gray-700">Port</label>
+                                <input type="number" name="radarr_port" id="radarr_port" 
+                                       value="7878"
+                                       min="1" max="65535"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                <p class="mt-1 text-xs text-gray-500">Default: 7878</p>
+                            </div>
+                            
+                            <div class="flex items-end">
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="radarr_use_ssl" id="radarr_use_ssl" 
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="radarr_use_ssl" class="ml-2 text-sm text-gray-700">Use HTTPS</label>
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <label for="radarr_api_key" class="block text-sm font-medium text-gray-700 mb-2">Radarr API Key</label>
-                            <input 
-                                type="password" 
-                                id="radarr_api_key"
-                                name="radarr_api_key"
-                                placeholder="Enter Radarr API key"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                            >
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="radarr_api_key" class="block text-sm font-medium text-gray-700">API Key</label>
+                                <input type="password" name="radarr_api_key" id="radarr_api_key" 
+                                       placeholder="Your Radarr API key"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                <p class="mt-1 text-xs text-gray-500">Found in Radarr Settings → General → Security</p>
+                            </div>
+                            
+                            <div>
+                                <label for="radarr_base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
+                                <input type="text" name="radarr_base_url" id="radarr_base_url" 
+                                       placeholder="/radarr (optional)"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                <p class="mt-1 text-xs text-gray-500">For reverse proxy setups</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Test Connection -->
+                    <div class="mt-4">
+                        <button type="button" 
+                                onclick="testRadarrConnection()"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                            <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Test Connection
+                        </button>
+                        <div id="radarr-test-results" class="mt-4"></div>
+                    </div>
+                    
+                    <!-- Advanced Settings (Collapsed by default) -->
+                    <div class="border-t pt-4 mt-4">
+                        <button type="button" onclick="toggleRadarrAdvanced()" 
+                                class="flex items-center justify-between w-full text-left focus:outline-none">
+                            <h5 class="text-md font-semibold text-gray-900">Advanced Settings</h5>
+                            <svg id="radarr-advanced-chevron" class="w-5 h-5 text-gray-500 transform transition-transform duration-200" 
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        
+                        <div id="radarr-advanced-settings" class="hidden mt-4 space-y-4">
+                            <!-- Default Settings -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="radarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
+                                    <select name="radarr_quality_profile_id" id="radarr_quality_profile_id" 
+                                            class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Test connection to load profiles</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="radarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
+                                    <select name="radarr_root_folder_path" id="radarr_root_folder_path" 
+                                            class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="">Test connection to load folders</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="radarr_minimum_availability" class="block text-sm font-medium text-gray-700">Minimum Availability</label>
+                                    <select name="radarr_minimum_availability" id="radarr_minimum_availability" 
+                                            class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                        <option value="announced">Announced</option>
+                                        <option value="inCinemas">In Cinemas</option>
+                                        <option value="released" selected>Released</option>
+                                        <option value="preDB">PreDB</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="radarr_tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                                    <input type="text" name="radarr_tags" id="radarr_tags" 
+                                           placeholder="4k, uhd, remux (comma separated)"
+                                           class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                                    <p class="mt-1 text-xs text-gray-500">Optional tags to apply to requests</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Checkboxes -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="radarr_is_default_movie" id="radarr_is_default_movie" 
+                                           checked
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="radarr_is_default_movie" class="ml-2 text-sm text-gray-700">
+                                        Default instance for movie requests
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="radarr_enable_scan" id="radarr_enable_scan" checked
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="radarr_enable_scan" class="ml-2 text-sm text-gray-700">
+                                        Enable library scanning
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="radarr_enable_automatic_search" id="radarr_enable_automatic_search" 
+                                           checked
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="radarr_enable_automatic_search" class="ml-2 text-sm text-gray-700">
+                                        Enable automatic search on approval
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="radarr_enable_integration" id="radarr_enable_integration" 
+                                           checked
+                                           class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                                    <label for="radarr_enable_integration" class="ml-2 text-sm text-gray-700">
+                                        Enable automatic integration
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -233,32 +432,167 @@
                 <!-- Sonarr Configuration -->
                 <div class="border border-gray-200 rounded-lg p-6">
                     <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                        <svg class="w-6 h-6 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4z"></path>
-                            <path d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5a.75.75 0 001.5 0v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z"></path>
+                        <svg class="w-6 h-6 mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
                         </svg>
                         Sonarr (TV Shows) - Optional
                     </h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label for="sonarr_url" class="block text-sm font-medium text-gray-700 mb-2">Sonarr URL</label>
-                            <input 
-                                type="url" 
-                                id="sonarr_url"
-                                name="sonarr_url"
-                                placeholder="http://your-sonarr-instance:8989"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                            >
+                    
+                    <!-- Instance Name -->
+                    <div class="mb-4">
+                        <label for="sonarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                        <input type="text" name="sonarr_name" id="sonarr_name" 
+                               placeholder="e.g., Sonarr TV Shows"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                        <p class="mt-1 text-xs text-gray-500">Friendly name to identify this instance</p>
+                    </div>
+                    
+                    <!-- Connection Settings -->
+                    <div class="space-y-4">
+                        <h5 class="text-md font-semibold text-gray-900">Connection Settings</h5>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="sonarr_hostname" class="block text-sm font-medium text-gray-700">Hostname/IP</label>
+                                <input type="text" name="sonarr_hostname" id="sonarr_hostname" 
+                                       placeholder="172.20.0.11 or localhost"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                <p class="mt-1 text-xs text-gray-500">Server hostname or IP address</p>
+                            </div>
+                            
+                            <div>
+                                <label for="sonarr_port" class="block text-sm font-medium text-gray-700">Port</label>
+                                <input type="number" name="sonarr_port" id="sonarr_port" 
+                                       value="8989"
+                                       min="1" max="65535"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                <p class="mt-1 text-xs text-gray-500">Default: 8989</p>
+                            </div>
+                            
+                            <div class="flex items-end">
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="sonarr_use_ssl" id="sonarr_use_ssl" 
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="sonarr_use_ssl" class="ml-2 text-sm text-gray-700">Use HTTPS</label>
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <label for="sonarr_api_key" class="block text-sm font-medium text-gray-700 mb-2">Sonarr API Key</label>
-                            <input 
-                                type="password" 
-                                id="sonarr_api_key"
-                                name="sonarr_api_key"
-                                placeholder="Enter Sonarr API key"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                            >
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="sonarr_api_key" class="block text-sm font-medium text-gray-700">API Key</label>
+                                <input type="password" name="sonarr_api_key" id="sonarr_api_key" 
+                                       placeholder="Your Sonarr API key"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                <p class="mt-1 text-xs text-gray-500">Found in Sonarr Settings → General → Security</p>
+                            </div>
+                            
+                            <div>
+                                <label for="sonarr_base_url" class="block text-sm font-medium text-gray-700">Base URL</label>
+                                <input type="text" name="sonarr_base_url" id="sonarr_base_url" 
+                                       placeholder="/sonarr (optional)"
+                                       class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                <p class="mt-1 text-xs text-gray-500">For reverse proxy setups</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Test Connection -->
+                    <div class="mt-4">
+                        <button type="button" 
+                                onclick="testSonarrConnection()"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                            <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Test Connection
+                        </button>
+                        <div id="sonarr-test-results" class="mt-4"></div>
+                    </div>
+                    
+                    <!-- Advanced Settings (Collapsed by default) -->
+                    <div class="border-t pt-4 mt-4">
+                        <button type="button" onclick="toggleSonarrAdvanced()" 
+                                class="flex items-center justify-between w-full text-left focus:outline-none">
+                            <h5 class="text-md font-semibold text-gray-900">Advanced Settings</h5>
+                            <svg id="sonarr-advanced-chevron" class="w-5 h-5 text-gray-500 transform transition-transform duration-200" 
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        
+                        <div id="sonarr-advanced-settings" class="hidden mt-4 space-y-4">
+                            <!-- Default Settings -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="sonarr_quality_profile_id" class="block text-sm font-medium text-gray-700">Quality Profile</label>
+                                    <select name="sonarr_quality_profile_id" id="sonarr_quality_profile_id" 
+                                            class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="">Test connection to load profiles</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr_root_folder_path" class="block text-sm font-medium text-gray-700">Root Folder</label>
+                                    <select name="sonarr_root_folder_path" id="sonarr_root_folder_path" 
+                                            class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="">Test connection to load folders</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr_language_profile_id" class="block text-sm font-medium text-gray-700">Language Profile</label>
+                                    <select name="sonarr_language_profile_id" id="sonarr_language_profile_id" 
+                                            class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="">Test connection to load profiles</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="sonarr_tags" class="block text-sm font-medium text-gray-700">Tags</label>
+                                    <input type="text" name="sonarr_tags" id="sonarr_tags" 
+                                           placeholder="4k, uhd, anime (comma separated)"
+                                           class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                    <p class="mt-1 text-xs text-gray-500">Optional tags to apply to requests</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Checkboxes -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="sonarr_is_default_tv" id="sonarr_is_default_tv" 
+                                           checked
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="sonarr_is_default_tv" class="ml-2 text-sm text-gray-700">
+                                        Default instance for TV show requests
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="sonarr_enable_scan" id="sonarr_enable_scan" checked
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="sonarr_enable_scan" class="ml-2 text-sm text-gray-700">
+                                        Enable library scanning
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="sonarr_enable_automatic_search" id="sonarr_enable_automatic_search" 
+                                           checked
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="sonarr_enable_automatic_search" class="ml-2 text-sm text-gray-700">
+                                        Enable automatic search on approval
+                                    </label>
+                                </div>
+                                
+                                <div class="flex items-center">
+                                    <input type="checkbox" name="sonarr_enable_integration" id="sonarr_enable_integration" 
+                                           checked
+                                           class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                                    <label for="sonarr_enable_integration" class="ml-2 text-sm text-gray-700">
+                                        Enable automatic integration
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -278,7 +612,7 @@
                                 type="text" 
                                 id="app_name"
                                 name="app_name"
-                                value="Stout Requests"
+                                value="CuePlex"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                             >
                         </div>
@@ -324,8 +658,91 @@
         </div>
         {% endif %}
 
-        <!-- Step 3: Complete -->
+        <!-- Step 3: Initial Library Sync -->
         {% if step == '3' %}
+        <div class="bg-white rounded-lg shadow-lg p-8">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl font-bold text-gray-900">Initial Library Sync</h2>
+                <p class="text-gray-600 mt-2">Syncing your selected Plex libraries for fast discovery and request tracking</p>
+            </div>
+
+            <!-- Progress Section -->
+            <div class="mb-8">
+                <div class="bg-gray-200 rounded-full h-3 mb-4">
+                    <div id="sync-progress-bar" class="bg-orange-600 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+                
+                <div class="text-center">
+                    <div id="sync-status" class="text-lg font-medium text-gray-900 mb-2">Preparing to sync...</div>
+                    <div id="sync-details" class="text-sm text-gray-600">This may take a few minutes depending on your library size</div>
+                </div>
+            </div>
+
+            <!-- Sync Progress Info -->
+            <div id="sync-info" class="bg-gray-50 rounded-lg p-6 mb-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="text-center">
+                        <div id="movies-processed" class="text-2xl font-bold text-blue-600">0</div>
+                        <div class="text-sm text-gray-600">Movies</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="shows-processed" class="text-2xl font-bold text-green-600">0</div>
+                        <div class="text-sm text-gray-600">TV Shows</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="total-processed" class="text-2xl font-bold text-orange-600">0</div>
+                        <div class="text-sm text-gray-600">Total Items</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Display -->
+            <div id="sync-error" class="hidden bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800">Sync Error</h3>
+                        <div id="sync-error-message" class="mt-2 text-sm text-red-700"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Complete Message (hidden initially) -->
+            <div id="sync-complete" class="hidden bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-6 w-6 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-lg font-medium text-green-800">Sync Complete!</h3>
+                        <div class="mt-2 text-sm text-green-700">
+                            <p>Your Plex library has been successfully synced. CuePlex is now ready to use!</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex justify-center">
+                <button 
+                    id="continue-btn" 
+                    onclick="continueToApp()" 
+                    class="hidden bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-md text-lg font-medium"
+                >
+                    Continue to CuePlex →
+                </button>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Step 4: Complete -->
+        {% if step == '4' %}
         <div class="bg-white rounded-lg shadow-lg p-8 text-center">
             <div class="mb-8">
                 <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -334,7 +751,7 @@
                     </svg>
                 </div>
                 <h2 class="text-2xl font-bold text-gray-900">Setup Complete!</h2>
-                <p class="text-gray-600 mt-2">Stout Requests is now configured and ready to use</p>
+                <p class="text-gray-600 mt-2">CuePlex is now configured and ready to use</p>
             </div>
 
             <div class="bg-orange-50 border border-orange-200 rounded-lg p-6 mb-8">
@@ -348,11 +765,11 @@
 
             <div class="space-y-4">
                 <a href="{{ base_url }}/" class="inline-block bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-md text-lg font-medium">
-                    Start Using Stout Requests
+                    Start Using CuePlex
                 </a>
                 {% if not has_users %}
                 <p class="text-sm text-gray-600">
-                    You'll be automatically made an admin when you first log in with Plex
+                    You'll be automatically made an admin when you first log in with Plex account
                 </p>
                 {% endif %}
             </div>
@@ -410,12 +827,15 @@
             pollForAuth(pinId);
         }
 
+        // Store reference to popup window for closing
+        let plexAuthPopup = null;
+
         function openPlexAuth(url) {
             // Try to open popup first
-            const popup = window.open(url, 'plex-auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+            plexAuthPopup = window.open(url, 'plex-auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
             
             // If popup failed, fallback to new tab
-            if (!popup || popup.closed || typeof popup.closed == 'undefined') {
+            if (!plexAuthPopup || plexAuthPopup.closed || typeof plexAuthPopup.closed == 'undefined') {
                 // Show message about fallback
                 const fallbackMessage = document.createElement('div');
                 fallbackMessage.className = 'mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800';
@@ -423,7 +843,7 @@
                 document.querySelector('#plex-oauth-content .space-y-3').appendChild(fallbackMessage);
                 
                 // Open in new tab as fallback
-                window.open(url, '_blank');
+                plexAuthPopup = window.open(url, '_blank');
             }
         }
 
@@ -438,6 +858,10 @@
                     attempts++;
                     if (attempts > maxAttempts) {
                         clearInterval(pollInterval);
+                        // Close popup window if it exists
+                        if (plexAuthPopup && !plexAuthPopup.closed) {
+                            plexAuthPopup.close();
+                        }
                         showTimeoutUI();
                         return;
                     }
@@ -459,6 +883,10 @@
                         } else if (response.redirected) {
                             // Response was redirected - check if it's success or error
                             clearInterval(pollInterval);
+                            // Close popup window if it exists
+                            if (plexAuthPopup && !plexAuthPopup.closed) {
+                                plexAuthPopup.close();
+                            }
                             window.location.href = response.url;
                         } else if (response.status === 200) {
                             // Check if it's a JSON response indicating pending status
@@ -479,6 +907,10 @@
                         } else if (response.status === 303) {
                             // Explicit redirect - follow it
                             clearInterval(pollInterval);
+                            // Close popup window if it exists
+                            if (plexAuthPopup && !plexAuthPopup.closed) {
+                                plexAuthPopup.close();
+                            }
                             // For 303 responses, we need to read the location header differently
                             const text = await response.text();
                             if (text.includes('session_id=')) {
@@ -496,6 +928,10 @@
                         } else if (response.status >= 400 && response.status < 500) {
                             // Client error - stop polling and show error
                             clearInterval(pollInterval);
+                            // Close popup window if it exists
+                            if (plexAuthPopup && !plexAuthPopup.closed) {
+                                plexAuthPopup.close();
+                            }
                             showErrorUI('Authorization failed. Please try again.');
                         } else {
                             console.log('Unexpected poll response status:', response.status);
@@ -603,6 +1039,667 @@
                 }
             }
         });
+        
+        // Enable buttons when server is selected (step 1.5)
+        document.addEventListener('change', function(event) {
+            if (event.target.name === 'server_id') {
+                const configureBtn = document.getElementById('configure-btn');
+                const skipBtn = document.getElementById('skip-btn');
+                
+                if (configureBtn && skipBtn) {
+                    configureBtn.disabled = false;
+                    skipBtn.disabled = false;
+                    configureBtn.classList.remove('disabled:bg-gray-400', 'disabled:cursor-not-allowed');
+                    skipBtn.classList.remove('disabled:bg-gray-400', 'disabled:cursor-not-allowed');
+                    
+                    // Update button text
+                    const configureText = configureBtn.querySelector('.configure-btn-text');
+                    const skipText = skipBtn.querySelector('.skip-btn-text');
+                    if (configureText) configureText.textContent = 'Configure Radarr/Sonarr →';
+                    if (skipText) skipText.textContent = 'Skip & Complete Setup →';
+                }
+                
+                // Load libraries for the selected server
+                loadLibrariesForSelectedServer();
+            }
+        });
+        
+        // Also enable buttons when server list loads via HTMX
+        document.addEventListener('htmx:afterSettle', function(event) {
+            if (event.detail.target.id === 'server-list') {
+                // Add event listeners to radio buttons that were just loaded
+                const radioButtons = document.querySelectorAll('input[name="server_id"]');
+                radioButtons.forEach(radio => {
+                    radio.addEventListener('change', function() {
+                        const configureBtn = document.getElementById('configure-btn');
+                        const skipBtn = document.getElementById('skip-btn');
+                        
+                        if (configureBtn && skipBtn) {
+                            configureBtn.disabled = false;
+                            skipBtn.disabled = false;
+                            configureBtn.classList.remove('disabled:bg-gray-400', 'disabled:cursor-not-allowed');
+                            skipBtn.classList.remove('disabled:bg-gray-400', 'disabled:cursor-not-allowed');
+                            
+                            // Update button text
+                            const configureText = configureBtn.querySelector('.configure-btn-text');
+                            const skipText = skipBtn.querySelector('.skip-btn-text');
+                            if (configureText) configureText.textContent = 'Configure Radarr/Sonarr →';
+                            if (skipText) skipText.textContent = 'Skip & Complete Setup →';
+                        }
+                    });
+                });
+            }
+        });
+        
+        // Advanced settings toggle functions
+        function toggleRadarrAdvanced() {
+            const settings = document.getElementById('radarr-advanced-settings');
+            const chevron = document.getElementById('radarr-advanced-chevron');
+            
+            if (settings.classList.contains('hidden')) {
+                settings.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                settings.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+        
+        function toggleSonarrAdvanced() {
+            const settings = document.getElementById('sonarr-advanced-settings');
+            const chevron = document.getElementById('sonarr-advanced-chevron');
+            
+            if (settings.classList.contains('hidden')) {
+                settings.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                settings.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+        
+        // Test connection functions
+        async function testRadarrConnection() {
+            const resultsDiv = document.getElementById('radarr-test-results');
+            
+            // Get form data
+            const hostname = document.getElementById('radarr_hostname')?.value || '';
+            const port = document.getElementById('radarr_port')?.value || '7878';
+            const useSSL = document.getElementById('radarr_use_ssl')?.checked || false;
+            const apiKey = document.getElementById('radarr_api_key')?.value || '';
+            const baseUrl = document.getElementById('radarr_base_url')?.value || '';
+            
+            if (!hostname || !apiKey) {
+                resultsDiv.innerHTML = '<div class="text-red-600 text-sm">Please fill in hostname and API key first</div>';
+                return;
+            }
+            
+            // Show loading
+            resultsDiv.innerHTML = '<div class="text-blue-600 text-sm">Testing connection...</div>';
+            
+            try {
+                const response = await fetch('{{ base_url }}/setup/test-radarr', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        radarr_hostname: hostname,
+                        radarr_port: port,
+                        use_ssl: useSSL,
+                        radarr_api_key: apiKey,
+                        radarr_base_url: baseUrl
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    resultsDiv.innerHTML = `
+                        <div class="text-green-600 text-sm flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                            </svg>
+                            ${result.message}
+                        </div>`;
+                    
+                    // Load folders and quality profiles
+                    if (result.folders) {
+                        loadRadarrFolders(result.folders);
+                    }
+                    if (result.quality_profiles) {
+                        loadRadarrQualityProfiles(result.quality_profiles);
+                    }
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="text-red-600 text-sm flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            ${result.message}
+                        </div>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="text-red-600 text-sm flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                        Connection failed: ${error.message}
+                    </div>`;
+            }
+        }
+        
+        async function testSonarrConnection() {
+            const resultsDiv = document.getElementById('sonarr-test-results');
+            
+            // Get form data
+            const hostname = document.getElementById('sonarr_hostname')?.value || '';
+            const port = document.getElementById('sonarr_port')?.value || '8989';
+            const useSSL = document.getElementById('sonarr_use_ssl')?.checked || false;
+            const apiKey = document.getElementById('sonarr_api_key')?.value || '';
+            const baseUrl = document.getElementById('sonarr_base_url')?.value || '';
+            
+            if (!hostname || !apiKey) {
+                resultsDiv.innerHTML = '<div class="text-red-600 text-sm">Please fill in hostname and API key first</div>';
+                return;
+            }
+            
+            // Show loading
+            resultsDiv.innerHTML = '<div class="text-blue-600 text-sm">Testing connection...</div>';
+            
+            try {
+                const response = await fetch('{{ base_url }}/setup/test-sonarr', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        sonarr_hostname: hostname,
+                        sonarr_port: port,
+                        use_ssl: useSSL,
+                        sonarr_api_key: apiKey,
+                        sonarr_base_url: baseUrl
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    resultsDiv.innerHTML = `
+                        <div class="text-green-600 text-sm flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                            </svg>
+                            ${result.message}
+                        </div>`;
+                    
+                    // Load folders and quality profiles
+                    if (result.folders) {
+                        loadSonarrFolders(result.folders);
+                    }
+                    if (result.quality_profiles) {
+                        loadSonarrQualityProfiles(result.quality_profiles);
+                    }
+                    if (result.language_profiles) {
+                        loadSonarrLanguageProfiles(result.language_profiles);
+                    }
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="text-red-600 text-sm flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                            </svg>
+                            ${result.message}
+                        </div>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="text-red-600 text-sm flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                        Connection failed: ${error.message}
+                    </div>`;
+            }
+        }
+        
+        // Load functions for dropdowns
+        function loadRadarrFolders(folders) {
+            const select = document.getElementById('radarr_root_folder_path');
+            if (select && folders) {
+                select.innerHTML = '<option value="">Select a folder...</option>';
+                folders.forEach(folder => {
+                    const option = document.createElement('option');
+                    option.value = folder.path;
+                    option.textContent = folder.path;
+                    select.appendChild(option);
+                });
+            }
+        }
+        
+        function loadRadarrQualityProfiles(profiles) {
+            const select = document.getElementById('radarr_quality_profile_id');
+            if (select && profiles) {
+                select.innerHTML = '<option value="">Select a quality profile...</option>';
+                profiles.forEach(profile => {
+                    const option = document.createElement('option');
+                    option.value = profile.id;
+                    option.textContent = profile.name;
+                    select.appendChild(option);
+                });
+            }
+        }
+        
+        function loadSonarrFolders(folders) {
+            const select = document.getElementById('sonarr_root_folder_path');
+            if (select && folders) {
+                select.innerHTML = '<option value="">Select a folder...</option>';
+                folders.forEach(folder => {
+                    const option = document.createElement('option');
+                    option.value = folder.path;
+                    option.textContent = folder.path;
+                    select.appendChild(option);
+                });
+            }
+        }
+        
+        function loadSonarrQualityProfiles(profiles) {
+            const select = document.getElementById('sonarr_quality_profile_id');
+            if (select && profiles) {
+                select.innerHTML = '<option value="">Select a quality profile...</option>';
+                profiles.forEach(profile => {
+                    const option = document.createElement('option');
+                    option.value = profile.id;
+                    option.textContent = profile.name;
+                    select.appendChild(option);
+                });
+            }
+        }
+        
+        function loadSonarrLanguageProfiles(profiles) {
+            const select = document.getElementById('sonarr_language_profile_id');
+            if (select && profiles) {
+                select.innerHTML = '<option value="">Select a language profile...</option>';
+                profiles.forEach(profile => {
+                    const option = document.createElement('option');
+                    option.value = profile.id;
+                    option.textContent = profile.name;
+                    select.appendChild(option);
+                });
+            }
+        }
+        
+        // Library selection functions
+        async function loadLibrariesForSelectedServer() {
+            const selectedServer = document.querySelector('input[name="server_id"]:checked');
+            if (!selectedServer) return;
+            
+            const sessionId = document.querySelector('input[name="session_id"]').value;
+            if (!sessionId) return;
+            
+            try {
+                const response = await fetch(`{{ base_url }}/setup/get-libraries?session_id=${sessionId}&server_id=${selectedServer.value}`);
+                const data = await response.json();
+                
+                if (response.ok && data.libraries) {
+                    renderLibraries(data.libraries);
+                    document.getElementById('library-selection').classList.remove('hidden');
+                } else {
+                    console.error('Failed to load libraries:', data);
+                }
+            } catch (error) {
+                console.error('Error loading libraries:', error);
+            }
+        }
+        
+        function renderLibraries(libraries) {
+            const container = document.getElementById('library-list');
+            
+            if (!libraries || libraries.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-4 text-gray-500">
+                        <p>No movie or TV libraries found on this server.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const libraryHtml = libraries.map(library => {
+                const typeIcon = library.type === 'movie' ? '🎬' : '📺';
+                const typeColor = library.type === 'movie' ? 'blue' : 'green';
+                
+                return `
+                    <div class="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                        <input 
+                            type="checkbox" 
+                            id="library-${library.key}" 
+                            name="selected_libraries" 
+                            value="${library.title}"
+                            checked
+                            class="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                        />
+                        <label for="library-${library.key}" class="flex-1 cursor-pointer">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-lg">${typeIcon}</span>
+                                <span class="font-medium text-gray-900">${library.title}</span>
+                                <span class="px-2 py-1 text-xs bg-${typeColor}-100 text-${typeColor}-800 rounded-full">
+                                    ${library.type}
+                                </span>
+                            </div>
+                        </label>
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = `
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm font-medium text-gray-700">Available Libraries (${libraries.length})</span>
+                    </div>
+                    ${libraryHtml}
+                </div>
+            `;
+        }
+        
+        function selectAllLibraries() {
+            const checkboxes = document.querySelectorAll('input[name="selected_libraries"]');
+            checkboxes.forEach(checkbox => checkbox.checked = true);
+        }
+        
+        function selectNoneLibraries() {
+            const checkboxes = document.querySelectorAll('input[name="selected_libraries"]');
+            checkboxes.forEach(checkbox => checkbox.checked = false);
+        }
+        
+        // Step 3 sync functions
+        function startInitialSync() {
+            // Auto-start sync when step 3 loads
+            if (window.location.search.includes('step=3')) {
+                setTimeout(() => {
+                    performInitialSync();
+                }, 1000);
+            }
+        }
+        
+        async function performInitialSync() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('session_id');
+            
+            if (!sessionId) {
+                showSyncError('Setup session expired. Please start over.');
+                return;
+            }
+            
+            try {
+                updateSyncStatus('Starting sync...', 0);
+                
+                // Use streaming progress instead of simulation
+                await streamingSyncProgress(sessionId);
+                
+            } catch (error) {
+                console.error('Sync error:', error);
+                showSyncError(`Sync failed: ${error.message}`);
+            }
+        }
+        
+        async function streamingSyncProgress(sessionId) {
+            return new Promise((resolve, reject) => {
+                // Use fetch with streaming to get real-time progress
+                fetch(`{{ base_url }}/setup/sync`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Accept': 'text/event-stream',
+                        'Cache-Control': 'no-cache'
+                    },
+                    body: `session_id=${sessionId}`
+                }).then(response => {
+                    console.log('Received response:', response.status, response.headers.get('content-type'));
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    
+                    function readStream() {
+                        return reader.read().then(({ value, done }) => {
+                            if (done) {
+                                console.log('Stream completed');
+                                resolve();
+                                return;
+                            }
+                            
+                            const chunk = decoder.decode(value, { stream: true });
+                            console.log('Received chunk:', chunk);
+                            buffer += chunk;
+                            
+                            // Process complete lines
+                            let lineEnd;
+                            while ((lineEnd = buffer.indexOf('\n')) !== -1) {
+                                const line = buffer.substring(0, lineEnd).trim();
+                                buffer = buffer.substring(lineEnd + 1);
+                                
+                                console.log('Processing complete line:', line);
+                                
+                                if (line.startsWith('data: ')) {
+                                    try {
+                                        const jsonData = line.substring(6).trim();
+                                        console.log('Extracting JSON:', jsonData);
+                                        
+                                        if (jsonData) {
+                                            const data = JSON.parse(jsonData);
+                                            console.log('Successfully parsed data:', data);
+                                            
+                                            if (data.error) {
+                                                console.error('Received error from server:', data);
+                                                showSyncError(data.status || 'Sync failed');
+                                                reject(new Error(data.status || 'Sync failed'));
+                                                return;
+                                            }
+                                            
+                                            // Update progress UI
+                                            console.log('Updating UI - progress:', data.progress, 'status:', data.status);
+                                            updateSyncStatus(data.status || 'Processing...', data.progress || 0);
+                                            
+                                            // Update counts if provided
+                                            if (data.movies !== undefined || data.tv_shows !== undefined) {
+                                                console.log('Updating counts - movies:', data.movies, 'tv_shows:', data.tv_shows);
+                                                updateSyncCounts(data.movies || 0, data.tv_shows || 0);
+                                            }
+                                            
+                                            // Check for completion
+                                            if (data.completed) {
+                                                console.log('*** SYNC COMPLETED - SHOWING COMPLETION UI ***', data);
+                                                showSyncComplete();
+                                                setTimeout(() => {
+                                                    console.log('*** RESOLVING PROMISE ***');
+                                                    resolve();
+                                                }, 500);
+                                                return;
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.error('Failed to parse JSON data:', line, 'Error:', e);
+                                    }
+                                } else if (line.trim()) {
+                                    console.log('Non-data line received:', line);
+                                }
+                            }
+                            
+                            return readStream();
+                        });
+                    }
+                    
+                    return readStream();
+                }).catch(error => {
+                    console.error('Streaming error:', error);
+                    showSyncError(`Sync failed: ${error.message}`);
+                    reject(error);
+                });
+            });
+        }
+        
+        // Fallback function that calls sync endpoint directly (for non-streaming)
+        async function performDirectSync() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('session_id');
+            
+            try {
+                const response = await fetch(`{{ base_url }}/setup/sync`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `session_id=${sessionId}`
+                });
+                
+                if (response.ok) {
+                    const syncData = await response.json();
+                    console.log('Sync completed:', syncData);
+                    
+                    // Update final stats if available
+                    if (syncData.sync_result) {
+                        const result = syncData.sync_result;
+                        if (result.movies_processed) {
+                            document.getElementById('movies-processed').textContent = result.movies_processed;
+                        }
+                        if (result.shows_processed) { 
+                            document.getElementById('shows-processed').textContent = result.shows_processed;
+                        }
+                        const total = (result.movies_processed || 0) + (result.shows_processed || 0);
+                        document.getElementById('total-processed').textContent = total;
+                    }
+                    
+                    showSyncComplete();
+                } else {
+                    const errorData = await response.json();
+                    showSyncError(errorData.detail || 'Sync failed');
+                }
+            } catch (error) {
+                console.error('Sync error:', error);
+                showSyncError('Network error during sync. Please try again.');
+            }
+        }
+        
+        async function simulateSyncProgress() {
+            // Simulate sync progress for demo purposes
+            // In a real implementation, this would poll a sync status endpoint
+            const steps = [
+                { status: 'Connecting to Plex server...', progress: 10 },
+                { status: 'Loading library sections...', progress: 20 },
+                { status: 'Syncing movie libraries...', progress: 40, movies: 25 },
+                { status: 'Syncing TV libraries...', progress: 70, movies: 25, shows: 15 },
+                { status: 'Finalizing sync...', progress: 90, movies: 25, shows: 15 },
+                { status: 'Sync complete!', progress: 100, movies: 25, shows: 15 }
+            ];
+            
+            for (const step of steps) {
+                updateSyncStatus(step.status, step.progress);
+                if (step.movies) document.getElementById('movies-processed').textContent = step.movies;
+                if (step.shows) document.getElementById('shows-processed').textContent = step.shows;
+                if (step.movies || step.shows) {
+                    document.getElementById('total-processed').textContent = (step.movies || 0) + (step.shows || 0);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+            
+            showSyncComplete();
+        }
+        
+        function updateSyncStatus(status, progress) {
+            document.getElementById('sync-status').textContent = status;
+            document.getElementById('sync-progress-bar').style.width = progress + '%';
+            
+            if (progress < 100) {
+                document.getElementById('sync-details').textContent = `${progress}% complete`;
+            } else {
+                document.getElementById('sync-details').textContent = 'Sync completed successfully!';
+            }
+        }
+        
+        function updateSyncCounts(movies, tvShows) {
+            console.log('*** updateSyncCounts called with movies:', movies, 'tvShows:', tvShows);
+            const moviesElement = document.getElementById('movies-processed');
+            const showsElement = document.getElementById('shows-processed');
+            const totalElement = document.getElementById('total-processed');
+            
+            if (moviesElement) {
+                moviesElement.textContent = movies;
+                console.log('Updated movies count to:', movies);
+            }
+            if (showsElement) {
+                showsElement.textContent = tvShows;
+                console.log('Updated TV shows count to:', tvShows);
+            }
+            if (totalElement) {
+                const total = movies + tvShows;
+                totalElement.textContent = total;
+                console.log('Updated total count to:', total);
+            }
+        }
+        
+        function showSyncError(message) {
+            document.getElementById('sync-error-message').textContent = message;
+            document.getElementById('sync-error').classList.remove('hidden');
+        }
+        
+        function showSyncComplete() {
+            console.log('*** showSyncComplete function called ***');
+            const completeElement = document.getElementById('sync-complete');
+            const continueElement = document.getElementById('continue-btn');
+            
+            console.log('Complete element found:', completeElement);
+            console.log('Continue element found:', continueElement);
+            
+            if (completeElement) {
+                console.log('Complete element classes before:', completeElement.className);
+                completeElement.classList.remove('hidden');
+                console.log('Complete element classes after:', completeElement.className);
+                console.log('*** REMOVED HIDDEN CLASS FROM SYNC-COMPLETE ***');
+            } else {
+                console.error('*** SYNC-COMPLETE ELEMENT NOT FOUND ***');
+            }
+            
+            if (continueElement) {
+                console.log('Continue element classes before:', continueElement.className);
+                continueElement.classList.remove('hidden');
+                console.log('Continue element classes after:', continueElement.className);
+                console.log('*** REMOVED HIDDEN CLASS FROM CONTINUE-BTN ***');
+            } else {
+                console.error('*** CONTINUE-BTN ELEMENT NOT FOUND ***');
+            }
+            
+            // Also try to make them visible with inline styles as a fallback
+            if (completeElement) {
+                completeElement.style.display = 'block';
+                console.log('*** SET DISPLAY BLOCK ON COMPLETE ELEMENT ***');
+            }
+            if (continueElement) {
+                continueElement.style.display = 'block';
+                console.log('*** SET DISPLAY BLOCK ON CONTINUE ELEMENT ***');
+            }
+        }
+        
+        function continueToApp() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('session_id');
+            
+            if (sessionId) {
+                window.location.href = `{{ base_url }}/setup/auto-login?session_id=${sessionId}`;
+            } else {
+                window.location.href = '{{ base_url }}/setup/auto-login';
+            }
+        }
+        
+        // Auto-start sync on step 3
+        if (window.location.search.includes('step=3')) {
+            document.addEventListener('DOMContentLoaded', startInitialSync);
+        }
     </script>
 </body>
 </html>

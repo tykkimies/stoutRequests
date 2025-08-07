@@ -31,11 +31,11 @@
     {%- endif -%}
 
     <!-- Handle non-available statuses (delegate to original macro) -->
-    {%- if computed_status != 'available' -%}
+    {%- if computed_status not in ['available', 'partial_plex'] -%}
         {% from 'macros/status_display.html' import media_status_badge %}
         {{ media_status_badge(item, style, size, status, tmdb_id, media_type, base_url) }}
     {%- else -%}
-        <!-- Available status - show multi-instance request buttons -->
+        <!-- Available or partial status - show multi-instance request buttons -->
         
         {%- if filtered_instances and filtered_instances|length > 1 -%}
             <!-- Multiple instances available - show dropdown selector -->
@@ -54,7 +54,7 @@
                     </button>
                     
                     <!-- Dropdown menu (will be repositioned by JavaScript) -->
-                    <div class="hidden dropdown-menu bg-white rounded-md shadow-xl border border-gray-200" style="position: fixed; z-index: 99999; min-width: 160px;">
+                    <div class="hidden dropdown-menu bg-white dark:bg-gray-800 rounded-md shadow-xl border border-gray-200 dark:border-gray-600" style="position: fixed; z-index: 99999; min-width: 160px;">
                         {%- for instance in filtered_instances -%}
                             <form hx-post="{{ base_url }}/requests/create" hx-target="#button-area-{{ item_tmdb_id }}" hx-swap="innerHTML" class="block">
                                 <input type="hidden" name="tmdb_id" value="{{ item_tmdb_id }}">
@@ -69,7 +69,7 @@
                                 
                                 <button 
                                     type="submit" 
-                                    class="w-full text-left px-3 py-2 {{ text_size }} text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md border-b border-gray-100 last:border-b-0"
+                                    class="w-full text-left px-3 py-2 {{ text_size }} text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 first:rounded-t-md last:rounded-b-md border-b border-gray-100 dark:border-gray-600 last:border-b-0"
                                     onclick="event.stopPropagation(); closeAllDropdowns();"
                                 >
                                     <div class="flex items-center justify-between">
@@ -94,7 +94,7 @@
                 <div class="inline-block relative" onclick="event.preventDefault(); event.stopPropagation(); return false;">
                     <button 
                         type="button"
-                        class="inline-flex items-center px-3 py-2 border border-orange-300 text-sm leading-4 font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors"
+                        class="inline-flex items-center px-3 py-2 border border-orange-300 dark:border-orange-600 text-sm leading-4 font-medium rounded-md text-orange-700 dark:text-orange-200 bg-orange-50 dark:bg-orange-600/90 hover:bg-orange-100 dark:hover:bg-orange-700/90 transition-colors"
                         onclick="event.preventDefault(); event.stopPropagation(); toggleDropdownMenu(this); return false;"
                     >
                         <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -106,7 +106,7 @@
                         </svg>
                     </button>
                     
-                    <div class="hidden dropdown-menu bg-white rounded-md shadow-xl border border-gray-200" style="position: fixed; z-index: 99999; min-width: 200px;">
+                    <div class="hidden dropdown-menu bg-white dark:bg-gray-800 rounded-md shadow-xl border border-gray-200 dark:border-gray-600" style="position: fixed; z-index: 99999; min-width: 200px;">
                         {%- for instance in filtered_instances -%}
                             <form hx-post="{{ base_url }}/requests/create" hx-target="#button-area-{{ item_tmdb_id }}" hx-swap="innerHTML" class="block">
                                 <input type="hidden" name="tmdb_id" value="{{ item_tmdb_id }}">
@@ -121,7 +121,7 @@
                                 
                                 <button 
                                     type="submit" 
-                                    class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md border-b border-gray-100 last:border-b-0"
+                                    class="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 first:rounded-t-md last:rounded-b-md border-b border-gray-100 dark:border-gray-600 last:border-b-0"
                                     onclick="event.stopPropagation(); closeAllDropdowns();"
                                 >
                                     <div class="flex items-center justify-between">
@@ -178,7 +178,7 @@
                     <input type="hidden" name="quality_tier" value="{{ instance.quality_tier or 'standard' }}">
                     <input type="hidden" name="request_source" value="single_instance">
                     
-                    <button type="submit" class="inline-flex items-center px-3 py-2 border border-orange-300 text-sm leading-4 font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors" onclick="event.stopPropagation();">
+                    <button type="submit" class="inline-flex items-center px-3 py-2 border border-orange-300 dark:border-orange-600 text-sm leading-4 font-medium rounded-md text-orange-700 dark:text-orange-200 bg-orange-50 dark:bg-orange-600/90 hover:bg-orange-100 dark:hover:bg-orange-700/90 transition-colors" onclick="event.stopPropagation();">
                         <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
                         </svg>

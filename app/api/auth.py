@@ -204,10 +204,13 @@ async def plex_login(request: Request, session: Session = Depends(get_session)):
         </div>
         
         <script>
+            // Store reference to popup window for closing
+            let plexAuthLoginPopup = null;
+            
             function openPlexAuthLogin(url) {{
-                const popup = window.open(url, 'plex-auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
-                if (!popup || popup.closed || typeof popup.closed == 'undefined') {{
-                    window.open(url, '_blank');
+                plexAuthLoginPopup = window.open(url, 'plex-auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+                if (!plexAuthLoginPopup || plexAuthLoginPopup.closed || typeof plexAuthLoginPopup.closed == 'undefined') {{
+                    plexAuthLoginPopup = window.open(url, '_blank');
                 }}
             }}
             
@@ -226,6 +229,10 @@ async def plex_login(request: Request, session: Session = Depends(get_session)):
                     attempts++;
                     if (attempts > maxAttempts) {{
                         clearInterval(pollInterval);
+                        // Close popup window if it exists
+                        if (plexAuthLoginPopup && !plexAuthLoginPopup.closed) {{
+                            plexAuthLoginPopup.close();
+                        }}
                         document.getElementById('login-oauth-content').innerHTML = `
                             <div class="text-center text-red-600">
                                 <p>⏰ Authorization timed out. Please try again.</p>
@@ -252,9 +259,13 @@ async def plex_login(request: Request, session: Session = Depends(get_session)):
                                 localStorage.setItem('access_token', data.access_token);
                                 
                                 // Create a cookie for server-side rendering (optional)
-                                document.cookie = `access_token=${{data.access_token}}; path=/; max-age=86400`;
+                                document.cookie = `access_token=${{data.access_token}}; path=/; max-age=14400`;
                                 
                                 clearInterval(pollInterval);
+                                // Close popup window if it exists
+                                if (plexAuthLoginPopup && !plexAuthLoginPopup.closed) {{
+                                    plexAuthLoginPopup.close();
+                                }}
                                 
                                 // Show success message briefly
                                 document.getElementById('login-oauth-content').innerHTML = `
@@ -284,6 +295,10 @@ async def plex_login(request: Request, session: Session = Depends(get_session)):
                             const data = await response.json();
                             if (data.status === 'unauthorized' && data.redirect_url) {{
                                 clearInterval(pollInterval);
+                                // Close popup window if it exists
+                                if (plexAuthLoginPopup && !plexAuthLoginPopup.closed) {{
+                                    plexAuthLoginPopup.close();
+                                }}
                                 
                                 // Show brief message then redirect
                                 document.getElementById('login-oauth-content').innerHTML = `
@@ -409,6 +424,11 @@ async def plex_verify(request: Request, pin_id: str = Form(...), session: Sessio
             session.commit()
             session.refresh(user)
             
+            # Initialize user permissions for new admin user
+            from ..services.permissions_service import PermissionsService
+            permissions_service = PermissionsService(session)
+            permissions_service.create_default_user_permissions(user.id, is_admin=True)
+            
             # If this is the first user and settings are configured, set them as the configurator
             from ..services.settings_service import SettingsService
             SettingsService.set_configured_by_first_user(session)
@@ -485,6 +505,16 @@ async def import_plex_friends(
             imported_count += 1
     
     session.commit()
+    session.refresh_all()
+    
+    # Initialize permissions for all newly imported users
+    from ..services.permissions_service import PermissionsService
+    permissions_service = PermissionsService(session)
+    for friend_data in friends:
+        statement = select(User).where(User.plex_id == friend_data['id'])
+        user = session.exec(statement).first()
+        if user:
+            permissions_service.create_default_user_permissions(user.id, is_admin=user.is_admin)
     
     # Content negotiation: HTMX vs API clients
     if request.headers.get("HX-Request"):
@@ -581,7 +611,7 @@ async def local_login_form(request: Request, session: Session = Depends(get_sess
                     // Set token and redirect
                     if (result.access_token) {{
                         localStorage.setItem('access_token', result.access_token);
-                        document.cookie = `access_token=${{result.access_token}}; path=/; max-age=86400`;
+                        document.cookie = `access_token=${{result.access_token}}; path=/; max-age=14400`;
                         window.location.href = '{base_url}/';
                     }}
                 }} else {{

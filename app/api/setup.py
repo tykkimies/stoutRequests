@@ -3,6 +3,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
 from typing import Optional
+from datetime import datetime
 
 from ..core.database import get_session
 from ..models.user import User
@@ -30,8 +31,17 @@ async def setup_wizard(
     session: Session = Depends(get_session)
 ):
     """First-time setup wizard"""
+    # Debug logging for setup wizard access
+    step = request.query_params.get("step", "1")
+    session_id = request.query_params.get("session_id", "none")
+    print(f"🔧 Setup wizard accessed: step={step}, session_id={session_id}, url={request.url}")
+    
     # Check if already configured
-    if SettingsService.is_configured(session):
+    is_configured = SettingsService.is_configured(session)
+    print(f"🔧 Setup wizard is_configured check: {is_configured}")
+    
+    if is_configured:
+        print(f"🔧 Setup wizard redirecting to main site because is_configured=True")
         return RedirectResponse(url=build_app_url("/"), status_code=303)
     
     # Check if any users exist
@@ -53,6 +63,7 @@ async def setup_wizard(
         **global_context  # Include global context (base_url, etc.)
     }
     
+    print(f"🔧 Setup wizard rendering step {context['step']} with has_users={has_users}")
     return templates.TemplateResponse("setup_wizard.html", context)
 
 
@@ -232,12 +243,19 @@ async def setup_plex_verify(
 
 @router.post("/select-server")
 async def setup_select_server(
-    session_id: str = Form(...),
-    server_id: str = Form(...),
+    request: Request,
     session: Session = Depends(get_session)
 ):
-    """Complete server selection and basic setup"""
+    """Complete server selection and library preferences, then proceed to step 2 configuration"""
     try:
+        # Get form data
+        form_data = await request.form()
+        session_id = form_data.get('session_id')
+        server_id = form_data.get('server_id')
+        selected_libraries = form_data.getlist('selected_libraries')
+        
+        print(f"🔧 Setup select-server called: session_id={session_id}, server_id={server_id}, libraries={selected_libraries}")
+        
         import json
         import os
         
@@ -265,22 +283,101 @@ async def setup_select_server(
                 status_code=303
             )
         
-        # Update settings with server info
+        # Update settings with server info (don't mark as configured yet - wait for step 2)
         settings_data = {
             'plex_url': selected_server['scheme'] + '://' + selected_server['address'] + ':' + str(selected_server['port']),
             'plex_token': setup_data['auth_token'],
             'plex_client_id': 'stout-requests',
-            'is_configured': True
+            'is_configured': False  # Don't mark as configured until step 2 is complete
         }
         
         # Pass the user ID to properly set configured_by
         user_id = setup_data['user']['id'] if 'user' in setup_data else None
         SettingsService.update_settings(session, settings_data, user_id)
         
-        # Clean up temp file
-        os.remove(temp_file)
+        # Save library preferences to setup data for later use
+        setup_data['selected_libraries'] = selected_libraries
+        with open(temp_file, 'w') as f:
+            json.dump(setup_data, f)
         
-        return RedirectResponse(url=build_app_url("/setup/auto-login"), status_code=303)
+        redirect_url = build_app_url(f"/setup?step=2&session_id={session_id}")
+        print(f"🔧 Setup select-server redirecting to: {redirect_url}")
+        return RedirectResponse(url=redirect_url, status_code=303)
+        
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/setup?step=1&error=Server selection failed: {str(e)}", 
+            status_code=303
+        )
+
+
+@router.post("/select-server-skip")
+async def setup_select_server_skip(
+    request: Request,
+    session: Session = Depends(get_session)
+):
+    """Complete server selection and library preferences, skip configuration and go to sync step"""
+    try:
+        # Get form data
+        form_data = await request.form()
+        session_id = form_data.get('session_id')
+        server_id = form_data.get('server_id')
+        selected_libraries = form_data.getlist('selected_libraries')
+        
+        import json
+        import os
+        
+        # Load setup session data
+        temp_file = f"/tmp/stout_setup_{session_id}.json"
+        if not os.path.exists(temp_file):
+            return RedirectResponse(
+                url="/setup?step=1&error=Setup session expired", 
+                status_code=303
+            )
+        
+        with open(temp_file, 'r') as f:
+            setup_data = json.load(f)
+        
+        # Find selected server
+        selected_server = None
+        for server in setup_data['servers']:
+            if server['clientIdentifier'] == server_id:
+                selected_server = server
+                break
+        
+        if not selected_server:
+            return RedirectResponse(
+                url=f"/setup?step=1.5&session_id={session_id}&error=Invalid server selection", 
+                status_code=303
+            )
+        
+        # Update settings with server info but don't mark as configured yet
+        settings_data = {
+            'plex_url': selected_server['scheme'] + '://' + selected_server['address'] + ':' + str(selected_server['port']),
+            'plex_token': setup_data['auth_token'],
+            'plex_client_id': 'stout-requests',
+            'is_configured': False  # Don't mark as configured until sync step completes
+        }
+        
+        # Pass the user ID to properly set configured_by
+        user_id = setup_data['user']['id'] if 'user' in setup_data else None
+        SettingsService.update_settings(session, settings_data, user_id)
+        
+        # Save library preferences for the sync step
+        if selected_libraries:
+            settings = SettingsService.get_settings(session)
+            settings.set_sync_library_preferences(selected_libraries)
+            settings.updated_at = datetime.utcnow()
+            session.add(settings)
+            session.commit()
+        
+        # Save library preferences to setup data for the sync step
+        setup_data['selected_libraries'] = selected_libraries
+        with open(temp_file, 'w') as f:
+            json.dump(setup_data, f)
+        
+        # Go directly to sync step instead of auto-login
+        return RedirectResponse(url=build_app_url(f"/setup?step=3&session_id={session_id}"), status_code=303)
         
     except Exception as e:
         return RedirectResponse(
@@ -294,38 +391,193 @@ async def setup_step2(
     request: Request,
     session: Session = Depends(get_session),
     
-    # Optional Radarr/Sonarr settings
-    radarr_url: str = Form(""),
+    # Session ID (optional - only present when coming from step 1.5)
+    session_id: str = Form(""),
+    
+    # Radarr settings - full form fields
+    radarr_name: str = Form(""),
+    radarr_hostname: str = Form(""),
+    radarr_port: int = Form(7878),
+    radarr_use_ssl: bool = Form(False),
     radarr_api_key: str = Form(""),
-    sonarr_url: str = Form(""),
+    radarr_base_url: str = Form(""),
+    radarr_quality_profile_id: Optional[int] = Form(None),
+    radarr_root_folder_path: str = Form(""),
+    radarr_minimum_availability: str = Form("released"),
+    radarr_tags: str = Form(""),
+    radarr_is_default_movie: bool = Form(True),
+    radarr_is_4k_default: bool = Form(False),
+    radarr_enable_scan: bool = Form(True),
+    radarr_enable_automatic_search: bool = Form(True),
+    radarr_enable_integration: bool = Form(True),
+    
+    # Sonarr settings - full form fields
+    sonarr_name: str = Form(""),
+    sonarr_hostname: str = Form(""),
+    sonarr_port: int = Form(8989),
+    sonarr_use_ssl: bool = Form(False),
     sonarr_api_key: str = Form(""),
+    sonarr_base_url: str = Form(""),
+    sonarr_quality_profile_id: Optional[int] = Form(None),
+    sonarr_root_folder_path: str = Form(""),
+    sonarr_language_profile_id: Optional[int] = Form(None),
+    sonarr_tags: str = Form(""),
+    sonarr_is_default_tv: bool = Form(True),
+    sonarr_is_4k_default: bool = Form(False),
+    sonarr_enable_scan: bool = Form(True),
+    sonarr_enable_automatic_search: bool = Form(True),
+    sonarr_enable_integration: bool = Form(True),
+    sonarr_enable_season_folders: bool = Form(True),
+    sonarr_anime_standard_format: bool = Form(False),
     
     # App settings
-    app_name: str = Form("Stout Requests"),
+    app_name: str = Form("CuePlex"),
     require_approval: bool = Form(True),
     max_requests_per_user: int = Form(10)
 ):
     """Complete step 2 of setup - optional configuration"""
     try:
+        print(f"🔧 Setup step2 called with radarr_hostname='{radarr_hostname}', sonarr_hostname='{sonarr_hostname}'")
         # Get current settings
         settings = SettingsService.get_settings(session)
         
-        # Update with optional settings
+        # Update app settings (non-service related) but don't mark setup as complete yet
         settings_data = {
-            'radarr_url': radarr_url.strip() if radarr_url else None,
-            'radarr_api_key': radarr_api_key.strip() if radarr_api_key else None,
-            'sonarr_url': sonarr_url.strip() if sonarr_url else None,
-            'sonarr_api_key': sonarr_api_key.strip() if sonarr_api_key else None,
             'app_name': app_name.strip(),
             'require_approval': require_approval,
-            'max_requests_per_user': max_requests_per_user
+            'max_requests_per_user': max_requests_per_user,
+            'is_configured': False  # Don't mark as configured until sync step completes
         }
         
         SettingsService.update_settings(session, settings_data)
         
-        return RedirectResponse(url=build_app_url("/setup/auto-login"), status_code=303)
+        # Create ServiceInstance objects for Radarr and Sonarr if provided
+        from ..models.service_instance import ServiceInstance, ServiceType, RADARR_DEFAULT_SETTINGS, SONARR_DEFAULT_SETTINGS
+        from ..models.user import User
+        
+        # Get the first admin user (server owner) to assign as creator
+        first_admin = session.exec(select(User).where(User.is_admin == True)).first()
+        created_by = first_admin.id if first_admin else None
+        
+        # Create Radarr instance if configured
+        if radarr_hostname.strip() and radarr_api_key.strip():
+            print(f"🔧 Creating Radarr instance: {radarr_name} at {radarr_hostname}:{radarr_port}")
+            # Build URL from components
+            protocol = "https" if radarr_use_ssl else "http"
+            base = f"/{radarr_base_url.strip('/')}" if radarr_base_url.strip() else ""
+            url = f"{protocol}://{radarr_hostname.strip()}:{radarr_port}{base}"
+            
+            # Build settings (same as admin form)
+            radarr_settings = RADARR_DEFAULT_SETTINGS.copy()
+            radarr_settings.update({
+                "hostname": radarr_hostname.strip(),
+                "port": int(radarr_port),
+                "use_ssl": radarr_use_ssl,
+                "base_url": radarr_base_url.strip() if radarr_base_url.strip() else None,
+                "quality_profile_id": int(radarr_quality_profile_id) if radarr_quality_profile_id else None,
+                "root_folder_path": radarr_root_folder_path or None,
+                "minimum_availability": radarr_minimum_availability,
+                "tags": [tag.strip() for tag in radarr_tags.split(",") if tag.strip()] if radarr_tags else [],
+                "monitored": radarr_enable_automatic_search,
+                "search_for_movie": radarr_enable_automatic_search,
+                "enable_scan": radarr_enable_scan,
+                "enable_automatic_search": radarr_enable_automatic_search,
+                "enable_integration": radarr_enable_integration
+            })
+            
+            radarr_instance = ServiceInstance(
+                name=radarr_name.strip() if radarr_name.strip() else "Radarr",
+                service_type=ServiceType.RADARR,
+                url=url,  # Built URL for compatibility
+                api_key=radarr_api_key.strip(),
+                is_enabled=True,
+                is_default_movie=radarr_is_default_movie,
+                is_4k_default=radarr_is_4k_default,
+                created_by=created_by
+            )
+            radarr_instance.set_settings(radarr_settings)
+            session.add(radarr_instance)
+            print(f"🔧 Radarr instance added to session: {radarr_instance.name}")
+        
+        # Create Sonarr instance if configured
+        if sonarr_hostname.strip() and sonarr_api_key.strip():
+            # Build URL from components
+            protocol = "https" if sonarr_use_ssl else "http"
+            base = f"/{sonarr_base_url.strip('/')}" if sonarr_base_url.strip() else ""
+            url = f"{protocol}://{sonarr_hostname.strip()}:{sonarr_port}{base}"
+            
+            # Build settings (same as admin form)
+            sonarr_settings = SONARR_DEFAULT_SETTINGS.copy()
+            sonarr_settings.update({
+                "hostname": sonarr_hostname.strip(),
+                "port": int(sonarr_port),
+                "use_ssl": sonarr_use_ssl,
+                "base_url": sonarr_base_url.strip() if sonarr_base_url.strip() else None,
+                "quality_profile_id": int(sonarr_quality_profile_id) if sonarr_quality_profile_id else None,
+                "language_profile_id": int(sonarr_language_profile_id) if sonarr_language_profile_id else None,
+                "root_folder_path": sonarr_root_folder_path or None,
+                "tags": [tag.strip() for tag in sonarr_tags.split(",") if tag.strip()] if sonarr_tags else [],
+                "enable_scan": sonarr_enable_scan,
+                "enable_automatic_search": sonarr_enable_automatic_search,
+                "enable_integration": sonarr_enable_integration,
+                "season_folder": sonarr_enable_season_folders,
+                "anime_standard_format": sonarr_anime_standard_format
+            })
+            
+            sonarr_instance = ServiceInstance(
+                name=sonarr_name.strip() if sonarr_name.strip() else "Sonarr",
+                service_type=ServiceType.SONARR,
+                url=url,  # Built URL for compatibility
+                api_key=sonarr_api_key.strip(),
+                is_enabled=True,
+                is_default_tv=sonarr_is_default_tv,
+                is_4k_default=sonarr_is_4k_default,
+                created_by=created_by
+            )
+            sonarr_instance.set_settings(sonarr_settings)
+            session.add(sonarr_instance)
+        
+        print(f"🔧 Committing setup step2 changes to database")
+        session.commit()
+        print(f"🔧 Setup step2 completed successfully")
+        
+        # Save library preferences from setup data if available
+        if session_id.strip():
+            import os
+            temp_file = f"/tmp/stout_setup_{session_id}.json"
+            if os.path.exists(temp_file):
+                try:
+                    import json
+                    with open(temp_file, 'r') as f:
+                        setup_data = json.load(f)
+                    
+                    # Save library preferences if they exist
+                    selected_libraries = setup_data.get('selected_libraries', [])
+                    if selected_libraries:
+                        print(f"🔧 Saving library preferences: {selected_libraries}")
+                        settings = SettingsService.get_settings(session)
+                        settings.set_sync_library_preferences(selected_libraries)
+                        settings.updated_at = datetime.utcnow()
+                        session.add(settings)
+                        session.commit()
+                        print(f"🔧 Library preferences saved successfully")
+                    
+                    # Don't clean up temp file yet - we need it for sync step
+                    print(f"🔧 Keeping temp file for sync step: {temp_file}")
+                except Exception as lib_error:
+                    print(f"🔧 Warning: Could not save library preferences: {lib_error}")
+        
+        # Redirect to sync step instead of auto-login
+        print(f"🔧 Redirecting to sync step with session_id='{session_id}'")
+        if session_id.strip():
+            return RedirectResponse(url=build_app_url(f"/setup?step=3&session_id={session_id}"), status_code=303)
+        else:
+            return RedirectResponse(url=build_app_url("/setup?step=3"), status_code=303)
         
     except Exception as e:
+        print(f"🔧 ERROR in setup step2: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return RedirectResponse(
             url=f"/setup?step=2&error=Configuration failed: {str(e)}", 
             status_code=303
@@ -479,6 +731,180 @@ async def test_tmdb_connection(
             "message": f"Connection failed: {str(e)}"
         }
 
+
+@router.post("/test-radarr")
+async def test_radarr_connection(
+    radarr_hostname: str = Form(...),
+    radarr_port: str = Form("7878"),
+    use_ssl: bool = Form(False),
+    radarr_api_key: str = Form(...),
+    radarr_base_url: str = Form("")
+):
+    """Test Radarr connection during setup and return folders/profiles"""
+    try:
+        from ..services.radarr_service import RadarrService
+        import requests
+        
+        # Build URL
+        protocol = "https" if use_ssl else "http"
+        base = f"/{radarr_base_url.strip('/')}" if radarr_base_url.strip() else ""
+        url = f"{protocol}://{radarr_hostname}:{radarr_port}{base}"
+        
+        # Test basic connection
+        response = requests.get(
+            f"{url}/api/v3/system/status",
+            headers={'X-Api-Key': radarr_api_key},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return {
+                "status": "error", 
+                "message": f"Failed to connect: HTTP {response.status_code}"
+            }
+        
+        status_data = response.json()
+        
+        # Get folders and quality profiles
+        folders = []
+        quality_profiles = []
+        
+        try:
+            # Get root folders
+            folders_response = requests.get(
+                f"{url}/api/v3/rootfolder",
+                headers={'X-Api-Key': radarr_api_key},
+                timeout=10
+            )
+            if folders_response.status_code == 200:
+                folders = folders_response.json()
+        except:
+            pass
+        
+        try:
+            # Get quality profiles
+            profiles_response = requests.get(
+                f"{url}/api/v3/qualityprofile",
+                headers={'X-Api-Key': radarr_api_key},
+                timeout=10
+            )
+            if profiles_response.status_code == 200:
+                quality_profiles = profiles_response.json()
+        except:
+            pass
+        
+        return {
+            "status": "success", 
+            "message": f"Connected to Radarr: {status_data.get('appName', 'Unknown')} v{status_data.get('version', 'Unknown')}",
+            "folders": folders,
+            "quality_profiles": quality_profiles
+        }
+            
+    except Exception as e:
+        return {
+            "status": "error", 
+            "message": f"Connection failed: {str(e)}"
+        }
+
+
+@router.post("/test-sonarr")
+async def test_sonarr_connection(
+    sonarr_hostname: str = Form(...),
+    sonarr_port: str = Form("8989"),
+    use_ssl: bool = Form(False),
+    sonarr_api_key: str = Form(...),
+    sonarr_base_url: str = Form("")
+):
+    """Test Sonarr connection during setup and return folders/profiles"""
+    try:
+        from ..services.sonarr_service import SonarrService
+        import requests
+        
+        # Build URL
+        protocol = "https" if use_ssl else "http"
+        base = f"/{sonarr_base_url.strip('/')}" if sonarr_base_url.strip() else ""
+        url = f"{protocol}://{sonarr_hostname}:{sonarr_port}{base}"
+        
+        # Test basic connection
+        response = requests.get(
+            f"{url}/api/v3/system/status",
+            headers={'X-Api-Key': sonarr_api_key},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return {
+                "status": "error", 
+                "message": f"Failed to connect: HTTP {response.status_code}"
+            }
+        
+        status_data = response.json()
+        
+        # Get folders and quality profiles
+        folders = []
+        quality_profiles = []
+        language_profiles = []
+        
+        try:
+            # Get root folders
+            folders_response = requests.get(
+                f"{url}/api/v3/rootfolder",
+                headers={'X-Api-Key': sonarr_api_key},
+                timeout=10
+            )
+            if folders_response.status_code == 200:
+                folders = folders_response.json()
+        except:
+            pass
+        
+        try:
+            # Get quality profiles
+            profiles_response = requests.get(
+                f"{url}/api/v3/qualityprofile",
+                headers={'X-Api-Key': sonarr_api_key},
+                timeout=10
+            )
+            if profiles_response.status_code == 200:
+                quality_profiles = profiles_response.json()
+        except:
+            pass
+        
+        try:
+            # Get language profiles (Sonarr v3)
+            lang_response = requests.get(
+                f"{url}/api/v3/languageprofile",
+                headers={'X-Api-Key': sonarr_api_key},
+                timeout=10
+            )
+            if lang_response.status_code == 200:
+                language_profiles = lang_response.json()
+        except:
+            # Try v4 endpoint
+            try:
+                lang_response = requests.get(
+                    f"{url}/api/v4/language",
+                    headers={'X-Api-Key': sonarr_api_key},
+                    timeout=10
+                )
+                if lang_response.status_code == 200:
+                    language_profiles = lang_response.json()
+            except:
+                pass
+        
+        return {
+            "status": "success", 
+            "message": f"Connected to Sonarr: {status_data.get('appName', 'Unknown')} v{status_data.get('version', 'Unknown')}",
+            "folders": folders,
+            "quality_profiles": quality_profiles,
+            "language_profiles": language_profiles
+        }
+            
+    except Exception as e:
+        return {
+            "status": "error", 
+            "message": f"Connection failed: {str(e)}"
+        }
+
 @router.get("/plex-oauth/status/{pin_id}", response_class=HTMLResponse)
 async def check_plex_oauth_status(pin_id: int):
     from ..services.plex_service import PlexService
@@ -494,6 +920,18 @@ async def check_plex_oauth_status(pin_id: int):
 async def setup_auto_login(request: Request, session: Session = Depends(get_session)):
     """Automatically log in the user after setup completion"""
     try:
+        # Clean up any remaining temp files from query parameters
+        session_id = request.query_params.get('session_id')
+        if session_id:
+            import os
+            temp_file = f"/tmp/stout_setup_{session_id}.json"
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                    print(f"🔧 Cleaned up temp file on auto-login: {temp_file}")
+                except Exception as cleanup_error:
+                    print(f"🔧 Warning: Could not clean up temp file: {cleanup_error}")
+        
         # Find the user that was created during setup (should be the only admin)
         from ..models.user import User
         from sqlmodel import select
@@ -521,7 +959,7 @@ async def setup_auto_login(request: Request, session: Session = Depends(get_sess
         response.set_cookie(
             key="access_token",
             value=access_token,
-            max_age=86400,  # 24 hours
+            max_age=14400,  # 4 hours to match token expiration
             httponly=False,  # Allow JavaScript access for HTMX headers
             secure=False,  # Set to True in production with HTTPS
             path="/",
@@ -533,6 +971,254 @@ async def setup_auto_login(request: Request, session: Session = Depends(get_sess
     except Exception as e:
         print(f"Error in auto-login: {e}")
         return RedirectResponse(url=build_app_url("/login"), status_code=303)
+
+@router.get("/get-libraries")
+async def get_libraries(
+    session_id: str,
+    server_id: str,
+    session: Session = Depends(get_session)
+):
+    """Get available libraries for the selected server during setup"""
+    try:
+        import json
+        import os
+        
+        # Load setup session data
+        temp_file = f"/tmp/stout_setup_{session_id}.json"
+        if not os.path.exists(temp_file):
+            raise HTTPException(status_code=400, detail="Setup session expired")
+        
+        with open(temp_file, 'r') as f:
+            setup_data = json.load(f)
+        
+        # Find selected server
+        selected_server = None
+        for server in setup_data['servers']:
+            if server['clientIdentifier'] == server_id:
+                selected_server = server
+                break
+        
+        if not selected_server:
+            raise HTTPException(status_code=400, detail="Invalid server selection")
+        
+        # Temporarily configure Plex service with this server's info to get libraries
+        plex_url = selected_server['scheme'] + '://' + selected_server['address'] + ':' + str(selected_server['port'])
+        plex_token = setup_data['auth_token']
+        
+        # Create a temporary PlexService instance
+        from ..services.plex_service import PlexService
+        temp_plex_service = PlexService(session, setup_mode=True, override_url=plex_url, override_token=plex_token)
+        
+        # Get available libraries
+        libraries = temp_plex_service.get_available_libraries()
+        
+        return {
+            "libraries": libraries,
+            "server_info": {
+                "name": selected_server['name'],
+                "address": selected_server['address']
+            }
+        }
+        
+    except Exception as e:
+        print(f"❌ Error getting libraries for setup: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get libraries: {str(e)}")
+
+
+@router.post("/sync")
+async def setup_sync(
+    request: Request,
+    session_id: str = Form(...),
+    session: Session = Depends(get_session)
+):
+    """Perform initial library sync during setup with real-time progress"""
+    try:
+        import json
+        import os
+        from fastapi.responses import StreamingResponse
+        
+        # Debug: Print request headers
+        accept_header = request.headers.get("Accept", "")
+        hx_request = request.headers.get("HX-Request", "")
+        print(f"🔧 Sync request headers - Accept: '{accept_header}', HX-Request: '{hx_request}'")
+        
+        # Check for streaming request (either HTMX or SSE)
+        is_streaming = request.headers.get("HX-Request") or "text/event-stream" in accept_header
+        print(f"🔧 Is streaming request: {is_streaming}")
+        
+        if is_streaming:
+            print(f"🔧 Taking streaming sync path")
+            # Streaming request - return real-time progress updates
+            return StreamingResponse(
+                sync_with_progress(session_id, session),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache", 
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        else:
+            print(f"🔧 Taking non-streaming sync path")
+            # Regular request - perform sync and return result
+            return await perform_sync(session_id, session)
+    except Exception as e:
+        print(f"🔧 ERROR in setup sync: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+
+async def sync_with_progress(session_id: str, session: Session):
+    """Generator that yields real progress updates during sync"""
+    try:
+        import json
+        import os
+        from ..services.plex_sync_service import PlexSyncService
+        from ..services.settings_service import SettingsService
+        import asyncio
+        
+        print(f"🔧 [STREAMING] Generator started for session {session_id}")
+        
+        # Load setup session data
+        temp_file = f"/tmp/stout_setup_{session_id}.json"
+        if not os.path.exists(temp_file):
+            yield f"data: {{\"error\": \"Setup session expired\", \"progress\": 0}}\n\n"
+            return
+        
+        # Send initial progress
+        yield f"data: {{\"progress\": 0, \"status\": \"Starting sync...\", \"movies\": 0, \"tv_shows\": 0}}\n\n"
+        print(f"🔧 [STREAMING] Sent initial progress")
+        
+        # Perform actual sync using existing sync service
+        sync_service = PlexSyncService(session)
+        
+        # Step-by-step progress updates
+        yield f"data: {{\"progress\": 10, \"status\": \"Connecting to Plex...\", \"movies\": 0, \"tv_shows\": 0}}\n\n"
+        await asyncio.sleep(0.1)
+        
+        yield f"data: {{\"progress\": 20, \"status\": \"Running library sync...\", \"movies\": 0, \"tv_shows\": 0}}\n\n"
+        await asyncio.sleep(0.1)
+        
+        # Run the actual sync
+        sync_result = await sync_service.sync_library()
+        print(f"🔧 [STREAMING] Sync completed with result: {sync_result}")
+        
+        yield f"data: {{\"progress\": 90, \"status\": \"Finalizing...\", \"movies\": 0, \"tv_shows\": 0}}\n\n"
+        await asyncio.sleep(0.1)
+        
+        # Get final counts
+        from ..models.plex_library_item import PlexLibraryItem
+        from sqlmodel import select, func
+        
+        movie_count = session.exec(
+            select(func.count(PlexLibraryItem.id)).where(PlexLibraryItem.media_type == "movie")
+        ).first() or 0
+        
+        tv_count = session.exec(
+            select(func.count(PlexLibraryItem.id)).where(PlexLibraryItem.media_type == "tv")
+        ).first() or 0
+        
+        print(f"🔧 [STREAMING] Final counts - Movies: {movie_count}, TV: {tv_count}")
+        
+        # Send completion with real counts
+        completion_data = {
+            "progress": 100,
+            "status": "Sync completed successfully!",
+            "movies": movie_count,
+            "tv_shows": tv_count,
+            "completed": True
+        }
+        final_data = f"data: {json.dumps(completion_data)}\n\n"
+        print(f"🔧 [STREAMING] Sending completion: {final_data.strip()}")
+        yield final_data
+        
+        # Mark setup as complete after successful sync
+        settings = SettingsService.get_settings(session)
+        settings_data = {'is_configured': True}
+        SettingsService.update_settings(session, settings_data)
+        print(f"🔧 [STREAMING] Setup marked as configured")
+        
+        # Start background job scheduler now that setup is complete
+        try:
+            from ..services.background_jobs import background_jobs
+            if not background_jobs.scheduler_running:
+                background_jobs.start()
+                print(f"🚀 Background job scheduler started after setup completion")
+        except Exception as e:
+            print(f"⚠️ Error starting scheduler after setup: {e}")
+        
+        # Clean up temp file
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+            print(f"🔧 [STREAMING] Cleaned up temp file")
+        
+        print(f"🔧 [STREAMING] Generator completed for session {session_id}")
+        
+    except Exception as e:
+        print(f"🔧 [STREAMING] ERROR in streaming generator: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        yield f"data: {{\"progress\": 0, \"status\": \"Streaming failed: {str(e)}\", \"error\": true}}\n\n"
+
+
+async def perform_sync(session_id: str, session: Session):
+    """Perform sync and return final result"""
+    try:
+        import json
+        import os
+        
+        # Load setup session data
+        temp_file = f"/tmp/stout_setup_{session_id}.json"
+        if not os.path.exists(temp_file):
+            raise HTTPException(status_code=400, detail="Setup session expired")
+        
+        with open(temp_file, 'r') as f:
+            setup_data = json.load(f)
+        
+        print(f"🔧 Starting non-streaming sync for session {session_id}")
+        
+        # Trigger sync using existing sync service
+        from ..services.plex_sync_service import PlexSyncService
+        sync_service = PlexSyncService(session)
+        sync_result = await sync_service.sync_library()
+        
+        print(f"🔧 Non-streaming sync completed: {sync_result}")
+        
+        # Mark setup as complete after successful sync
+        from ..services.settings_service import SettingsService
+        settings = SettingsService.get_settings(session)
+        settings_data = {'is_configured': True}
+        SettingsService.update_settings(session, settings_data)
+        print(f"🔧 Setup marked as configured after successful sync")
+        
+        # Start background job scheduler now that setup is complete
+        try:
+            from ..services.background_jobs import background_jobs
+            if not background_jobs.scheduler_running:
+                background_jobs.start()
+                print(f"🚀 Background job scheduler started after setup completion")
+        except Exception as e:
+            print(f"⚠️ Error starting scheduler after setup: {e}")
+        
+        # Clean up temp file after successful sync
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+            print(f"🔧 Cleaned up temp file: {temp_file}")
+        
+        return {
+                "status": "success",
+                "message": "Initial sync completed successfully",
+                "sync_result": sync_result
+            }
+            
+    except Exception as e:
+        print(f"❌ Error during initial sync: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
 
 @router.get("/test-oauth")
 async def test_oauth_flow():

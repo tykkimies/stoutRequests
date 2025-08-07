@@ -152,7 +152,8 @@ class MultiInstanceIntegrationService:
                     tmdb_id=media_request.tmdb_id,
                     user_id=media_request.user_id,
                     quality_tier=media_request.requested_quality_tier,
-                    instance_category=service_instance.instance_category
+                    instance_category=service_instance.instance_category,
+                    quality_profile_id=media_request.override_quality_profile_id
                 ),
                 timeout=30.0
             )
@@ -218,7 +219,8 @@ class MultiInstanceIntegrationService:
                     season_number=season_number,
                     episode_number=episode_number,
                     quality_tier=media_request.requested_quality_tier,
-                    instance_category=service_instance.instance_category
+                    instance_category=service_instance.instance_category,
+                    quality_profile_id=media_request.override_quality_profile_id
                 ),
                 timeout=30.0
             )
@@ -257,6 +259,11 @@ class MultiInstanceIntegrationService:
             # Override service configuration with instance settings
             settings = service_instance.get_settings()
             print(f"📊 Instance Settings: {settings}")
+            print(f"📊 Monitored setting from instance: {settings.get('monitored', 'NOT_SET')}")
+            print(f"📊 Search for movie setting: {settings.get('search_for_movie', 'NOT_SET')}")
+            print(f"📊 Enable automatic search setting: {settings.get('enable_automatic_search', 'NOT_SET')}")
+            print(f"📊 Enable integration setting: {settings.get('enable_integration', 'NOT_SET')}")
+            print(f"📊 Enable scan setting: {settings.get('enable_scan', 'NOT_SET')}")
             
             print(f"🔗 Building service URL...")
             # Build URL from instance configuration

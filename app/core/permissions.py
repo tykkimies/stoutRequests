@@ -58,13 +58,13 @@ def get_user_display_info(user: User, session: Session) -> dict:
     Returns:
         dict: Display info with role_text, role_color, is_admin
     """
-    # Server owners get special treatment
+    # Server owners always get special treatment (unchangeable)
     if getattr(user, 'is_server_owner', False):
         return {
             "role_text": "Server Owner",
             "role_color": "red",  # Special color for server owner
             "is_admin": True,
-            "has_role": True,
+            "has_role": False,  # Server owner is not a regular role
             "is_server_owner": True
         }
     
@@ -73,6 +73,7 @@ def get_user_display_info(user: User, session: Session) -> dict:
         permissions_service = PermissionsService(session)
         user_role = permissions_service.get_user_role(user.id)
         
+        # Check if user has a role assigned
         if user_role:
             role_text = user_role.display_name
             # Color based on role
@@ -83,19 +84,28 @@ def get_user_display_info(user: User, session: Session) -> dict:
             else:
                 role_color = "blue"
             is_admin = 'admin' in user_role.name.lower()
+            
+            return {
+                "role_text": role_text,
+                "role_color": role_color,
+                "is_admin": is_admin,
+                "has_role": True,
+                "is_server_owner": False
+            }
+        
+        # Fallback to legacy system if no role assigned
         else:
-            # Fallback to legacy system if no role assigned
             role_color = "yellow" if user.is_admin else "blue"
             role_text = "Legacy Admin" if user.is_admin else "Basic User"
             is_admin = user.is_admin
             
-        return {
-            "role_text": role_text,
-            "role_color": role_color,
-            "is_admin": is_admin,
-            "has_role": user_role is not None,
-            "is_server_owner": False
-        }
+            return {
+                "role_text": role_text,
+                "role_color": role_color,
+                "is_admin": is_admin,
+                "has_role": False,
+                "is_server_owner": False
+            }
         
     except Exception as e:
         print(f"Error getting user display info for user {user.id}: {e}")
@@ -105,7 +115,7 @@ def get_user_display_info(user: User, session: Session) -> dict:
             "role_color": "yellow" if user.is_admin else "blue",
             "is_admin": user.is_admin,
             "has_role": False,
-            "is_server_owner": False
+            "is_server_owner": getattr(user, 'is_server_owner', False)
         }
 
 

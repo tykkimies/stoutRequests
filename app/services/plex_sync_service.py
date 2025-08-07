@@ -357,12 +357,12 @@ class PlexSyncService:
             from sqlalchemy import text
             update_query = text("""
                 UPDATE mediarequest 
-                SET status = 'available', updated_at = NOW()
-                WHERE status IN ('pending', 'approved', 'downloading', 'downloaded')
+                SET status = 'AVAILABLE', updated_at = NOW()
+                WHERE status IN ('PENDING', 'APPROVED')
                 AND EXISTS (
                     SELECT 1 FROM plex_library_item 
                     WHERE plex_library_item.tmdb_id = mediarequest.tmdb_id 
-                    AND plex_library_item.media_type = mediarequest.media_type
+                    AND plex_library_item.media_type::text = mediarequest.media_type::text
                 )
             """)
             

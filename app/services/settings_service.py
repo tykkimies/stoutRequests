@@ -51,7 +51,10 @@ class SettingsService:
             if user_exists:
                 settings.configured_by = user_id
         
-        settings.is_configured = True
+        # Only set is_configured if explicitly passed in settings_data
+        # This allows setup process to control when to mark as configured
+        if 'is_configured' in settings_data:
+            settings.is_configured = settings_data['is_configured']
         
         # Validate URLs
         errors = settings.validate_urls()
@@ -72,16 +75,11 @@ class SettingsService:
     
     @staticmethod
     def is_configured(session: Session) -> bool:
-        """Check if basic settings are configured"""
+        """Check if setup wizard has been completed"""
         settings = SettingsService.get_settings(session)
         
-        # Check if minimum required settings are present (only Plex is required)
-        required_fields = ['plex_url', 'plex_token']
-        for field in required_fields:
-            if not getattr(settings, field):
-                return False
-        
-        return True
+        # Check the is_configured flag (set to True only after setup wizard completion)
+        return settings.is_configured
     
     @staticmethod
     def set_configured_by_first_user(session: Session) -> None:

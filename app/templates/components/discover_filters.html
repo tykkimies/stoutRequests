@@ -271,13 +271,13 @@
                 </div>
             </label>
             <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
-                <input type="checkbox" name="streaming" value="384" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
-                    {% if '384' in current_streaming %}checked{% endif %}>
+                <input type="checkbox" name="streaming" value="1899" class="mr-2 text-orange-600 focus:ring-orange-500 h-3 w-3"
+                    {% if '1899' in current_streaming %}checked{% endif %}>
                 <div class="flex items-center">
                     <div class="w-4 h-4 mr-2 bg-purple-700 rounded-sm flex items-center justify-center">
-                        <span class="text-white text-xs font-bold">H</span>
+                        <span class="text-white text-xs font-bold">M</span>
                     </div>
-                    <span>HBO Max</span>
+                    <span>Max</span>
                 </div>
             </label>
             <label class="flex items-center text-xs cursor-pointer hover:bg-gray-50 p-1 rounded">
@@ -419,6 +419,12 @@ function clearFilters() {
     const form = document.getElementById('discover-filter-form');
     if (!form) return;
     
+    // Check if we're in search mode
+    const searchInput = document.getElementById('search-input');
+    const searchSection = document.getElementById('search-results-section');
+    const isSearchMode = searchInput && searchInput.value.trim() && 
+                         searchSection && !searchSection.classList.contains('hidden');
+    
     // Reset all form fields to default values
     form.reset();
     
@@ -427,6 +433,11 @@ function clearFilters() {
     
     // Reset select elements to first option
     form.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
+    
+    if (isSearchMode) {
+        // In search mode - resubmit search without filters
+        htmx.trigger(searchInput, 'keyup');
+    }
     
     // Reset text inputs
     form.querySelectorAll('input[type="text"], input[type="number"]').forEach(input => input.value = '');
@@ -598,21 +609,55 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Update form URL based on current state
         function updateFormUrl() {
-            const contentSources = form.dataset.currentContentSources;
-            const mediaType = form.dataset.currentMediaType;
+            // Check if we're currently in search mode
+            const searchInput = document.getElementById('search-input');
+            const searchSection = document.getElementById('search-results-section');
+            const isSearchMode = searchInput && searchInput.value.trim() && 
+                                 searchSection && !searchSection.classList.contains('hidden');
             
-            // Check if we're in an expanded category view
-            if (contentSources && contentSources.trim() && mediaType && ['movie', 'tv'].includes(mediaType)) {
-                // Use expanded URL for category filtering
-                form.setAttribute('hx-get', form.dataset.expandedUrl);
+            if (isSearchMode) {
+                // In search mode - apply filters to search results
+                form.setAttribute('hx-get', `{{ base_url }}/search`);
+                form.setAttribute('hx-target', '#search-results-content');
+                // Add search query as hidden input if not already present
+                if (!form.querySelector('input[name="q"]')) {
+                    const queryInput = document.createElement('input');
+                    queryInput.type = 'hidden';
+                    queryInput.name = 'q';
+                    queryInput.value = searchInput.value;
+                    form.appendChild(queryInput);
+                } else {
+                    // Update existing query input
+                    form.querySelector('input[name="q"]').value = searchInput.value;
+                }
             } else {
-                // Use base discover URL
-                form.setAttribute('hx-get', form.dataset.baseUrl);
+                // Normal category mode
+                const contentSources = form.dataset.currentContentSources;
+                const mediaType = form.dataset.currentMediaType;
+                
+                // Remove search query input if present
+                const queryInput = form.querySelector('input[name="q"]');
+                if (queryInput) queryInput.remove();
+                
+                // Reset to normal category target
+                form.setAttribute('hx-target', '#categories-container');
+                
+                // Check if we're in an expanded category view
+                if (contentSources && contentSources.trim() && mediaType && ['movie', 'tv'].includes(mediaType)) {
+                    // Use expanded URL for category filtering
+                    form.setAttribute('hx-get', form.dataset.expandedUrl);
+                } else {
+                    // Use base discover URL
+                    form.setAttribute('hx-get', form.dataset.baseUrl);
+                }
             }
         }
         
         // Enhanced loading state management
         form.addEventListener('htmx:beforeRequest', function() {
+            // Update form URL and target before sending request
+            updateFormUrl();
+            
             if (applyBtn && applyText) {
                 applyBtn.disabled = true;
                 applyText.textContent = 'Applying...';

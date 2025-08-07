@@ -24,7 +24,7 @@ class Settings(SQLModel, table=True):
     sonarr_api_key: Optional[str] = Field(default=None, max_length=500)
     
     # Application Settings
-    app_name: str = Field(default="Stout Requests", max_length=100)
+    app_name: str = Field(default="CuePlex", max_length=100)
     base_url: str = Field(default="", max_length=200)  # For reverse proxy support (e.g., "/stout")
     require_approval: bool = Field(default=True)
     auto_approve_admin: bool = Field(default=True)
@@ -33,6 +33,12 @@ class Settings(SQLModel, table=True):
     # Request Visibility Settings
     can_view_all_requests: bool = Field(default=False)  # Users can see all requests, not just their own
     can_view_request_user: bool = Field(default=False)  # Users can see who made each request
+    
+    # Request Cleanup Settings
+    request_cleanup_retention_days: int = Field(default=30)  # Days to keep completed/rejected requests
+    
+    # Category Default Visibility Settings (JSON field storing category_id -> visible mapping)
+    default_category_visibility: Optional[str] = Field(default=None, max_length=2000)
     
     # Library Sync Preferences (JSON field storing list of library names)
     sync_library_preferences: Optional[str] = Field(default=None, max_length=2000)
@@ -203,3 +209,33 @@ class Settings(SQLModel, table=True):
     def set_background_job_settings(self, settings: dict) -> None:
         """Set background job settings"""
         self.background_job_settings = json.dumps(settings) if settings else None
+    
+    def get_default_category_visibility(self) -> dict:
+        """Get default category visibility settings (category_id -> visible mapping)"""
+        if not self.default_category_visibility:
+            # Default visibility: first 7 categories visible, rest hidden
+            return {
+                'recently-added': True,
+                'recent-requests': True, 
+                'recommended-for-you': True,
+                'trending-movies': True,
+                'popular-movies': True,
+                'trending-tv': True,
+                'popular-tv': True,
+                'top-rated-movies': False,
+                'upcoming-movies': False,
+                'top-rated-tv': False
+            }
+        try:
+            return json.loads(self.default_category_visibility)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    
+    def set_default_category_visibility(self, visibility_settings: dict) -> None:
+        """Set default category visibility settings"""
+        self.default_category_visibility = json.dumps(visibility_settings) if visibility_settings else None
+    
+    def is_category_visible_by_default(self, category_id: str) -> bool:
+        """Check if a category should be visible by default for new users"""
+        visibility_settings = self.get_default_category_visibility()
+        return visibility_settings.get(category_id, False)

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Discover - Stout Requests{% endblock %}
+{% block title %}Discover - CuePlex{% endblock %}
 
 {% block content %}
 <div class="px-4 sm:px-0">
     {% if not current_user %}
     <!-- Landing page for non-authenticated users -->
     <div class="text-center py-16">
-        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to Stout Requests</h1>
+        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to CuePlex</h1>
         <p class="text-xl text-gray-600 mb-8">Request movies and TV shows for your Plex server</p>
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 max-w-md mx-auto">
             <div class="flex items-center justify-center mb-4">
@@ -309,10 +309,21 @@ function backToCategories() {
     const categoriesSection = document.getElementById('categories-section');
     const expandedSection = document.getElementById('expanded-category-section');
     const searchSection = document.getElementById('search-results-section');
+    const searchInput = document.getElementById('search-input');
     
     categoriesSection.classList.remove('hidden');
     expandedSection.classList.add('hidden');
     searchSection.classList.add('hidden');
+    
+    // Clear search input and hide clear button
+    if (searchInput) {
+        searchInput.value = '';
+        const clearButton = document.getElementById('clear-search');
+        if (clearButton) clearButton.classList.add('hidden');
+    }
+    
+    // Clear search results content
+    document.getElementById('search-results-content').innerHTML = '';
     
     currentView = 'categories';
     currentCategoryId = null;

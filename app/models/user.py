@@ -20,6 +20,9 @@ class User(SQLModel, table=True):
     password_hash: Optional[str] = Field(default=None)
     is_local_user: bool = Field(default=False)
     
+    # User preferences
+    dark_mode: bool = Field(default=True)
+    
     def is_plex_user(self) -> bool:
         """Check if this is a Plex-authenticated user"""
         return self.plex_id is not None and not self.is_local_user

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from 'macros/multi_instance_request.html' import multi_instance_request_button %}
 
-{% block title %}{{ media.title or media.name }} - Stout Requests{% endblock %}
+{% block title %}{{ media.title or media.name }} - CuePlex{% endblock %}
 
 {% block content %}
 <div class="min-h-screen bg-gray-50">
@@ -33,18 +33,18 @@
                         <h1 class="text-4xl lg:text-5xl font-bold">{{ media.title or media.name }}</h1>
                         
                         <!-- Plex Status Badge -->
-                        {% if plex_status == 'in_plex' or is_in_plex %}
-                        <span class="bg-green-600 text-white px-3 py-1 rounded-full text-sm font-medium">
-                            ✓ Available in Plex
-                        </span>
-                        {% elif plex_status == 'partial_plex' %}
+                        {% if plex_status == 'partial_plex' %}
                         <span class="bg-yellow-600 text-white px-3 py-1 rounded-full text-sm font-medium">
                             📺 Partially in Plex
+                        </span>
+                        {% elif plex_status == 'in_plex' %}
+                        <span class="bg-green-600 text-white px-3 py-1 rounded-full text-sm font-medium">
+                            ✓ Available in Plex
                         </span>
                         {% endif %}
                         
                         <!-- Request Status Badge (only show if not fully in Plex) -->
-                        {% if not (plex_status == 'in_plex' or is_in_plex) %}
+                        {% if plex_status != 'in_plex' %}
                         <div id="request-status-badge">
                             {% include 'components/status_badge.html' %}
                         </div>

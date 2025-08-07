@@ -44,6 +44,15 @@
                             <span class="text-xs text-gray-500">{{ request.release_date[:4] }}</span>
                             {% endif %}
                         </div>
+                        
+                        <!-- Request Details (Quality Tier) -->
+                        {% if request.status.value == 'PENDING' and request.requested_quality_tier %}
+                        <div class="flex items-center space-x-2 mt-1">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 dark:border dark:border-blue-700">
+                                Quality: {{ '4K' if request.requested_quality_tier == '4k' else request.requested_quality_tier.title() }}
+                            </span>
+                        </div>
+                        {% endif %}
                     </div>
                     
                     <!-- Status Badge -->
@@ -64,8 +73,10 @@
                     {% if request.service_instance_id and instance_lookup.get(request.service_instance_id) %}
                     <div class="mb-1">
                         <span class="text-xs text-blue-600">🔧 {{ instance_lookup[request.service_instance_id].name }}</span>
-                        {% if instance_lookup[request.service_instance_id].quality_tier and instance_lookup[request.service_instance_id].quality_tier != 'standard' %}
-                        <span class="text-xs px-1 py-0.5 bg-blue-100 text-blue-800 rounded ml-1">{{ instance_lookup[request.service_instance_id].quality_tier|upper }}</span>
+                        {% if instance_lookup[request.service_instance_id].quality_tier %}
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 dark:border dark:border-blue-700 ml-1">
+                            Quality: {{ '4K' if instance_lookup[request.service_instance_id].quality_tier == '4k' else instance_lookup[request.service_instance_id].quality_tier.title() }}
+                        </span>
                         {% endif %}
                     </div>
                     {% endif %}
@@ -96,17 +107,75 @@
                     <!-- Approval/Rejection Actions -->
                     {% if user_permissions.can_approve_requests %}
                         {% if request.status.value == 'PENDING' %}
-                        <button 
-                            hx-post="{{ base_url }}/requests/{{ request.id }}/approve?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
-                            hx-target="#requests-content"
-                            hx-swap="outerHTML"
-                            hx-confirm="Approve this request?"
-                            onclick="event.stopPropagation();"
-                            class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200"
-                            title="Approve Request"
-                        >
-                            ✓ Approve
-                        </button>
+                        <!-- Approve dropdown button -->
+                        <div class="relative inline-block" style="position: relative;">
+                            <button 
+                                onclick="event.stopPropagation(); toggleApprovalDropdown({{ request.id }})"
+                                class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium transition-all duration-200 flex items-center"
+                                title="Approve Request"
+                            >
+                                ✓ Approve
+                                <svg class="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </button>
+                            
+                            <!-- Approval dropdown -->
+                            <div id="approval-dropdown-{{ request.id }}" class="hidden fixed mt-1 w-72 bg-white rounded-lg shadow-2xl border-2 border-gray-300" style="z-index: 99999; transform: translateY(100%);">
+                                <div class="p-4">
+                                    <h4 class="text-base font-semibold text-gray-800 mb-3">Choose Instance for Approval</h4>
+                                    <form class="space-y-2">
+                                        <div>
+                                            <label for="instance-override-{{ request.id }}" class="block text-sm font-semibold text-gray-800 mb-1">Service Instance</label>
+                                            <select 
+                                                id="instance-override-{{ request.id }}" 
+                                                name="override_instance_id"
+                                                class="mt-1 block w-full text-sm border-2 border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white py-2 px-3"
+                                            >
+                                                {% for instance in available_instances %}
+                                                    {% if (request.media_type.value == 'movie' and instance.service_type.lower() == 'radarr') or (request.media_type.value == 'tv' and instance.service_type.lower() == 'sonarr') %}
+                                                        <option value="{{ instance.id }}" 
+                                                            {% if instance.id == request.service_instance_id %}selected{% endif %}>
+                                                            {{ instance.name }}
+                                                            {% if instance.is_4k_default %} (4K){% endif %}
+                                                            {% if instance.is_default_movie or instance.is_default_tv %} (Default){% endif %}
+                                                        </option>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </select>
+                                            <p class="text-sm text-gray-600 mt-2 bg-blue-50 p-2 rounded">
+                                                <strong>Originally requested:</strong> 
+                                                {% if request.service_instance_id and instance_lookup.get(request.service_instance_id) %}
+                                                    {{ instance_lookup[request.service_instance_id].name }}
+                                                {% else %}
+                                                    Default instance
+                                                {% endif %}
+                                            </p>
+                                        </div>
+                                        <div class="flex space-x-3 mt-4">
+                                            <button 
+                                                type="button"
+                                                hx-post="{{ base_url }}/requests/{{ request.id }}/approve?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
+                                                hx-target="#requests-content"
+                                                hx-swap="outerHTML"
+                                                hx-include="#instance-override-{{ request.id }}"
+                                                onclick="event.stopPropagation();"
+                                                class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-semibold shadow-md transition-colors"
+                                            >
+                                                ✓ Approve with Selected Instance
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                onclick="event.stopPropagation(); toggleApprovalDropdown({{ request.id }})"
+                                                class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md text-sm font-semibold shadow-md transition-colors"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
                         <button 
                             hx-post="{{ base_url }}/requests/{{ request.id }}/reject?status={{ current_status_filter }}&media_type={{ current_media_type_filter }}"
                             hx-target="#requests-content"

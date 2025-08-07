@@ -59,6 +59,7 @@ class BackgroundJobManager:
         self.download_status_interval = 120  # 2 minutes in seconds
         self.library_sync_interval = 3600  # 1 hour in seconds
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bg_job")
+        self._executor_shutdown = False  # Track executor state
         self._lock = threading.Lock()
         self._scheduler_thread = None
         
@@ -76,6 +77,7 @@ class BackgroundJobManager:
             if not self.running:
                 self.running = True
                 self.scheduler_running = True
+                self._executor_shutdown = False  # Reset executor state
                 
                 # Start the scheduler thread
                 self._scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
@@ -85,30 +87,45 @@ class BackgroundJobManager:
     
     def stop(self):
         """Stop the background job manager and scheduler"""
+        print("🛑 Stopping background job manager...")
+        
+        # First, signal shutdown to prevent new job submissions
         with self._lock:
             if self.running:
                 self.running = False
                 self.scheduler_running = False
-                
-                # Wait for scheduler thread to finish
-                if self._scheduler_thread and self._scheduler_thread.is_alive():
-                    self._scheduler_thread.join(timeout=5)
+                self._executor_shutdown = True  # Signal executor is shutting down
+        
+        # Wait for scheduler thread to finish (outside of lock to avoid deadlock)
+        if self._scheduler_thread and self._scheduler_thread.is_alive():
+            print("🛑 Waiting for scheduler thread to stop...")
+            self._scheduler_thread.join(timeout=10)  # Increased timeout
+            if self._scheduler_thread.is_alive():
+                print("⚠️ Scheduler thread did not stop within timeout")
         
         # Shutdown the thread pool executor gracefully
-        if self._executor:
+        if self._executor and not self._executor._shutdown:
             print("🛑 Shutting down thread pool executor...")
-            self._executor.shutdown(wait=True, cancel_futures=True)
-            print("✅ Thread pool executor shutdown complete")
+            try:
+                self._executor.shutdown(wait=True, cancel_futures=True)
+                print("✅ Thread pool executor shutdown complete")
+            except Exception as e:
+                print(f"⚠️ Error during executor shutdown: {e}")
+        else:
+            print("✅ Thread pool executor already shut down")
     
     def restart(self):
         """Restart the scheduler with a fresh executor"""
         print("🔄 Restarting background job scheduler...")
         
-        # Stop current scheduler
+        # Stop current scheduler and wait for complete shutdown
         self.stop()
         
-        # Create a new executor
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bg_job")
+        # Ensure complete cleanup before restart
+        with self._lock:
+            # Create a new executor only after complete shutdown
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bg_job")
+            self._executor_shutdown = False
         
         # Start fresh
         self.start()
@@ -149,12 +166,18 @@ class BackgroundJobManager:
                     
             except Exception as e:
                 error_msg = str(e).lower()
-                if "interpreter shutdown" in error_msg or "cannot schedule new futures" in error_msg:
-                    print(f"🛑 Scheduler shutting down due to interpreter shutdown")
+                if ("interpreter shutdown" in error_msg or 
+                    "cannot schedule new futures" in error_msg or
+                    "executor is shutting down" in error_msg or
+                    "shutdown" in error_msg):
+                    print(f"🛑 Scheduler shutting down due to shutdown: {e}")
+                    # Mark executor as shutdown to prevent further attempts
+                    with self._lock:
+                        self._executor_shutdown = True
                     break
                     
                 print(f"❌ Error in scheduler loop: {e}")
-                # Back off on error, but check shutdown status
+                # Back off on error, but check shutdown status more frequently
                 for _ in range(30):  # 30 x 1 second = 30 seconds total
                     if not self.scheduler_running:
                         break
@@ -167,6 +190,17 @@ class BackgroundJobManager:
         now = get_utc_now()
         
         with self._lock:
+            # Check if we should continue running
+            if not self.scheduler_running or self._executor_shutdown:
+                return
+                
+            # Also check if executor is actually shut down
+            if self._executor and self._executor._shutdown:
+                print("🛑 Executor is shutting down, stopping job scheduling")
+                self._executor_shutdown = True
+                self.scheduler_running = False
+                return
+            
             jobs_to_run = []
             for job_name, job in self.jobs.items():
                 if (job.get('enabled', True) and 
@@ -178,20 +212,36 @@ class BackgroundJobManager:
         
         # Run jobs outside of the lock to avoid blocking
         for job_name in jobs_to_run:
-            # Check if we're still running before submitting jobs
-            if not self.scheduler_running:
-                print(f"🛑 Scheduler shutting down, skipping job: {job_name}")
-                break
-                
+            # Double-check state before each job submission
+            with self._lock:
+                if not self.scheduler_running or self._executor_shutdown:
+                    print(f"🛑 Scheduler shutting down, skipping job: {job_name}")
+                    break
+            
             print(f"⏰ Auto-running scheduled job: {job_name}")
             # Submit job to thread pool since we're not in an async context
             try:
+                # Check executor state before submission
+                if self._executor._shutdown:
+                    print(f"🛑 Cannot schedule new job {job_name} - executor already shut down")
+                    break
+                
+                # Also check if executor is None (edge case during restart)
+                if self._executor is None:
+                    print(f"🛑 Cannot schedule new job {job_name} - executor is None")
+                    break
+                    
                 self._executor.submit(self._run_job_sync, job_name)
             except RuntimeError as e:
-                if "cannot schedule new futures" in str(e).lower():
-                    print(f"🛑 Cannot schedule new job {job_name} - executor shutting down")
+                if "cannot schedule new futures" in str(e).lower() or "shutdown" in str(e).lower():
+                    print(f"🛑 Cannot schedule new job {job_name} - executor shutting down: {e}")
+                    # Mark executor as shutdown to prevent further attempts
+                    with self._lock:
+                        self._executor_shutdown = True
+                        self.scheduler_running = False  # Stop the entire scheduler loop
                     break
                 else:
+                    print(f"❌ Unexpected error scheduling job {job_name}: {e}")
                     raise
     
     def _trigger_status_update(self, job_name: str):
@@ -246,6 +296,16 @@ class BackgroundJobManager:
                     result = loop.run_until_complete(self._process_approved_requests())
                     success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
                     print(f"✅ Scheduled request submission completed: {success}")
+                elif job_name == 'request_cleanup':
+                    # Run the job directly without trigger method to avoid double execution tracking
+                    result = loop.run_until_complete(self._cleanup_old_requests())
+                    success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
+                    print(f"✅ Scheduled request cleanup completed: {success}")
+                elif job_name == 'category_cache':
+                    # Run the job directly without trigger method to avoid double execution tracking
+                    result = loop.run_until_complete(self._refresh_category_cache())
+                    success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
+                    print(f"✅ Scheduled category cache refresh completed: {success}")
                 else:
                     print(f"⚠️ Unknown job type: {job_name}")
                     result = {'success': False, 'error': f'Unknown job type: {job_name}'}
@@ -385,6 +445,11 @@ class BackgroundJobManager:
         
         try:
             print("🔄 Starting background library sync...")
+            
+            # Check executor state before submission
+            with self._lock:
+                if self._executor_shutdown or self._executor is None or self._executor._shutdown:
+                    raise RuntimeError("Cannot execute job - executor is shutting down")
             
             # Run the sync in the thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -539,6 +604,11 @@ class BackgroundJobManager:
                 self.jobs['download_status_check']['running'] = True
                 self.jobs['download_status_check']['last_run'] = get_utc_now()
             
+            # Check executor state before submission
+            with self._lock:
+                if self._executor_shutdown or self._executor is None or self._executor._shutdown:
+                    raise RuntimeError("Cannot execute job - executor is shutting down")
+            
             # Run the check in thread pool
             loop = asyncio.get_event_loop()
             
@@ -599,6 +669,11 @@ class BackgroundJobManager:
         
         try:
             print("🔄 Starting background download status check...")
+            
+            # Check executor state before submission
+            with self._lock:
+                if self._executor_shutdown or self._executor is None or self._executor._shutdown:
+                    raise RuntimeError("Cannot execute job - executor is shutting down")
             
             # Run the download status check in the thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -731,8 +806,30 @@ class BackgroundJobManager:
                 'running': False,
                 'interval_seconds': 300,  # 5 minutes
                 'stats': {},
-                'enabled': False,  # Will be overridden by persisted settings
+                'enabled': True,  # Enabled by default - Will be overridden by persisted settings
+                'auto_run': True
+            },
+            'request_cleanup': {
+                'name': 'Request Cleanup',
+                'description': 'Cleans up old completed/rejected requests based on retention settings',
+                'last_run': None,
+                'next_run': None,
+                'running': False,
+                'interval_seconds': 86400,  # 24 hours
+                'stats': {},
+                'enabled': False,  # Disabled by default - Will be overridden by persisted settings
                 'auto_run': False
+            },
+            'category_cache': {
+                'name': 'Category Cache Refresh',
+                'description': 'Preloads category content into cache for faster home page loading',
+                'last_run': None,
+                'next_run': None,
+                'running': False,
+                'interval_seconds': 14400,  # 4 hours default
+                'stats': {},
+                'enabled': False,  # Disabled by default - Will be overridden by persisted settings
+                'auto_run': True
             }
         }
 
@@ -1017,11 +1114,12 @@ class BackgroundJobManager:
             errors = []
             
             with Session(engine) as session:
-                # Get all approved requests that haven't been submitted to services yet
+                # Get all approved requests that need to be resubmitted
+                # For now, we'll target approved requests that might have failed submission
                 statement = (
                     select(MediaRequest)
                     .where(MediaRequest.status == RequestStatus.APPROVED)
-                    .where(MediaRequest.service_submitted == False)  # Not yet submitted
+                    .where(MediaRequest.service_instance_id.isnot(None))  # Has an assigned service
                 )
                 
                 pending_requests = session.exec(statement).all()
@@ -1093,6 +1191,422 @@ class BackgroundJobManager:
                 'errors': [str(e)]
             }
 
+    async def trigger_request_cleanup(self, retention_days: int = 30, triggered_by: str = "manual") -> Dict[str, Any]:
+        """Manually trigger request cleanup job"""
+        return await self._execute_job_with_tracking(
+            job_name='request_cleanup',
+            job_function=lambda: self._run_request_cleanup_sync(retention_days),
+            triggered_by=triggered_by
+        )
+    
+    def _run_request_cleanup_sync(self, retention_days: int = 30) -> Dict[str, Any]:
+        """
+        Synchronous wrapper for the async request cleanup.
+        This runs in a thread pool.
+        """
+        try:
+            print("🔄 Creating new event loop for background request cleanup...")
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                print("🔄 Starting request cleanup...")
+                result = loop.run_until_complete(self._cleanup_old_requests(retention_days))
+                
+                print(f"🔄 Request cleanup completed with result: {result}")
+                return result
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            print(f"❌ Error in _run_request_cleanup_sync: {e}")
+            # Return error result
+            return {
+                'success': False,
+                'error': str(e),
+                'cleaned_count': 0
+            }
+    
+    async def _cleanup_old_requests(self, retention_days: int = None) -> Dict[str, Any]:
+        """Clean up old completed/rejected requests based on retention settings"""
+        print("🗑️ Starting request cleanup job...")
+        
+        try:
+            from sqlmodel import Session, select, func
+            from ..core.database import engine
+            from ..models.media_request import MediaRequest, RequestStatus
+            from ..services.settings_service import SettingsService
+            
+            # Use provided retention_days or get from settings
+            if retention_days is None:
+                with Session(engine) as session:
+                    settings = SettingsService.get_settings(session)
+                    retention_days = settings.request_cleanup_retention_days or 30
+            
+            cutoff_date = get_utc_now() - timedelta(days=retention_days)
+            
+            cleaned_count = 0
+            errors = []
+            
+            with Session(engine) as session:
+                # Get old requests that are completed/rejected/available
+                statement = (
+                    select(MediaRequest)
+                    .where(MediaRequest.status.in_([RequestStatus.AVAILABLE, RequestStatus.REJECTED]))
+                    .where(MediaRequest.updated_at < cutoff_date)
+                )
+                
+                old_requests = session.exec(statement).all()
+                
+                print(f"🗑️ Found {len(old_requests)} old requests to clean up (older than {retention_days} days)")
+                
+                for request in old_requests:
+                    try:
+                        print(f"🗑️ Cleaning up request {request.id}: {request.title} (status: {request.status.value})")
+                        session.delete(request)
+                        cleaned_count += 1
+                    except Exception as e:
+                        error_msg = f"Error cleaning request {request.id}: {str(e)}"
+                        errors.append(error_msg)
+                        print(f"❌ {error_msg}")
+                
+                # Commit all deletions
+                session.commit()
+            
+            result = {
+                'success': True,
+                'cleaned_count': cleaned_count,
+                'total_found': len(old_requests),
+                'retention_days': retention_days,
+                'cutoff_date': format_datetime_local(cutoff_date),
+                'errors': errors
+            }
+            
+            # Update job stats
+            with self._lock:
+                self.jobs['request_cleanup']['stats'] = result
+                self.jobs['request_cleanup']['last_run'] = get_utc_now()
+                # Update next run time if auto-scheduling is enabled
+                if self.jobs['request_cleanup'].get('enabled', False) and self.jobs['request_cleanup'].get('auto_run', False):
+                    self.jobs['request_cleanup']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['request_cleanup']['interval_seconds'])
+            
+            print(f"✅ Request cleanup job completed: {cleaned_count} requests cleaned, {len(errors)} errors")
+            return result
+            
+        except Exception as e:
+            print(f"❌ Error in request cleanup job: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'cleaned_count': 0,
+                'total_found': 0,
+                'errors': [str(e)]
+            }
+
+    async def _execute_job_with_tracking(self, job_name: str, job_function, triggered_by: str = "manual") -> Dict[str, Any]:
+        """Execute a job with proper tracking and error handling"""
+        with self._lock:
+            is_running = self.jobs[job_name]['running']
+        
+        if is_running:
+            print(f"⚠️ {job_name} already running - rejecting new request")
+            return {
+                'success': False,
+                'message': f'{job_name} already running',
+                'job_id': None
+            }
+        
+        # Create job execution record
+        execution_id = self._create_job_execution(job_name, triggered_by)
+        
+        # Mark job as running
+        with self._lock:
+            self.jobs[job_name]['running'] = True
+            self.jobs[job_name]['last_run'] = get_utc_now()
+        
+        try:
+            print(f"🔄 Starting {job_name}...")
+            
+            # Check executor state before submission
+            with self._lock:
+                if self._executor_shutdown or self._executor is None or self._executor._shutdown:
+                    raise RuntimeError("Cannot execute job - executor is shutting down")
+            
+            # Run the job in the thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            
+            # Add timeout to prevent hanging
+            try:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self._executor,
+                        job_function
+                    ),
+                    timeout=600  # 10 minute timeout
+                )
+            except asyncio.TimeoutError:
+                print(f"❌ {job_name} timed out after 10 minutes")
+                result = {'error': f'{job_name} timed out after 10 minutes'}
+            
+            # Determine success based on result
+            success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
+            
+            # Update job execution record
+            self._update_job_execution(
+                execution_id, 
+                success=success, 
+                result_data=result if isinstance(result, dict) else {'result': str(result)},
+                error_message=result.get('error') if isinstance(result, dict) else None
+            )
+            
+            # Update job status
+            with self._lock:
+                self.jobs[job_name]['stats'] = result
+                # Update next run time if auto-scheduling is enabled
+                if self.jobs[job_name].get('enabled', False) and self.jobs[job_name].get('auto_run', False):
+                    self.jobs[job_name]['next_run'] = get_utc_now() + timedelta(seconds=self.jobs[job_name]['interval_seconds'])
+            
+            print(f"✅ {job_name} completed: {result}")
+            
+            return {
+                'success': success,
+                'message': f'{job_name} completed successfully' if success else f'{job_name} completed with errors',
+                'stats': result,
+                'execution_id': execution_id
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in {job_name}: {e}")
+            
+            # Update job execution record with error
+            self._update_job_execution(execution_id, success=False, error_message=str(e))
+            
+            return {
+                'success': False,
+                'message': f'{job_name} failed: {str(e)}',
+                'error': str(e),
+                'execution_id': execution_id
+            }
+        finally:
+            # Mark job as no longer running
+            with self._lock:
+                self.jobs[job_name]['running'] = False
+
+    async def _refresh_category_cache(self) -> Dict[str, Any]:
+        """Refresh category content cache for faster home page loading"""
+        try:
+            from app.core.database import get_session
+            from datetime import datetime, timedelta
+            import json
+            
+            cached_count = 0
+            errors = []
+            
+            print("🔄 Starting category cache refresh...")
+            
+            # Create a simple in-memory cache (in a real app, you'd use Redis)
+            # For now, we'll cache in the application instance
+            if not hasattr(self, '_category_cache'):
+                self._category_cache = {}
+                self._cache_timestamps = {}
+            
+            # Get default categories to cache
+            from app.main import get_default_categories
+            categories = get_default_categories()
+            
+            with get_session() as session:
+                for category in categories:
+                    try:
+                        category_id = category['id']
+                        category_type = category['type']
+                        
+                        print(f"🔄 Caching category: {category['title']}")
+                        
+                        # Cache different types of categories
+                        if category_type == 'plex':
+                            # Cache Plex content
+                            content = await self._cache_plex_category(category, session)
+                        elif category_type == 'requests':
+                            # Cache request content
+                            content = await self._cache_requests_category(category, session)
+                        elif category_type == 'trending':
+                            # Cache TMDB trending content
+                            content = await self._cache_tmdb_category(category, session)
+                        else:
+                            # Cache other types
+                            content = await self._cache_generic_category(category, session)
+                        
+                        if content:
+                            self._category_cache[category_id] = content
+                            self._cache_timestamps[category_id] = datetime.utcnow()
+                            cached_count += 1
+                            print(f"✅ Cached {len(content)} items for {category['title']}")
+                        else:
+                            print(f"⚠️ No content found for {category['title']}")
+                            
+                    except Exception as e:
+                        error_msg = f"Error caching category {category.get('title', 'Unknown')}: {str(e)}"
+                        print(f"❌ {error_msg}")
+                        errors.append(error_msg)
+            
+            cache_size = len(self._category_cache)
+            print(f"✅ Category cache refresh completed: {cached_count} categories cached, {len(errors)} errors")
+            
+            return {
+                'success': len(errors) == 0,
+                'cached_count': cached_count,
+                'cache_size': cache_size,
+                'errors': errors,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in category cache refresh: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'cached_count': 0,
+                'cache_size': 0,
+                'errors': [str(e)]
+            }
+
+    async def _cache_plex_category(self, category: dict, session) -> list:
+        """Cache Plex library content for a category"""
+        try:
+            from app.services.plex_service import PlexService
+            
+            plex_service = PlexService(session)
+            
+            # Get recently added items based on category configuration
+            if category['id'] == 'recently-added':
+                items = await plex_service.get_recently_added(
+                    limit=category.get('limit', 40)
+                )
+                return items if items else []
+            
+            return []
+        except Exception as e:
+            print(f"⚠️ Error caching Plex category: {e}")
+            return []
+
+    async def _cache_requests_category(self, category: dict, session) -> list:
+        """Cache requests content for a category"""
+        try:
+            from sqlmodel import select
+            from app.models.media_request import MediaRequest
+            from app.models.user import User
+            
+            # Get recent requests
+            if category['id'] == 'recent-requests':
+                stmt = (
+                    select(MediaRequest)
+                    .order_by(MediaRequest.requested_at.desc())
+                    .limit(category.get('limit', 20))
+                )
+                requests = session.exec(stmt).all()
+                
+                # Convert to serializable format
+                items = []
+                for req in requests:
+                    items.append({
+                        'id': req.tmdb_id,
+                        'title': req.title,
+                        'media_type': req.media_type.value,
+                        'poster_path': req.poster_path,
+                        'status': req.status.value,
+                        'requested_at': req.requested_at.isoformat() if req.requested_at else None
+                    })
+                
+                return items
+            
+            return []
+        except Exception as e:
+            print(f"⚠️ Error caching requests category: {e}")
+            return []
+
+    async def _cache_tmdb_category(self, category: dict, session) -> list:
+        """Cache TMDB content for a category"""
+        try:
+            from app.services.tmdb_service import TMDBService
+            
+            tmdb_service = TMDBService()
+            
+            # Cache trending content
+            if 'trending' in category['id']:
+                items = await tmdb_service.get_trending_all(
+                    page=1,
+                    limit=category.get('limit', 20)
+                )
+                return items if items else []
+            
+            return []
+        except Exception as e:
+            print(f"⚠️ Error caching TMDB category: {e}")
+            return []
+
+    async def _cache_generic_category(self, category: dict, session) -> list:
+        """Cache generic category content"""
+        try:
+            # For now, just return empty list for unknown category types
+            # This can be extended as needed
+            return []
+        except Exception as e:
+            print(f"⚠️ Error caching generic category: {e}")
+            return []
+
+    def get_cached_category(self, category_id: str) -> dict:
+        """Get cached content for a category if available and not expired"""
+        try:
+            if not hasattr(self, '_category_cache'):
+                return None
+                
+            if category_id not in self._category_cache:
+                return None
+                
+            # Check if cache is expired (default 4 hours)
+            from datetime import datetime, timedelta
+            cache_time = self._cache_timestamps.get(category_id)
+            if not cache_time:
+                return None
+                
+            # Get cache expiry from job settings
+            cache_interval = self.jobs.get('category_cache', {}).get('interval_seconds', 14400)
+            expiry_time = cache_time + timedelta(seconds=cache_interval)
+            
+            if datetime.utcnow() > expiry_time:
+                # Cache expired, remove it
+                del self._category_cache[category_id]
+                del self._cache_timestamps[category_id]
+                return None
+                
+            return {
+                'content': self._category_cache[category_id],
+                'cached_at': cache_time.isoformat(),
+                'expires_at': expiry_time.isoformat()
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Error getting cached category: {e}")
+            return None
+
+    async def trigger_category_cache_refresh(self, triggered_by: str = "manual") -> Dict[str, Any]:
+        """Manually trigger category cache refresh"""
+        return await self._execute_job_with_tracking("category_cache", self._refresh_category_cache, triggered_by)
+
+    def _is_setup_complete(self) -> bool:
+        """Check if initial setup has been completed"""
+        try:
+            from app.core.database import get_session
+            from app.services.settings_service import SettingsService
+            
+            with get_session() as session:
+                settings = SettingsService.get_settings(session)
+                return settings.is_configured
+        except Exception as e:
+            print(f"⚠️ Error checking setup status: {e}")
+            return False
+
 
 # Global instance
 background_jobs = BackgroundJobManager()
@@ -1117,5 +1631,10 @@ def ensure_scheduler_started():
         background_jobs.start()
         print("🚀 Background job scheduler started on demand")
 
-# Start the scheduler but jobs remain disabled by default
-background_jobs.start()
+# Start the scheduler but jobs remain disabled by default  
+# Enable scheduler after setup is complete
+if background_jobs._is_setup_complete():
+    background_jobs.start()
+    print("🚀 Background job scheduler started automatically after setup")
+else:
+    print("⏳ Background job scheduler waiting for setup completion")

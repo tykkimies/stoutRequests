@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 
 class PlexService:
-    def __init__(self, session: Session = None, setup_mode: bool = False):
+    def __init__(self, session: Session = None, setup_mode: bool = False, override_url: str = None, override_token: str = None):
         if session is None:
             from ..core.database import engine
             self.session = Session(engine)
@@ -23,10 +23,10 @@ class PlexService:
 
         if setup_mode:
             print("🔧 PlexService initialized in setup mode")
-            self.plex_url = None
-            self.plex_token = None
+            # Use override parameters if provided (for setup library loading)
+            self.plex_url = override_url
+            self.plex_token = override_token
             self.client_id = "plexstoutrequests"
-
 
         else:
             print("🔧 PlexService initialized in normal mode")

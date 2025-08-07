@@ -740,3 +740,18 @@ class SonarrService:
         except Exception as e:
             print(f"❌ Failed to trigger season search: {e}")
             # Don't fail the entire operation if search trigger fails
+    
+    async def add_tv_show(self, tmdb_id: int, quality_profile_id: int = None, root_folder_path: str = None, user_id: int = None, season_number: int = None, episode_number: int = None, quality_tier: str = None, instance_category: str = None) -> Optional[Dict]:
+        """Alias for add_series method to maintain compatibility with integration service"""
+        # Convert single season/episode to lists for add_series method
+        season_numbers = [season_number] if season_number else None
+        episode_numbers = {season_number: [episode_number]} if season_number and episode_number else None
+        
+        return await self.add_series(
+            tmdb_id=tmdb_id,
+            quality_profile_id=quality_profile_id,
+            root_folder_path=root_folder_path,
+            user_id=user_id,
+            season_numbers=season_numbers,
+            episode_numbers=episode_numbers
+        )

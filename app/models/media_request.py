@@ -34,6 +34,7 @@ class MediaRequest(SQLModel, table=True):
     # Multi-instance support
     service_instance_id: Optional[int] = Field(default=None, foreign_key="serviceinstance.id")  # Which instance handled/will handle this request
     requested_quality_tier: Optional[str] = Field(default="standard", max_length=20)  # Quality tier requested ("standard", "4k", "hdr")
+    override_quality_profile_id: Optional[int] = Field(default=None)  # Admin override for specific quality profile ID
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None

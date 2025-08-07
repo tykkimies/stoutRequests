@@ -26,7 +26,7 @@
     <div id="expanded-category-content">
         <!-- Load expanded content with infinite scroll -->
         <div 
-            hx-get="{{ base_url }}/discover/category/expanded?type={{ category_type }}&sort={{ category_sort }}&content_sources={{ category_sort }}&limit=40&page=1"
+            hx-get="{{ base_url }}/discover/category/expanded?type={{ category_type }}&media_type={{ category_type }}&sort={{ category_sort }}&content_sources={{ category_sort }}&limit=40&page=1"
             hx-trigger="load"
             hx-target="this"
             hx-swap="outerHTML"

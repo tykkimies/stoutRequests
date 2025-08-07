@@ -268,10 +268,13 @@ class RadarrService:
             # Get additional settings from service instance
             settings = self.instance.get_settings() if self.instance else {}
             minimum_availability = settings.get('minimum_availability', 'released')
+            
+            # Get settings directly - they should now be consistent with enable_automatic_search
             monitored = settings.get('monitored', True)
             search_for_movie = settings.get('search_for_movie', True)
+            print(f"🔍 Radarr monitored setting: {monitored}")
             print(f"🔍 Radarr search_for_movie setting: {search_for_movie}")
-            print(f"🔍 All Radarr settings: {settings}")
+            print(f"🔍 All Radarr instance settings: {settings}")
             
             # Prepare movie data for adding - ensure required fields are present
             add_data = {

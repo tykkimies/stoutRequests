@@ -106,22 +106,44 @@ async def update_general_settings(
     session: Session = Depends(get_session),
     
     # App settings (truly global)
-    app_name: str = Form("Stout Requests"),
+    app_name: str = Form("CuePlex"),
     base_url: str = Form(""),
     max_requests_per_user: int = Form(10),
-    site_theme: str = Form("default")
+    request_cleanup_retention_days: int = Form(30)
 ):
     """Update general application settings (global settings only)"""
     try:
+        # Parse form data to extract category visibility settings
+        form_data = await request.form()
+        
+        # Extract category visibility from checkboxes
+        category_visibility = {}
+        category_fields = [
+            'recently-added', 'recent-requests', 'recommended-for-you',
+            'trending-movies', 'popular-movies', 'trending-tv', 'popular-tv',
+            'top-rated-movies', 'upcoming-movies', 'top-rated-tv'
+        ]
+        
+        for category_id in category_fields:
+            checkbox_name = f'category_{category_id}'
+            category_visibility[category_id] = checkbox_name in form_data
+        
         settings_data = {
             'app_name': app_name.strip(),
             'base_url': base_url.strip(),
             'max_requests_per_user': max_requests_per_user,
-            'site_theme': site_theme.strip()
+            'request_cleanup_retention_days': request_cleanup_retention_days
         }
         
         # Update settings (only the general ones, don't touch media settings)
         SettingsService.update_settings(session, settings_data, current_user.id)
+        
+        # Update category visibility settings separately
+        settings = SettingsService.get_settings(session)
+        settings.set_default_category_visibility(category_visibility)
+        settings.updated_at = datetime.utcnow()
+        session.add(settings)
+        session.commit()
         
         # Get current base_url for HTML responses
         current_base_url = SettingsService.get_base_url(session)
@@ -297,6 +319,11 @@ async def create_test_user(
         session.commit()
         session.refresh(test_user)
         
+        # Initialize user permissions for new test user
+        from ..services.permissions_service import PermissionsService
+        permissions_service = PermissionsService(session)
+        permissions_service.create_default_user_permissions(test_user.id, is_admin=is_admin)
+        
         return RedirectResponse(
             url=build_app_url(f"/admin?success=Test user '{username}' created successfully"),
             status_code=303
@@ -409,6 +436,20 @@ async def import_friends(
             print(f"ℹ️  User already exists: {friend_data['username']}")
     
     session.commit()
+    
+    # Initialize permissions for newly imported users
+    from ..services.permissions_service import PermissionsService
+    permissions_service = PermissionsService(session)
+    for friend_data in friends:
+        statement = select(User).where(User.plex_id == friend_data['id'])
+        user = session.exec(statement).first()
+        if user:
+            # Check if permissions already exist to avoid duplicates
+            from ..models.user_permissions import UserPermissions
+            perm_statement = select(UserPermissions).where(UserPermissions.user_id == user.id)
+            existing_perms = session.exec(perm_statement).first()
+            if not existing_perms:
+                permissions_service.create_default_user_permissions(user.id)
     
     # Content negotiation: HTMX vs API clients
     if request.headers.get("HX-Request"):
@@ -650,7 +691,6 @@ async def users_list(
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Instance Access</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joined</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -706,7 +746,7 @@ async def users_list(
                             <div class="ml-4">
                                 <div class="text-sm font-medium text-gray-900">
                                     {full_name}
-                                    {'<span class="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">Local User</span>' if is_local else ''}
+                                    {'<span class="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 dark:border dark:border-purple-700 rounded-full">Local User</span>' if is_local else ''}
                                     {'<span class="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">Test User</span>' if is_test_user else ''}
                                 </div>
                                 <div class="text-sm text-gray-500">@{username}</div>
@@ -722,10 +762,6 @@ async def users_list(
                         <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-{status_color}-100 text-{status_color}-800">
                             {status_text}
                         </span>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <!-- Instance access info - managed via main permissions modal -->
-                        <span class="text-xs text-gray-600">Via Permissions</span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {join_date}
@@ -880,6 +916,12 @@ async def create_local_user(
         
         session.add(local_user)
         session.commit()
+        session.refresh(local_user)
+        
+        # Initialize user permissions for new local user
+        from ..services.permissions_service import PermissionsService
+        permissions_service = PermissionsService(session)
+        permissions_service.create_default_user_permissions(local_user.id, is_admin=is_admin)
         
         return {
             "message": f"Local user '{username}' created successfully",
@@ -1194,7 +1236,9 @@ async def get_user_permissions_page(
         'can_request_movies': can_movies_effective,
         'can_request_tv': can_tv_effective,
         'can_request_4k': can_4k_effective,
-        'auto_approve_enabled': user_permissions.auto_approve_enabled if user_permissions else False
+        'auto_approve_enabled': user_permissions.auto_approve_enabled if user_permissions else False,
+        'can_view_other_users_requests': permissions_service.has_permission(user_id, PermissionFlags.REQUEST_VIEW_ALL),
+        'can_see_requester_username': permissions_service.has_permission(user_id, PermissionFlags.REQUEST_VIEW_USERS)
     }
     print(f"🔍 Template effective permissions: {template_effective_permissions}")
     
@@ -1592,11 +1636,6 @@ async def set_user_limits(
         form_data = await request.form()
         instance_permissions = {}
         
-        # Category permissions
-        instance_permissions['category_4k'] = 'category_4k' in form_data
-        instance_permissions['category_anime'] = 'category_anime' in form_data
-        instance_permissions['category_foreign'] = 'category_foreign' in form_data
-        
         # Instance-specific permissions - check all instances explicitly
         from app.models.service_instance import ServiceInstance
         all_instances = session.exec(select(ServiceInstance)).all()
@@ -1639,7 +1678,9 @@ async def set_user_limits(
             'can_request_movies': permissions_service.can_request_media_type(user_id, 'movie'),
             'can_request_tv': permissions_service.can_request_media_type(user_id, 'tv'),
             'can_request_4k': permissions_service.can_request_4k(user_id),
-            'auto_approve_enabled': user_permissions.auto_approve_enabled if user_permissions else False
+            'auto_approve_enabled': user_permissions.auto_approve_enabled if user_permissions else False,
+            'can_view_other_users_requests': permissions_service.has_permission(user_id, PermissionFlags.REQUEST_VIEW_ALL),
+            'can_see_requester_username': permissions_service.has_permission(user_id, PermissionFlags.REQUEST_VIEW_USERS)
         }
         
         base_url = SettingsService.get_base_url(session)
@@ -1723,8 +1764,42 @@ async def admin_jobs_status(
         from ..services.background_jobs import background_jobs
         from ..services.plex_sync_service import PlexSyncService
 
-        # Get job status
-        all_jobs = background_jobs.get_all_jobs_status()
+        # Get job status from APScheduler
+        from ..services.job_scheduler import job_scheduler
+        from ..services.settings_service import SettingsService
+        
+        # Get job configuration from database and APScheduler
+        settings = SettingsService.get_settings(session)
+        job_config = settings.get_background_job_settings()
+        apscheduler_jobs = job_scheduler.list_jobs() if job_scheduler.is_running() else []
+        
+        # Convert APScheduler jobs to the format expected by the template
+        all_jobs = {}
+        for job_id in ["library_sync", "download_status_check", "request_submission", "request_cleanup", "category_cache"]:
+            config = job_config.get(job_id, {})
+            
+            # Find corresponding APScheduler job
+            apscheduler_job = None
+            for aj in apscheduler_jobs:
+                if aj["id"] == job_id:
+                    apscheduler_job = aj
+                    break
+            
+            # Parse next_run time if available
+            next_run = None
+            if apscheduler_job and apscheduler_job["next_run"]:
+                from datetime import datetime
+                try:
+                    next_run = datetime.fromisoformat(apscheduler_job["next_run"].replace('Z', '+00:00'))
+                except:
+                    next_run = None
+            
+            all_jobs[job_id] = {
+                "enabled": config.get("enabled", True),
+                "interval_seconds": config.get("interval_minutes", 60) * 60,  # Convert to seconds for compatibility
+                "next_run": next_run,
+                "running": False  # APScheduler jobs don't show as "running" in this context
+            }
         
         # Get library sync stats
         sync_stats = None
@@ -2482,13 +2557,24 @@ async def edit_radarr_form(
                 <h4 class="text-lg font-medium text-gray-900 mb-6">Edit Radarr Instance</h4>
                 <form hx-post="{current_base_url}/admin/services/radarr/{instance_id}/update" hx-target="#radarr-instances" class="space-y-6">
                     
-                    <!-- Instance Name -->
-                    <div>
-                        <label for="radarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
-                        <input type="text" name="radarr_name" id="radarr_name" 
-                               value="{instance.name}"
-                               placeholder="e.g., Radarr 4K, Movies HD"
-                               class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                    <!-- Instance Name and Default Setting -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="radarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                            <input type="text" name="radarr_name" id="radarr_name" 
+                                   value="{instance.name}"
+                                   placeholder="e.g., Radarr 4K, Movies HD"
+                                   class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                        </div>
+                        
+                        <div class="flex items-center mt-6">
+                            <input type="checkbox" name="is_default_movie" id="is_default_movie" 
+                                   {"checked" if instance.is_default_movie else ""}
+                                   class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                            <label for="is_default_movie" class="ml-2 text-sm text-gray-700">
+                                Default instance for movie requests
+                            </label>
+                        </div>
                     </div>
                     
                     <!-- Connection Settings -->
@@ -2802,8 +2888,8 @@ async def update_radarr_instance(
         root_folder_path = form_data.get("radarr_root_folder_path", "").strip()
         minimum_availability = form_data.get("minimum_availability", "inCinemas").strip()
         tags = form_data.get("tags", "").strip()
-        monitored = form_data.get("monitored") == "on"
-        search_for_movie = form_data.get("search_for_movie") == "on"
+        # Use enable_automatic_search for both monitored and search_for_movie
+        # since these aren't exposed as separate checkboxes in the UI
         enable_scan = form_data.get("enable_scan") == "on"
         enable_automatic_search = form_data.get("enable_automatic_search") == "on"
         enable_integration = form_data.get("enable_integration") == "on"
@@ -2819,8 +2905,8 @@ async def update_radarr_instance(
             "root_folder_path": root_folder_path if root_folder_path else None,
             "minimum_availability": minimum_availability,
             "tags": [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else [],
-            "monitored": monitored,
-            "search_for_movie": search_for_movie,
+            "monitored": enable_automatic_search,
+            "search_for_movie": enable_automatic_search,
             "enable_scan": enable_scan,
             "enable_automatic_search": enable_automatic_search,
             "enable_integration": enable_integration
@@ -2921,13 +3007,32 @@ async def add_radarr_form(
             <h4 class="text-lg font-medium text-gray-900 mb-6">Add Radarr Instance</h4>
             <form hx-post="{current_base_url}/admin/services/radarr/create" hx-target="#radarr-instances" class="space-y-6">
                 
-                <!-- Instance Name -->
-                <div>
-                    <label for="radarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
-                    <input type="text" name="radarr_name" id="radarr_name" 
-                           placeholder="e.g., Radarr 4K, Movies HD"
-                           class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
-                    <p class="mt-1 text-xs text-gray-500">Friendly name to identify this instance</p>
+                <!-- Instance Name and Default Setting -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="radarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                        <input type="text" name="radarr_name" id="radarr_name" 
+                               placeholder="e.g., Radarr 4K, Movies HD"
+                               class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500">
+                        <p class="mt-1 text-xs text-gray-500">Friendly name to identify this instance</p>
+                    </div>
+                    
+                    <div class="space-y-3 mt-6">
+                        <div class="flex items-center">
+                            <input type="checkbox" name="is_default_movie" id="is_default_movie" 
+                                   class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                            <label for="is_default_movie" class="ml-2 text-sm text-gray-700">
+                                Default instance for movie requests
+                            </label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" name="is_4k_default" id="is_4k_default" 
+                                   class="h-4 w-4 text-orange-600 border-gray-300 rounded">
+                            <label for="is_4k_default" class="ml-2 text-sm text-gray-700">
+                                Default instance for 4K movie requests
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Connection Settings -->
@@ -3216,25 +3321,34 @@ async def test_radarr_connection(
                         <p class="text-green-700 text-xs">Instance: {result.get("instance_name", radarr_name)}</p>
                     </div>
                     <script>
-                        // Expand the advanced settings section
-                        const advancedSection = document.getElementById('radarr-advanced-settings');
-                        const chevron = document.getElementById('advanced-chevron');
-                        if (advancedSection && chevron) {{
-                            advancedSection.classList.remove('hidden');
-                            chevron.classList.add('rotate-180');
-                            
-                            // Populate quality profiles
-                            const qualitySelect = document.getElementById('radarr_quality_profile_id');
-                            if (qualitySelect) {{
-                                qualitySelect.innerHTML = '<option value="">Select quality profile...</option>{profile_options}';
+                        // Use setTimeout to ensure DOM is fully updated
+                        setTimeout(function() {{
+                            // Expand the advanced settings section
+                            const advancedSection = document.getElementById('radarr-advanced-settings');
+                            const chevron = document.getElementById('advanced-chevron');
+                            if (advancedSection && chevron) {{
+                                advancedSection.classList.remove('hidden');
+                                chevron.classList.add('rotate-180');
+                                
+                                // Populate quality profiles
+                                const qualitySelect = document.getElementById('radarr_quality_profile_id');
+                                if (qualitySelect) {{
+                                    qualitySelect.innerHTML = '<option value="">Select quality profile...</option>{profile_options}';
+                                }} else {{
+                                    console.warn('Could not find radarr_quality_profile_id element');
+                                }}
+                                
+                                // Populate root folders
+                                const rootFolderSelect = document.getElementById('radarr_root_folder_path');
+                                if (rootFolderSelect) {{
+                                    rootFolderSelect.innerHTML = '<option value="">Select root folder...</option>{folder_options}';
+                                }} else {{
+                                    console.warn('Could not find radarr_root_folder_path element');
+                                }}
+                            }} else {{
+                                console.warn('Could not find advanced settings section or chevron');
                             }}
-                            
-                            // Populate root folders
-                            const rootFolderSelect = document.getElementById('radarr_root_folder_path');
-                            if (rootFolderSelect) {{
-                                rootFolderSelect.innerHTML = '<option value="">Select root folder...</option>{folder_options}';
-                            }}
-                        }}
+                        }}, 100); // 100ms delay to ensure DOM is ready
                     </script>
                 ''')
                 
@@ -3247,13 +3361,18 @@ async def test_radarr_connection(
                         <p class="text-yellow-700 text-xs">Warning: Could not load profiles/folders: {str(e)}</p>
                     </div>
                     <script>
-                        // Expand the advanced settings section anyway
-                        const advancedSection = document.getElementById('radarr-advanced-settings');
-                        const chevron = document.getElementById('advanced-chevron');
-                        if (advancedSection && chevron) {{
-                            advancedSection.classList.remove('hidden');
-                            chevron.classList.add('rotate-180');
-                        }}
+                        // Use setTimeout to ensure DOM is fully updated
+                        setTimeout(function() {{
+                            // Expand the advanced settings section anyway
+                            const advancedSection = document.getElementById('radarr-advanced-settings');
+                            const chevron = document.getElementById('advanced-chevron');
+                            if (advancedSection && chevron) {{
+                                advancedSection.classList.remove('hidden');
+                                chevron.classList.add('rotate-180');
+                            }} else {{
+                                console.warn('Could not find advanced settings section or chevron');
+                            }}
+                        }}, 100); // 100ms delay to ensure DOM is ready
                     </script>
                 ''')
         else:
@@ -3296,9 +3415,10 @@ async def create_radarr_instance(
         radarr_root_folder_path = form_data.get("radarr_root_folder_path", "").strip()
         minimum_availability = form_data.get("minimum_availability", "inCinemas").strip()
         tags = form_data.get("tags", "").strip()
-        monitored = form_data.get("monitored") == "on"
-        search_for_movie = form_data.get("search_for_movie") == "on"
+        enable_automatic_search = form_data.get("enable_automatic_search") == "on"
         enable_integration = form_data.get("enable_integration") == "on"
+        is_default_movie = form_data.get("is_default_movie") == "on"
+        is_4k_default = form_data.get("is_4k_default") == "on"
         
         # Validation
         if not radarr_name or not radarr_hostname or not radarr_port or not radarr_api_key:
@@ -3326,10 +3446,10 @@ async def create_radarr_instance(
             "root_folder_path": radarr_root_folder_path or None,
             "minimum_availability": minimum_availability,
             "tags": [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else [],
-            "monitored": monitored,
-            "search_for_movie": search_for_movie,
+            "monitored": enable_automatic_search,
+            "search_for_movie": enable_automatic_search,
             "enable_scan": True,
-            "enable_automatic_search": True,
+            "enable_automatic_search": enable_automatic_search,
             "enable_integration": enable_integration
         })
         
@@ -3340,9 +3460,43 @@ async def create_radarr_instance(
             url=radarr_url,
             api_key=radarr_api_key,
             is_enabled=True,
+            is_default_movie=is_default_movie,
+            is_4k_default=is_4k_default,
             created_by=current_user.id
         )
         new_instance.set_settings(settings)
+        
+        # Handle default instance conflicts
+        if is_default_movie:
+            # Clear other default movie instances
+            other_defaults = session.exec(select(ServiceInstance).where(
+                ServiceInstance.service_type == ServiceType.RADARR,
+                ServiceInstance.is_default_movie == True
+            )).all()
+            for other_instance in other_defaults:
+                other_instance.is_default_movie = False
+                session.add(other_instance)
+        
+        if is_4k_default:
+            # Clear other 4K default instances
+            other_4k_defaults = session.exec(select(ServiceInstance).where(
+                ServiceInstance.service_type == ServiceType.RADARR,
+                ServiceInstance.is_4k_default == True
+            )).all()
+            for other_instance in other_4k_defaults:
+                other_instance.is_4k_default = False
+                session.add(other_instance)
+        
+        # Auto-default logic: If this is the only Radarr instance, make it default for movies
+        if not is_default_movie:
+            existing_radarr_count = session.exec(
+                select(ServiceInstance).where(
+                    ServiceInstance.service_type == ServiceType.RADARR,
+                    ServiceInstance.is_enabled == True
+                )
+            ).all()
+            if len(existing_radarr_count) == 0:  # This will be the only one after creation
+                new_instance.is_default_movie = True
         
         # Save to database
         session.add(new_instance)
@@ -3487,31 +3641,42 @@ async def test_sonarr_connection(
                         <p class="text-green-700 text-xs">Instance: {result.get("instance_name", sonarr_name)}</p>
                     </div>
                     <script>
-                        // Expand the advanced settings section
-                        const advancedSection = document.getElementById('sonarr-advanced-settings');
-                        const chevron = document.getElementById('sonarr-advanced-chevron');
-                        if (advancedSection && chevron) {{
-                            advancedSection.classList.remove('hidden');
-                            chevron.classList.add('rotate-180');
-                            
-                            // Populate quality profiles
-                            const qualitySelect = document.getElementById('sonarr_quality_profile_id');
-                            if (qualitySelect) {{
-                                qualitySelect.innerHTML = '<option value="">Select quality profile...</option>{quality_options}';
+                        // Use setTimeout to ensure DOM is fully updated
+                        setTimeout(function() {{
+                            // Expand the advanced settings section
+                            const advancedSection = document.getElementById('sonarr-advanced-settings');
+                            const chevron = document.getElementById('sonarr-advanced-chevron');
+                            if (advancedSection && chevron) {{
+                                advancedSection.classList.remove('hidden');
+                                chevron.classList.add('rotate-180');
+                                
+                                // Populate quality profiles
+                                const qualitySelect = document.getElementById('sonarr_quality_profile_id');
+                                if (qualitySelect) {{
+                                    qualitySelect.innerHTML = '<option value="">Select quality profile...</option>{quality_options}';
+                                }} else {{
+                                    console.warn('Could not find sonarr_quality_profile_id element');
+                                }}
+                                
+                                // Populate language profiles
+                                const languageSelect = document.getElementById('sonarr_language_profile_id');
+                                if (languageSelect) {{
+                                    languageSelect.innerHTML = '<option value="">Select language profile...</option>{language_options}';
+                                }} else {{
+                                    console.warn('Could not find sonarr_language_profile_id element');
+                                }}
+                                
+                                // Populate root folders
+                                const rootFolderSelect = document.getElementById('sonarr_root_folder_path');
+                                if (rootFolderSelect) {{
+                                    rootFolderSelect.innerHTML = '<option value="">Select root folder...</option>{folder_options}';
+                                }} else {{
+                                    console.warn('Could not find sonarr_root_folder_path element');
+                                }}
+                            }} else {{
+                                console.warn('Could not find advanced settings section or chevron');
                             }}
-                            
-                            // Populate language profiles
-                            const languageSelect = document.getElementById('sonarr_language_profile_id');
-                            if (languageSelect) {{
-                                languageSelect.innerHTML = '<option value="">Select language profile...</option>{language_options}';
-                            }}
-                            
-                            // Populate root folders
-                            const rootFolderSelect = document.getElementById('sonarr_root_folder_path');
-                            if (rootFolderSelect) {{
-                                rootFolderSelect.innerHTML = '<option value="">Select root folder...</option>{folder_options}';
-                            }}
-                        }}
+                        }}, 100); // 100ms delay to ensure DOM is ready
                     </script>
                 ''')
                 
@@ -3524,13 +3689,18 @@ async def test_sonarr_connection(
                         <p class="text-yellow-700 text-xs">Warning: Could not load profiles/folders: {str(e)}</p>
                     </div>
                     <script>
-                        // Expand the advanced settings section anyway
-                        const advancedSection = document.getElementById('sonarr-advanced-settings');
-                        const chevron = document.getElementById('sonarr-advanced-chevron');
-                        if (advancedSection && chevron) {{
-                            advancedSection.classList.remove('hidden');
-                            chevron.classList.add('rotate-180');
-                        }}
+                        // Use setTimeout to ensure DOM is fully updated
+                        setTimeout(function() {{
+                            // Expand the advanced settings section anyway
+                            const advancedSection = document.getElementById('sonarr-advanced-settings');
+                            const chevron = document.getElementById('sonarr-advanced-chevron');
+                            if (advancedSection && chevron) {{
+                                advancedSection.classList.remove('hidden');
+                                chevron.classList.add('rotate-180');
+                            }} else {{
+                                console.warn('Could not find advanced settings section or chevron');
+                            }}
+                        }}, 100); // 100ms delay to ensure DOM is ready
                     </script>
                 ''')
         else:
@@ -3580,6 +3750,7 @@ async def create_sonarr_instance(
         enable_integration = form_data.get("enable_integration") == "on"
         enable_season_folders = form_data.get("enable_season_folders") == "on"
         anime_standard_format = form_data.get("anime_standard_format") == "on"
+        is_default_tv = form_data.get("is_default") == "on"
         
         # Validation
         if not sonarr_name or not sonarr_hostname or not sonarr_port or not sonarr_api_key:
@@ -3623,9 +3794,21 @@ async def create_sonarr_instance(
             url=sonarr_url,
             api_key=sonarr_api_key,
             is_enabled=True,
+            is_default_tv=is_default_tv,
             created_by=current_user.id
         )
         new_instance.set_settings(settings)
+        
+        # Auto-default logic: If this is the only Sonarr instance, make it default for TV
+        if not is_default_tv:
+            existing_sonarr_count = session.exec(
+                select(ServiceInstance).where(
+                    ServiceInstance.service_type == ServiceType.SONARR,
+                    ServiceInstance.is_enabled == True
+                )
+            ).all()
+            if len(existing_sonarr_count) == 0:  # This will be the only one after creation
+                new_instance.is_default_tv = True
         
         # Save to database
         session.add(new_instance)
@@ -4063,13 +4246,24 @@ async def edit_sonarr_form(
                 <h4 class="text-lg font-medium text-gray-900 mb-6">Edit Sonarr Instance</h4>
                 <form hx-post="{current_base_url}/admin/services/sonarr/{instance_id}/update" hx-target="#sonarr-instances" class="space-y-6">
                     
-                    <!-- Instance Name -->
-                    <div>
-                        <label for="sonarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
-                        <input type="text" name="sonarr_name" id="sonarr_name" 
-                               value="{instance.name}"
-                               placeholder="e.g., Sonarr 4K, TV Shows HD"
-                               class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                    <!-- Instance Name and Default Setting -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="sonarr_name" class="block text-sm font-medium text-gray-700 mb-2">Instance Name</label>
+                            <input type="text" name="sonarr_name" id="sonarr_name" 
+                                   value="{instance.name}"
+                                   placeholder="e.g., Sonarr 4K, TV Shows HD"
+                                   class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                        </div>
+                        
+                        <div class="flex items-center mt-6">
+                            <input type="checkbox" name="is_default" id="is_default" 
+                                   {"checked" if instance.is_default_tv else ""}
+                                   class="h-4 w-4 text-purple-600 border-gray-300 rounded">
+                            <label for="is_default" class="ml-2 text-sm text-gray-700">
+                                Default instance for TV show requests
+                            </label>
+                        </div>
                     </div>
                     
                     <!-- Connection Settings -->
@@ -4305,6 +4499,7 @@ async def update_sonarr_instance(
         sonarr_api_key = form_data.get("sonarr_api_key", "").strip()
         use_ssl = form_data.get("use_ssl") == "on"
         sonarr_base_url = form_data.get("sonarr_base_url", "").strip()
+        is_default_tv = form_data.get("is_default") == "on"
         
         # Validation
         if not sonarr_name or not sonarr_hostname or not sonarr_port or not sonarr_api_key:
@@ -4322,6 +4517,7 @@ async def update_sonarr_instance(
         instance.name = sonarr_name
         instance.url = sonarr_url
         instance.api_key = sonarr_api_key
+        instance.is_default_tv = is_default_tv
         
         # Update settings - extract all form data with correct field names
         quality_profile_id = form_data.get("sonarr_quality_profile_id", "").strip()
@@ -4675,8 +4871,42 @@ async def admin_jobs_tab(
     from ..services.background_jobs import background_jobs
     from ..services.plex_sync_service import PlexSyncService
 
-    # Get job status
-    all_jobs = background_jobs.get_all_jobs_status()
+    # Get job status from APScheduler
+    from ..services.job_scheduler import job_scheduler
+    from ..services.settings_service import SettingsService
+    
+    # Get job configuration from database and APScheduler
+    settings = SettingsService.get_settings(session)
+    job_config = settings.get_background_job_settings()
+    apscheduler_jobs = job_scheduler.list_jobs() if job_scheduler.is_running() else []
+    
+    # Convert APScheduler jobs to the format expected by the template
+    all_jobs = {}
+    for job_id in ["library_sync", "download_status_check", "request_submission", "request_cleanup", "category_cache"]:
+        config = job_config.get(job_id, {})
+        
+        # Find corresponding APScheduler job
+        apscheduler_job = None
+        for aj in apscheduler_jobs:
+            if aj["id"] == job_id:
+                apscheduler_job = aj
+                break
+        
+        # Parse next_run time if available
+        next_run = None
+        if apscheduler_job and apscheduler_job["next_run"]:
+            from datetime import datetime
+            try:
+                next_run = datetime.fromisoformat(apscheduler_job["next_run"].replace('Z', '+00:00'))
+            except:
+                next_run = None
+        
+        all_jobs[job_id] = {
+            "enabled": config.get("enabled", True),
+            "interval_seconds": config.get("interval_minutes", 60) * 60,  # Convert to seconds for compatibility
+            "next_run": next_run,
+            "running": False  # APScheduler jobs don't show as "running" in this context
+        }
     
     # Get library sync stats
     sync_stats = None
@@ -4742,6 +4972,46 @@ async def admin_jobs_tab(
     next_download_check = download_status_job.get('next_run')
     next_download_check_formatted = next_download_check.strftime('%Y-%m-%d %H:%M:%S UTC') if next_download_check else "Not scheduled"
     
+    # Determine request submission schedule
+    submission_job = all_jobs.get('request_submission', {})
+    submission_schedule = "disabled"
+    if submission_job.get('enabled', False):
+        interval = submission_job.get('interval_seconds', 300)
+        if interval <= 120:  # 2 minutes
+            submission_schedule = "2minutes"
+        elif interval <= 300:  # 5 minutes
+            submission_schedule = "5minutes"
+        elif interval <= 600:  # 10 minutes
+            submission_schedule = "10minutes"
+        elif interval <= 900:  # 15 minutes
+            submission_schedule = "15minutes"
+        else:  # 30 minutes or more
+            submission_schedule = "30minutes"
+    
+    # Format next request submission time
+    next_submission = submission_job.get('next_run')
+    next_submission_formatted = next_submission.strftime('%Y-%m-%d %H:%M:%S UTC') if next_submission else "Not scheduled"
+    
+    # Determine category cache schedule
+    cache_job = all_jobs.get('category_cache', {})
+    cache_schedule = "disabled"
+    if cache_job.get('enabled', False):
+        interval = cache_job.get('interval_seconds', 14400)
+        if interval <= 7200:  # 2 hours
+            cache_schedule = "2hours"
+        elif interval <= 14400:  # 4 hours
+            cache_schedule = "4hours"
+        elif interval <= 21600:  # 6 hours
+            cache_schedule = "6hours"
+        elif interval <= 43200:  # 12 hours
+            cache_schedule = "12hours"
+        else:  # 24 hours or more
+            cache_schedule = "24hours"
+    
+    # Format next category cache time
+    next_cache = cache_job.get('next_run')
+    next_cache_formatted = next_cache.strftime('%Y-%m-%d %H:%M:%S UTC') if next_cache else "Not scheduled"
+    
     return create_template_response("admin_tabs/jobs.html", {
         "request": request,
         "current_user": current_user,
@@ -4751,13 +5021,18 @@ async def admin_jobs_tab(
         "next_sync": next_sync_formatted,
         "download_schedule": download_schedule,
         "next_download_check": next_download_check_formatted,
+        "submission_schedule": submission_schedule,
+        "next_request_submission": next_submission_formatted,
+        "cache_schedule": cache_schedule,
+        "next_category_cache": next_cache_formatted,
         "cleanup_schedule": "disabled",  # Not implemented yet
         "cleanup_retention": "30days",  # Default value
         "job_stats": {
             "active": sum(1 for job in all_jobs.values() if job.get('running', False)),
             "scheduled": sum(1 for job in all_jobs.values() if job.get('enabled', False)),
             "failed": 0  # TODO: Track failed jobs
-        }
+        },
+        "scheduler_running": job_scheduler.is_running()  # Check actual APScheduler status
     })
 
 
@@ -5170,91 +5445,57 @@ async def run_manual_job(
 ):
     """Run a manual job"""
     from fastapi.responses import HTMLResponse
-    from ..services.background_jobs import background_jobs
+    from ..services.job_scheduler import job_scheduler
     
+    # Map job types to scheduler job IDs
+    job_id_map = {
+        "sync-library": "library_sync",
+        "download-status": "download_status_check", 
+        "request-submission": "request_submission",
+        "cleanup-requests": "request_cleanup",
+        "category-cache": "category_cache"
+    }
+    
+    job_id = job_id_map.get(job_type)
+    if not job_id:
+        return HTMLResponse(f"""
+            <div class="p-4 bg-red-50 border border-red-200 rounded-md">
+                <div class="flex">
+                    <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    <p class="ml-3 text-sm text-red-700">Unknown job type: {job_type}</p>
+                </div>
+            </div>
+        """)
+
     try:
-        if job_type == "sync-library":
-            result = await background_jobs.trigger_library_sync()
+        result = await job_scheduler.trigger_job(job_id)
+        
+        if result['success']:
+            job_names = {
+                "library_sync": "Library sync",
+                "download_status_check": "Download status check",
+                "request_submission": "Request submission",
+                "request_cleanup": "Request cleanup", 
+                "category_cache": "Category cache refresh"
+            }
             
-            if result['success']:
-                return HTMLResponse(f"""
-                    <div class="p-4 bg-green-50 border border-green-200 rounded-md">
-                        <div class="flex">
-                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                            </svg>
-                            <p class="ml-3 text-sm text-green-700">Library sync started successfully!</p>
-                        </div>
-                    </div>
-                """)
-            else:
-                return HTMLResponse(f"""
-                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-                        <div class="flex">
-                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-                            </svg>
-                            <p class="ml-3 text-sm text-yellow-700">{result['message']}</p>
-                        </div>
-                    </div>
-                """)
-                
-        elif job_type == "download-status":
-            result = await background_jobs.trigger_download_status_check()
+            job_name = job_names.get(job_id, job_id)
             
-            if result['success']:
-                return HTMLResponse(f"""
-                    <div class="p-4 bg-green-50 border border-green-200 rounded-md">
-                        <div class="flex">
-                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                            </svg>
-                            <p class="ml-3 text-sm text-green-700">Download status check started successfully!</p>
-                        </div>
-                    </div>
-                """)
-            else:
-                return HTMLResponse(f"""
-                    <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-                        <div class="flex">
-                            <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-                            </svg>
-                            <p class="ml-3 text-sm text-yellow-700">{result['message']}</p>
-                        </div>
-                    </div>
-                """)
-                
-        elif job_type == "cleanup-requests":
-            # Placeholder for request cleanup job
             return HTMLResponse(f"""
-                <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
+                <div class="p-4 bg-green-50 border border-green-200 rounded-md">
                     <div class="flex">
-                        <svg class="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                        <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                         </svg>
-                        <p class="ml-3 text-sm text-blue-700">Request cleanup functionality coming soon!</p>
+                        <div class="ml-3">
+                            <p class="text-sm text-green-700 font-medium">{job_name} started successfully!</p>
+                            <p class="text-xs text-green-600 mt-1">Execution ID: {result.get('execution_id', 'N/A')}</p>
+                        </div>
                     </div>
                 </div>
             """)
-            
-        elif job_type == "update-metadata":
-            # Placeholder for metadata update job
-            return HTMLResponse(f"""
-                <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
-                    <div class="flex">
-                        <svg class="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-                        </svg>
-                        <p class="ml-3 text-sm text-blue-700">Metadata update functionality coming soon!</p>
-                    </div>
-                </div>
-            """)
-            
-        elif job_type == "health-check":
-            # Use the existing test-all services functionality
-            return await test_all_services(request, current_user, session)
-            
         else:
             return HTMLResponse(f"""
                 <div class="p-4 bg-red-50 border border-red-200 rounded-md">
@@ -5262,7 +5503,10 @@ async def run_manual_job(
                         <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
                         </svg>
-                        <p class="ml-3 text-sm text-red-700">Unknown job type: {job_type}</p>
+                        <div class="ml-3">
+                            <p class="text-sm text-red-700 font-medium">Job failed to start</p>
+                            <p class="text-xs text-red-600 mt-1">{result.get('error', 'Unknown error')}</p>
+                        </div>
                     </div>
                 </div>
             """)
@@ -5283,15 +5527,24 @@ async def run_manual_job(
 @router.get("/jobs/history")
 async def get_job_history(
     request: Request,
+    offset: int = 0,
+    limit: int = 25,
     current_user: User = Depends(get_current_admin_user_flexible),
     session: Session = Depends(get_session)
 ):
-    """Get job execution history"""
+    """Get job execution history with pagination"""
     from fastapi.responses import HTMLResponse
     from ..services.background_jobs import background_jobs
+    from ..services.settings_service import SettingsService
     
-    # Get recent job execution history
-    history = background_jobs.get_job_execution_history(limit=50)
+    # Get base URL for proper HTMX routing
+    base_url = SettingsService.get_base_url(session)
+    
+    # Get job execution history with pagination
+    history_data = background_jobs.get_job_execution_history(limit=limit, offset=offset)
+    history = history_data['history']
+    total_count = history_data['total_count']
+    has_more = history_data['has_more']
     
     # Build history HTML
     if not history:
@@ -5307,9 +5560,9 @@ async def get_job_history(
     
     history_items = []
     for execution in history:
-        # Format timestamps
-        started_at = execution['started_at'].strftime('%Y-%m-%d %H:%M:%S') if execution['started_at'] else "Unknown"
-        completed_at = execution['completed_at'].strftime('%Y-%m-%d %H:%M:%S') if execution['completed_at'] else "Still running"
+        # Get already formatted timestamps
+        started_at = execution['started_at'] if execution['started_at'] else "Unknown"
+        completed_at = execution['completed_at'] if execution['completed_at'] else "Still running"
         
         # Determine status styling
         status = execution['status']
@@ -5329,9 +5582,6 @@ async def get_job_history(
             status_text_color = "text-blue-800"
             status_icon = "🔄"
         
-        # Format duration
-        duration_text = f"{execution['duration_seconds']:.1f}s" if execution['duration_seconds'] else "N/A"
-        
         # Format triggered by
         triggered_by = execution['triggered_by'].capitalize()
         triggered_color = "text-blue-600" if execution['triggered_by'] == 'scheduler' else "text-gray-600"
@@ -5339,7 +5589,10 @@ async def get_job_history(
         # Format job name
         job_display_name = {
             'library_sync': 'Library Sync',
-            'download_status_check': 'Download Status Check'
+            'download_status_check': 'Download Status Check',
+            'request_submission': 'Request Submission',
+            'request_cleanup': 'Request Cleanup',
+            'category_cache': 'Category Cache Refresh'
         }.get(execution['job_name'], execution['job_name'].replace('_', ' ').title())
         
         history_items.append(f"""
@@ -5358,9 +5611,6 @@ async def get_job_history(
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {completed_at}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {duration_text}
-                </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm {triggered_color}">
                     {triggered_by}
                 </td>
@@ -5369,6 +5619,73 @@ async def get_job_history(
     
     else:
         history_content = "".join(history_items)
+    
+    # Pagination controls
+    prev_offset = max(0, offset - limit)
+    next_offset = offset + limit
+    
+    pagination_html = ""
+    if total_count > limit or offset > 0:
+        pagination_html = f"""
+        <div class="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 sm:px-6">
+            <div class="flex justify-between flex-1 sm:hidden">
+                <!-- Mobile pagination -->
+                <button {"disabled" if offset == 0 else ""}
+                        hx-get="{base_url}/admin/jobs/history?offset={prev_offset}&limit={limit}"
+                        hx-target="#job-history"
+                        class="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 {"cursor-not-allowed opacity-50" if offset == 0 else ""}">
+                    Previous
+                </button>
+                <button {"disabled" if not has_more else ""}
+                        hx-get="{base_url}/admin/jobs/history?offset={next_offset}&limit={limit}"
+                        hx-target="#job-history"
+                        class="relative ml-3 inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_more else ""}">
+                    Next
+                </button>
+            </div>
+            <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        Showing <span class="font-medium">{offset + 1}</span> to <span class="font-medium">{min(offset + limit, total_count)}</span> of <span class="font-medium">{total_count}</span> results
+                    </p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <!-- Clear History Button -->
+                    <button hx-post="{base_url}/admin/jobs/clear-history"
+                            hx-target="#job-history"
+                            hx-confirm="Are you sure you want to clear all job execution history? This cannot be undone."
+                            class="inline-flex items-center px-3 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                        Clear History
+                    </button>
+                    
+                    <!-- Pagination -->
+                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                        <button {"disabled" if offset == 0 else ""}
+                                hx-get="{base_url}/admin/jobs/history?offset={prev_offset}&limit={limit}"
+                                hx-target="#job-history"
+                                class="relative inline-flex items-center px-2 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-l-md hover:bg-gray-50 {"cursor-not-allowed opacity-50" if offset == 0 else ""}">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                            </svg>
+                            <span class="sr-only">Previous</span>
+                        </button>
+                        <button {"disabled" if not has_more else ""}
+                                hx-get="{base_url}/admin/jobs/history?offset={next_offset}&limit={limit}"
+                                hx-target="#job-history"
+                                class="relative inline-flex items-center px-2 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-r-md hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_more else ""}">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
+                            </svg>
+                            <span class="sr-only">Next</span>
+                        </button>
+                    </nav>
+                </div>
+            </div>
+        </div>
+        """
     
     return HTMLResponse(f"""
         <div class="overflow-hidden">
@@ -5379,7 +5696,6 @@ async def get_job_history(
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Started</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completed</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Triggered By</th>
                     </tr>
                 </thead>
@@ -5387,10 +5703,39 @@ async def get_job_history(
                     {history_content}
                 </tbody>
             </table>
+            {pagination_html}
         </div>
     """)
 
 
+@router.post("/jobs/clear-history")
+async def clear_job_history(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Clear all job execution history"""
+    from fastapi.responses import HTMLResponse
+    from ..services.background_jobs import background_jobs
+    from ..services.settings_service import SettingsService
+    
+    # Get base URL for proper HTMX routing
+    base_url = SettingsService.get_base_url(session)
+    
+    # Clear ALL job execution history (0 days = delete everything)
+    result = background_jobs.clear_job_execution_history(keep_recent_days=0)
+    print(f"Admin cleared job history: {result}")
+    
+    # Return empty history display
+    return HTMLResponse("""
+        <div class="text-center py-12">
+            <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012-2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+            </svg>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">Job History Cleared</h3>
+            <p class="text-gray-500">All job execution history has been removed. New job executions will appear here.</p>
+        </div>
+    """)
 
 
 @router.post("/jobs/update-cleanup")
@@ -5420,60 +5765,122 @@ async def update_job_schedule(
     current_user: User = Depends(get_current_admin_user_flexible),
     job_name: str = Form(...),
     interval: str = Form(...),
-    enabled: bool = Form(default=True)
+    enabled: bool = Form(default=True),
+    session: Session = Depends(get_session)
 ):
     """Update job scheduling configuration"""
     try:
-        from ..services.background_jobs import background_jobs
+        from ..services.job_scheduler import job_scheduler
+        from ..services.settings_service import SettingsService
         
-        # Convert interval string to seconds
-        interval_seconds = None
+        # Convert interval string to minutes for APScheduler
+        interval_minutes = None
         if interval == "disabled":
             enabled = False
         elif interval == "2minutes":
-            interval_seconds = 120
+            interval_minutes = 2
         elif interval == "5minutes":
-            interval_seconds = 300
+            interval_minutes = 5
+        elif interval == "10minutes":
+            interval_minutes = 10
         elif interval == "15minutes":
-            interval_seconds = 900
+            interval_minutes = 15
         elif interval == "30minutes":
-            interval_seconds = 1800
+            interval_minutes = 30
         elif interval == "hourly":
-            interval_seconds = 3600
+            interval_minutes = 60
+        elif interval == "2hours":
+            interval_minutes = 120
         elif interval == "4hours":
-            interval_seconds = 14400
-        elif interval == "daily":
-            interval_seconds = 86400
+            interval_minutes = 240
+        elif interval == "6hours":
+            interval_minutes = 360
+        elif interval == "12hours":
+            interval_minutes = 720
+        elif interval == "daily" or interval == "24hours":
+            interval_minutes = 1440
         elif interval == "weekly":
-            interval_seconds = 604800
+            interval_minutes = 10080
         else:
             raise ValueError(f"Unknown interval: {interval}")
         
-        # Update the job schedule
-        success = background_jobs.update_job_schedule(
-            job_name=job_name,
-            interval_seconds=interval_seconds,
-            enabled=enabled
-        )
+        # Update job configuration in database
+        settings = SettingsService.get_settings(session)
+        job_config = settings.get_background_job_settings()
         
-        if success:
-            if request.headers.get("HX-Request"):
-                return HTMLResponse(f'''
-                    <div class="p-3 bg-green-50 border border-green-200 rounded-md">
-                        <p class="text-green-700 text-sm">✓ Job schedule updated successfully</p>
-                    </div>
-                ''')
-            else:
-                return {"success": True, "message": "Job schedule updated successfully"}
+        # Update the specific job configuration
+        if job_name not in job_config:
+            job_config[job_name] = {}
+        
+        job_config[job_name]["enabled"] = enabled
+        if interval_minutes:
+            job_config[job_name]["interval_minutes"] = interval_minutes
+        
+        # Save updated configuration
+        settings.set_background_job_settings(job_config)
+        session.add(settings)
+        session.commit()
+        
+        # Update the scheduler with new configuration
+        if job_scheduler.is_running():
+            # Job function mapping
+            job_functions = {
+                "library_sync": "library_sync_job",
+                "download_status_check": "download_status_job",
+                "request_submission": "request_submission_job",
+                "request_cleanup": "request_cleanup_job",
+                "category_cache": "category_cache_job"
+            }
+            
+            job_names = {
+                "library_sync": "Library Sync",
+                "download_status_check": "Download Status Check", 
+                "request_submission": "Request Submission",
+                "request_cleanup": "Request Cleanup",
+                "category_cache": "Category Cache Refresh"
+            }
+            
+            if job_name in job_functions:
+                # Remove existing job
+                if job_scheduler.scheduler.get_job(job_name):
+                    job_scheduler.scheduler.remove_job(job_name)
+                
+                # Add updated job if enabled
+                if enabled and interval_minutes:
+                    # Get job function by importing from the module
+                    from ..services import job_scheduler as job_mod
+                    func_name = job_functions[job_name]
+                    job_func = getattr(job_mod, func_name)
+                    
+                    job_scheduler.scheduler.add_job(
+                        func=job_func,
+                        trigger='interval',
+                        minutes=interval_minutes,
+                        id=job_name,
+                        name=job_names[job_name],
+                        replace_existing=True
+                    )
+        
+        job_names = {
+            "library_sync": "Library Sync",
+            "download_status_check": "Download Status Check", 
+            "request_submission": "Request Submission",
+            "request_cleanup": "Request Cleanup",
+            "category_cache": "Category Cache Refresh"
+        }
+        
+        success_msg = f"✓ {job_names.get(job_name, job_name)} updated: {'Enabled' if enabled else 'Disabled'}"
+        if enabled and interval_minutes:
+            success_msg += f" (every {interval_minutes} minutes)"
+        
+        if request.headers.get("HX-Request"):
+            return HTMLResponse(f'''
+                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p class="text-green-700 text-sm">{success_msg}</p>
+                </div>
+            ''')
         else:
-            if request.headers.get("HX-Request"):
-                return HTMLResponse(f'''
-                    <div class="p-3 bg-red-50 border border-red-200 rounded-md">
-                        <p class="text-red-700 text-sm">✗ Failed to update job schedule</p>
-                    </div>
-                ''')
-            else:
-                return {"success": False, "message": "Failed to update job schedule"}
+            return {"success": True, "message": success_msg}
                 
     except Exception as e:
         print(f"Error updating job schedule: {e}")
@@ -5487,6 +5894,74 @@ async def update_job_schedule(
             return {"success": False, "message": f"Error: {str(e)}"}
 
 
+
+@router.get("/jobs/scheduler-status", response_class=HTMLResponse)
+async def get_scheduler_status(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get real-time scheduler status"""
+    if not current_user.is_admin:
+        return HTMLResponse('<div class="text-red-600">Access denied</div>')
+    
+    try:
+        from ..services.job_scheduler import job_scheduler
+        
+        is_running = job_scheduler.is_running()
+        
+        if is_running:
+            # Get job count
+            jobs = job_scheduler.list_jobs()
+            job_count = len(jobs)
+            
+            # Get next job run time
+            next_run_str = 'No jobs scheduled'
+            if jobs:
+                next_job = min(jobs, key=lambda x: x['next_run'] or '9999-12-31')
+                if next_job['next_run']:
+                    next_run_str = next_job['next_run'][:16].replace('T', ' ')
+            
+            status_html = f'''
+            <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                <div class="flex items-center">
+                    <div class="w-3 h-3 bg-green-500 rounded-full mr-3 animate-pulse"></div>
+                    <div>
+                        <h4 class="text-sm font-medium text-green-900">APScheduler RUNNING</h4>
+                        <p class="text-xs text-green-700">{job_count} jobs scheduled, next run: {next_run_str}</p>
+                    </div>
+                </div>
+            </div>
+            '''
+        else:
+            status_html = '''
+            <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div class="flex items-center">
+                    <div class="w-3 h-3 bg-red-500 rounded-full mr-3"></div>
+                    <div>
+                        <h4 class="text-sm font-medium text-red-900">APScheduler STOPPED</h4>
+                        <p class="text-xs text-red-700">Scheduler is not running - jobs will not execute</p>
+                    </div>
+                </div>
+            </div>
+            '''
+        
+        return HTMLResponse(status_html)
+        
+    except Exception as e:
+        return HTMLResponse(f'''
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <div class="flex items-center">
+                <div class="w-3 h-3 bg-yellow-500 rounded-full mr-3"></div>
+                <div>
+                    <h4 class="text-sm font-medium text-yellow-900">APScheduler ERROR</h4>
+                    <p class="text-xs text-yellow-700">Error checking status: {str(e)}</p>
+                </div>
+            </div>
+        </div>
+        ''')
+
+
 @router.post("/jobs/start-scheduler")
 async def start_scheduler(
     request: Request,
@@ -5494,19 +5969,50 @@ async def start_scheduler(
 ):
     """Start or restart the background job scheduler"""
     try:
-        from ..services.background_jobs import background_jobs
+        from ..services.job_scheduler import job_scheduler
+        from ..core.config import settings
         
-        # Restart the scheduler with a clean executor
-        background_jobs.restart()
+        # Check if scheduler is already running
+        if job_scheduler.is_running():
+            message = "✓ Job scheduler is already running"
+            status = "info"
+        else:
+            # Initialize if needed, then start the scheduler
+            if not job_scheduler._initialized:
+                await job_scheduler.initialize(settings.database_url)
+            
+            await job_scheduler.start()
+            
+            # Verify it actually started
+            if job_scheduler.is_running():
+                jobs = job_scheduler.list_jobs()
+                message = f"✓ Job scheduler started successfully with {len(jobs)} jobs scheduled"
+                status = "success"
+            else:
+                message = "⚠️ Scheduler start command completed but scheduler is not running"
+                status = "warning"
         
         if request.headers.get("HX-Request"):
+            if status == "success":
+                color_class = "green"
+            elif status == "warning":
+                color_class = "yellow"
+            else:
+                color_class = "blue"
+                
             return HTMLResponse(f'''
-                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
-                    <p class="text-green-700 text-sm">✓ Background job scheduler started successfully</p>
+                <div class="p-3 bg-{color_class}-50 border border-{color_class}-200 rounded-md">
+                    <p class="text-{color_class}-700 text-sm">{message}</p>
                 </div>
+                <script>
+                    // Trigger a refresh of the scheduler status after starting
+                    setTimeout(() => {{
+                        htmx.trigger('#scheduler-status-display', 'load');
+                    }}, 1000);
+                </script>
             ''')
         else:
-            return {"success": True, "message": "Scheduler started successfully"}
+            return {"success": True, "message": message}
             
     except Exception as e:
         print(f"Error starting scheduler: {e}")
@@ -5518,4 +6024,37 @@ async def start_scheduler(
             ''')
         else:
             return {"success": False, "message": f"Error: {str(e)}"}
+
+
+@router.post("/jobs/stop-scheduler")
+async def stop_scheduler(
+    request: Request,
+    current_user: User = Depends(get_current_admin_user_flexible)
+):
+    """Stop the background job scheduler"""
+    
+    # Note: In the new APScheduler system, the scheduler is managed by the FastAPI lifespan
+    # Stopping it manually would require app restart, so we'll show an informational message
+    
+    if request.headers.get("HX-Request"):
+        return HTMLResponse(f'''
+            <div class="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <p class="text-blue-700 text-sm">
+                    ℹ️ The job scheduler is now integrated with the application lifecycle.
+                    To stop/restart the scheduler, restart the application.
+                </p>
+            </div>
+        ''')
+    else:
+        return {
+            "success": True, 
+            "message": "Job scheduler is integrated with application lifecycle. Restart app to restart scheduler."
+        }
+        
+    # Legacy code for reference - old system would have done:
+    # try:
+    #     from ..services.job_scheduler import job_scheduler
+    #     await job_scheduler.shutdown()
+    # except Exception as e:
+    #     return {"success": False, "message": f"Error: {str(e)}"}
 

@@ -578,7 +578,7 @@ async def create_request(
 
     # Return appropriate message based on initial status
     if initial_status == RequestStatus.APPROVED:
-        message = "Auto-approved!"
+        message = "Approved!"
         color_class = "blue"
     else:
         message = "Requested!"
@@ -601,13 +601,15 @@ async def create_request(
     # We'll use a JavaScript trigger to refresh status badges on the page
     script_trigger = '''
     <script>
-        // Trigger refresh of all status badges on the page
-        document.body.dispatchEvent(new CustomEvent('refreshStatusBadges', {
-            detail: { 
-                updatedItemId: ''' + str(tmdb_id) + ''',
-                newStatus: "''' + ("PENDING" if initial_status == RequestStatus.PENDING else "APPROVED") + '''"
-            }
-        }));
+        // Defer the status badge refresh to prevent blocking
+        setTimeout(() => {
+            document.body.dispatchEvent(new CustomEvent('refreshStatusBadges', {
+                detail: { 
+                    updatedItemId: ''' + str(tmdb_id) + ''',
+                    newStatus: "''' + ("PENDING" if initial_status == RequestStatus.PENDING else "APPROVED") + '''"
+                }
+            }));
+        }, 100);
     </script>
     '''
     
@@ -637,24 +639,44 @@ async def create_request(
             // Close the dropdown after successful request
             closeAllDropdowns();
             
-            // Update the top-left overlay if it exists and doesn't already have a status badge
-            const cardElement = document.getElementById('media-card-{tmdb_id}');
-            if (cardElement) {{
-                const topBadgeArea = cardElement.querySelector('.absolute.top-2.left-2');
-                if (topBadgeArea && !topBadgeArea.querySelector('.bg-blue-600') && !topBadgeArea.querySelector('.bg-yellow-600')) {{
-                    topBadgeArea.innerHTML = `{overlay_badge}`;
+            // Defer the badge update to prevent blocking
+            setTimeout(() => {{
+                // Update the top-left overlay if it exists and doesn't have an "In Plex" badge
+                const cardElement = document.getElementById('media-card-{tmdb_id}');
+                if (cardElement) {{
+                    const topBadgeArea = cardElement.querySelector('.absolute.top-2.left-2');
+                    if (topBadgeArea && !topBadgeArea.querySelector('.bg-green-600')) {{
+                        topBadgeArea.innerHTML = `{overlay_badge}`;
+                    }}
                 }}
-            }}
+            }}, 50);
         </script>
         ''')
     
-    # Build the main response message for non-multi-instance requests
-    response_html = f'''<div class="inline-flex items-center px-3 py-2 border border-{color_class}-300 text-sm leading-4 font-medium rounded-md text-{color_class}-700 bg-{color_class}-50">
-        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-        </svg>
-        {message}
-    </div>'''
+    # Build the main response message for non-multi-instance requests using consistent button style
+    if initial_status == RequestStatus.APPROVED:
+        response_html = '<div class="w-full bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium text-center">✓ Approved</div>'
+        overlay_badge = '<span class="bg-blue-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Approved</span>'
+    else:  # PENDING
+        response_html = '<div class="w-full bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium text-center">⏳ Pending</div>'
+        overlay_badge = '<span class="bg-yellow-600/90 backdrop-blur-sm text-white px-2 py-1 rounded text-xs font-medium">Pending</span>'
+    
+    # Add overlay badge update script for non-multi-instance requests
+    response_html += f'''
+    <script>
+        // Defer the badge update to prevent blocking
+        setTimeout(() => {{
+            // Update the top-left overlay badge for non-multi-instance requests
+            const cardElement = document.getElementById('media-card-{tmdb_id}');
+            if (cardElement) {{
+                const topBadgeArea = cardElement.querySelector('.absolute.top-2.left-2');
+                if (topBadgeArea && !topBadgeArea.querySelector('.bg-green-600')) {{
+                    topBadgeArea.innerHTML = `{overlay_badge}`;
+                }}
+            }}
+        }}, 50);
+    </script>
+    '''
     
     # Only add OOB updates for main media requests
     if request_source == "main":
@@ -869,6 +891,54 @@ async def my_requests_legacy(
 
 
 
+@router.get("/{request_id}/quality-profiles", response_class=HTMLResponse)
+@require_permission(PermissionFlags.ADMIN_APPROVE_REQUESTS)
+async def get_request_quality_profiles(
+    request_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user_flexible),
+    session: Session = Depends(get_session)
+):
+    """Get quality profiles for a request's service instance"""
+    statement = select(MediaRequest).where(MediaRequest.id == request_id)
+    media_request = session.exec(statement).first()
+    
+    if not media_request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    if not media_request.service_instance_id:
+        return HTMLResponse('<option value="">No service instance configured</option>')
+    
+    # Get the service instance
+    instance_statement = select(ServiceInstance).where(ServiceInstance.id == media_request.service_instance_id)
+    service_instance = session.exec(instance_statement).first()
+    
+    if not service_instance:
+        return HTMLResponse('<option value="">Service instance not found</option>')
+    
+    try:
+        # Get quality profiles from the service instance
+        from ..services.multi_instance_integration_service import MultiInstanceIntegrationService
+        integration_service = MultiInstanceIntegrationService(session)
+        profiles = await integration_service.get_instance_quality_profiles(service_instance)
+        
+        if not profiles:
+            return HTMLResponse('<option value="">No quality profiles available</option>')
+        
+        # Build options HTML
+        options_html = '<option value="">Use default quality profile</option>'
+        for profile in profiles:
+            profile_name = profile.get('name', f'Profile {profile.get("id")}')
+            profile_id = profile.get('id')
+            options_html += f'<option value="{profile_id}">{profile_name}</option>'
+        
+        return HTMLResponse(options_html)
+        
+    except Exception as e:
+        print(f"❌ Error getting quality profiles: {e}")
+        return HTMLResponse('<option value="">Error loading profiles</option>')
+
+
 @router.post("/{request_id}/approve")
 @require_permission(PermissionFlags.ADMIN_APPROVE_REQUESTS)
 async def approve_request(
@@ -886,6 +956,19 @@ async def approve_request(
     
     # Track if this was previously pending to update user count
     was_pending = media_request.status == RequestStatus.PENDING
+    
+    # Check for instance override in form data
+    form_data = await request.form() if request.method == "POST" else {}
+    instance_override = form_data.get("override_instance_id")
+    if instance_override and instance_override.strip() and instance_override != "":
+        try:
+            # Update the service instance for this request
+            new_instance_id = int(instance_override)
+            old_instance_id = media_request.service_instance_id
+            media_request.service_instance_id = new_instance_id
+            print(f"🎯 Instance override: {old_instance_id} -> {new_instance_id}")
+        except ValueError:
+            print(f"⚠️ Invalid instance ID: {instance_override}")
     
     media_request.status = RequestStatus.APPROVED
     media_request.approved_by = current_user.id
@@ -1228,18 +1311,22 @@ async def delete_request(
         
         # Content negotiation - check if this is an HTMX request
         if request.headers.get("HX-Request"):
-            # Use out-of-band swaps for ALL HTMX targets to avoid reloading content
-            from fastapi.responses import HTMLResponse
-            return HTMLResponse(f'''
-                <div></div>
-                <div hx-swap-oob="delete:#request-card-{request_id}"></div>
-                <div hx-swap-oob="innerHTML:#success-message">
-                    <div class="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg z-50" 
-                         style="animation: fadeOut 3s forwards;">
-                        ✅ Request deleted successfully
+            if hx_target in ["requests-content", "main-content"]:
+                # From requests list page - return updated content with current filters to update counts
+                return await unified_requests(request, status_filter, media_type_filter, 1, 24, current_user, session)
+            else:
+                # Use out-of-band swaps for other targets
+                from fastapi.responses import HTMLResponse
+                return HTMLResponse(f'''
+                    <div></div>
+                    <div hx-swap-oob="delete:#request-card-{request_id}"></div>
+                    <div hx-swap-oob="innerHTML:#success-message">
+                        <div class="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg z-50" 
+                             style="animation: fadeOut 3s forwards;">
+                            ✅ Request deleted successfully
+                        </div>
                     </div>
-                </div>
-            ''')
+                ''')
         
         return {"message": "Request deleted successfully"}
         

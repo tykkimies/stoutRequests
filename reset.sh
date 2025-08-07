@@ -1,9 +1,9 @@
 #!/bin/bash
-echo "🔄 Resetting Stout Requests for testing..."
+echo "🔄 Resetting CuePlex for testing..."
 
 # Check if the server is running and suggest stopping it
 if pgrep -f "uvicorn.*main:app" > /dev/null; then
-    echo "⚠️  Warning: Stout Requests server appears to be running!"
+    echo "⚠️  Warning: CuePlex server appears to be running!"
     echo "   Please stop it first with: sudo systemctl stop stoutrequests"
     echo "   Or if running manually: pkill -f uvicorn"
     echo ""

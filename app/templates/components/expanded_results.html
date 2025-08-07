@@ -71,7 +71,7 @@
                 
                 <!-- Top badges (always visible) -->
                 <div class="absolute top-2 left-2">
-                    {% if item.status and (item.status == 'in_plex' or item.status == 'partial_plex') or item.in_plex %}
+                    {% if item.status and (item.status == 'in_plex' or item.status == 'partial_plex' or item.status == 'requested_pending' or item.status == 'requested_approved') or item.in_plex %}
                     {{ multi_instance_request_button(item, None, available_instances, style='overlay', size='sm', base_url=base_url) }}
                     {% endif %}
                 </div>
@@ -92,7 +92,7 @@
     <!-- Infinite Scroll Trigger for first page -->
     {% if has_more %}
     <div id="load-more-trigger-page-1"
-        hx-get="{{ base_url|default('') }}/discover/category/more?{{ current_query_params|default('media_type=movie&type=movie&sort=trending') }}&page=2"
+        hx-get="{{ base_url|default('') }}/discover/category/more?{{ current_query_params|default('media_type=' + (media_type|default('movie')) + '&type=' + (media_type|default('movie')) + '&sort=' + (sort|default('trending'))) }}&page=2"
         hx-target="#results-grid"
         hx-swap="beforeend"
         hx-trigger="intersect threshold:0.1 once"

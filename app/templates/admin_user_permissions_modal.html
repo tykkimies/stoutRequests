@@ -166,7 +166,7 @@
                                 name="can_view_other_users_requests" 
                                 id="can_view_other_users_requests"
                                 value="true"
-                                {% if user_permissions and user_permissions.get_custom_permissions().get('can_view_other_users_requests') %}checked{% endif %}
+                                {% if template_effective_permissions.can_view_other_users_requests %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
                             <label for="can_view_other_users_requests" class="ml-2 text-sm text-gray-700 flex items-center">
@@ -183,7 +183,7 @@
                                 name="can_see_requester_username" 
                                 id="can_see_requester_username"
                                 value="true"
-                                {% if user_permissions and user_permissions.get_custom_permissions().get('can_see_requester_username') %}checked{% endif %}
+                                {% if template_effective_permissions.can_see_requester_username %}checked{% endif %}
                                 class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                             >
                             <label for="can_see_requester_username" class="ml-2 text-sm text-gray-700 flex items-center">
@@ -225,42 +225,6 @@
                     🎯 Control access to specific Radarr/Sonarr instances. Admins have access to all instances by default.
                 </p>
                 
-                <!-- Category-based Access -->
-                <div class="mb-4">
-                    <h6 class="text-xs font-medium text-gray-700 mb-2">Category Access</h6>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div class="flex items-center">
-                            <input 
-                                type="checkbox" 
-                                name="category_4k" 
-                                id="category_4k"
-                                {% if user_permissions and user_permissions.get_instance_permissions().get('category_4k') %}checked{% endif %}
-                                class="h-4 w-4 text-orange-600 border-gray-300 rounded"
-                            >
-                            <label for="category_4k" class="ml-2 text-sm text-gray-700">4K Content</label>
-                        </div>
-                        <div class="flex items-center">
-                            <input 
-                                type="checkbox" 
-                                name="category_anime" 
-                                id="category_anime"
-                                {% if user_permissions and user_permissions.get_instance_permissions().get('category_anime') %}checked{% endif %}
-                                class="h-4 w-4 text-orange-600 border-gray-300 rounded"
-                            >
-                            <label for="category_anime" class="ml-2 text-sm text-gray-700">Anime</label>
-                        </div>
-                        <div class="flex items-center">
-                            <input 
-                                type="checkbox" 
-                                name="category_foreign" 
-                                id="category_foreign"
-                                {% if user_permissions and user_permissions.get_instance_permissions().get('category_foreign') %}checked{% endif %}
-                                class="h-4 w-4 text-orange-600 border-gray-300 rounded"
-                            >
-                            <label for="category_foreign" class="ml-2 text-sm text-gray-700">Foreign Content</label>
-                        </div>
-                    </div>
-                </div>
                 
                 <!-- Specific Instance Access -->
                 {% if available_service_instances %}
@@ -380,112 +344,6 @@
     </div>
     {% endif %}
 
-    <!-- Effective Permissions -->
-    <div class="bg-white border border-gray-200 rounded-lg p-4">
-        <h4 class="text-md font-semibold text-gray-900 mb-3 flex items-center">
-            <svg class="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            Effective Permissions
-        </h4>
-        
-        <!-- Permission Categories -->
-        <div class="space-y-4">
-            {% set permission_categories = {
-                'Administration': ['admin.'],
-                'Request Management': ['request.'],
-                'Quality & Downloads': ['quality.'],
-                'Discovery & Content': ['discover.', 'content.'],
-                'Notifications': ['notifications.'],
-                'Integrations': ['integration.'],
-                'User Account': ['account.'],
-                'System': ['system.']
-            } %}
-            
-            {% for category, prefixes in permission_categories.items() %}
-                {% set category_permissions = [] %}
-                {% for permission, description in all_permissions.items() %}
-                    {% for prefix in prefixes %}
-                        {% if permission.startswith(prefix) %}
-                            {% set _ = category_permissions.append((permission, description)) %}
-                        {% endif %}
-                    {% endfor %}
-                {% endfor %}
-                
-                {% if category_permissions %}
-                <div class="border border-gray-200 rounded-lg">
-                    <div class="bg-gray-50 px-3 py-2 border-b border-gray-200 rounded-t-lg">
-                        <h5 class="text-sm font-medium text-gray-800 flex items-center">
-                            {% if category == 'Administration' %}
-                                <svg class="w-4 h-4 text-red-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                </svg>
-                            {% elif category == 'Request Management' %}
-                                <svg class="w-4 h-4 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
-                                </svg>
-                            {% elif category == 'Quality & Downloads' %}
-                                <svg class="w-4 h-4 text-purple-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                </svg>
-                            {% elif category == 'Discovery & Content' %}
-                                <svg class="w-4 h-4 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                                </svg>
-                            {% elif category == 'Notifications' %}
-                                <svg class="w-4 h-4 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-5 5v-5zM4.583 17.321C3.553 16.227 3 15.022 3 13.5c0-4.418 4.03-8 9-8s9 3.582 9 8c0 1.522-.553 2.727-1.583 3.821"></path>
-                                </svg>
-                            {% elif category == 'Integrations' %}
-                                <svg class="w-4 h-4 text-indigo-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                                </svg>
-                            {% elif category == 'User Account' %}
-                                <svg class="w-4 h-4 text-teal-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                                </svg>
-                            {% else %}
-                                <svg class="w-4 h-4 text-gray-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                                </svg>
-                            {% endif %}
-                            {{ category }}
-                        </h5>
-                    </div>
-                    <div class="p-3">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {% for permission, description in category_permissions %}
-                                {% set has_permission = effective_permissions.get(permission, false) %}
-                                <div class="flex items-center space-x-2 p-2 {% if has_permission %}bg-green-50 border border-green-200{% else %}bg-gray-50 border border-gray-200{% endif %} rounded">
-                                    <div class="flex-shrink-0">
-                                        {% if has_permission %}
-                                            <svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                                            </svg>
-                                        {% else %}
-                                            <svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
-                                            </svg>
-                                        {% endif %}
-                                    </div>
-                                    <div class="min-w-0 flex-1">
-                                        <p class="text-xs font-medium {% if has_permission %}text-green-900{% else %}text-gray-700{% endif %} truncate">
-                                            {{ description }}
-                                        </p>
-                                        <p class="text-xs {% if has_permission %}text-green-600{% else %}text-gray-500{% endif %} font-mono opacity-75">
-                                            {{ permission }}
-                                        </p>
-                                    </div>
-                                </div>
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-            {% endfor %}
-        </div>
-    </div>
 
     <!-- Save Button -->
     <div class="flex justify-between items-center pt-6 border-t border-gray-200">
@@ -494,7 +352,7 @@
         </div>
         <div class="flex space-x-3">
             <button type="button" 
-                    onclick="document.getElementById('user-permissions-modal').style.display='none'"
+                    onclick="hidePermissionsModal()"
                     class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-md text-sm font-medium">
                 Cancel
             </button>

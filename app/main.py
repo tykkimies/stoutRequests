@@ -8,8 +8,10 @@ from fastapi.security import HTTPBearer
 from sqlmodel import Session, select
 
 from .core.database import create_db_and_tables, get_session, engine
+from .core.config import settings
 from .core.template_context import get_global_template_context
 from .services.settings_service import build_app_url
+from .services.job_scheduler import job_scheduler
 from .api.auth import router as auth_router, get_current_user
 from .api.search import router as search_router
 from .api.requests import router as requests_router
@@ -18,6 +20,7 @@ from .api.setup import router as setup_router
 from .api.services import router as services_router
 from app.api import setup
 from .models import User, UserCategoryPreferences, UserCustomCategory
+from .models.category_cache import CategoryCache
 from .models.media_request import MediaType
 from .services.plex_sync_service import PlexSyncService
 from .services.permissions_service import PermissionsService
@@ -65,13 +68,15 @@ def build_discover_query_params(
     if media_type:
         params.append(f"media_type={media_type}")
     
-    # Handle different content source types
+    # Handle different content source types (these are mutually exclusive)
     if custom_category_id:
         params.append(f"custom_category_id={custom_category_id}")
     elif db_category_type and db_category_sort:
         params.append(f"db_category_type={db_category_type}")
         params.append(f"db_category_sort={db_category_sort}")
-    elif type and sort:
+    
+    # Add type and sort parameters if provided (independent of the above)
+    if type and sort:
         params.append(f"type={type}")
         params.append(f"sort={sort}")
     
@@ -148,16 +153,50 @@ async def get_instances_for_media_type(user_id: int, media_type: str) -> list:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print("🚀 FastAPI lifespan startup beginning...")
+    
     # Startup
+    print("📊 Creating database tables...")
     create_db_and_tables()
     
     # Initialize default roles and permissions
+    print("🔐 Ensuring default roles and permissions...")
     with Session(engine) as session:
         PermissionsService.ensure_default_roles(session)
     
+    # Initialize and start the new APScheduler-based job system
+    print("⏰ Initializing job scheduler...")
+    try:
+        await job_scheduler.initialize(settings.database_url)
+        await job_scheduler.start()
+        print(f"✅ Job scheduler started successfully - Running: {job_scheduler.is_running()}")
+        
+        # List jobs to confirm they're scheduled
+        jobs = job_scheduler.list_jobs()
+        print(f"📋 Scheduled {len(jobs)} jobs:")
+        for job in jobs:
+            print(f"   - {job['id']}: next run {job['next_run']}")
+            
+    except Exception as e:
+        print(f"❌ Failed to start job scheduler: {e}")
+        import traceback
+        traceback.print_exc()
+        # Don't fail the entire app if job scheduler fails
+    
+    print("🎉 FastAPI lifespan startup complete!")
+    
     yield
+    
+    # Shutdown - gracefully stop the job scheduler
+    print("🛑 FastAPI lifespan shutdown beginning...")
+    try:
+        await job_scheduler.shutdown(wait=True)
+        print("✅ Job scheduler shut down gracefully")
+    except Exception as e:
+        print(f"⚠️ Error during job scheduler shutdown: {e}")
+    print("👋 FastAPI lifespan shutdown complete!")
 
-app = FastAPI(title="Stout Requests", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="CuePlex", version="1.0.0", lifespan=lifespan)
 
 # Add middleware to handle base_url routing
 @app.middleware("http") 
@@ -375,25 +414,18 @@ async def get_user_global_context(current_user: User, session: Session) -> dict:
 
 def create_template_response(template_name: str, context: dict):
     """Create a template response with global context included"""
-    # Get the base URL setting for all templates
-    from app.services.settings_service import SettingsService
-    from app.core.database import get_session
+    # Get global template context which includes base_url, dark_mode, etc.
+    current_user = context.get('current_user')
+    request = context.get('request')
     
-    # Try to get base_url from context first, otherwise load from settings
-    base_url = context.get('base_url')
-    if base_url is None:
-        try:
-            session = next(get_session())
-            base_url = SettingsService.get_base_url(session)
-            session.close()
-        except Exception as e:
-            print(f"⚠️ Could not load base_url in template response: {e}")
-            base_url = ""
-    # Add base_url to context if not already present
-    final_context = {**context, 'base_url': base_url}
+    global_context = get_global_template_context(current_user=current_user, request=request)
+    
+    # Merge provided context with global context (provided context takes precedence)
+    final_context = {**global_context, **context}
     
     print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Template: {template_name}")
     print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Final context base_url: '{final_context.get('base_url', 'MISSING')}'")
+    print(f"🔧 [CREATE_TEMPLATE_RESPONSE] Final context dark_mode: '{final_context.get('dark_mode', 'MISSING')}'")
     
     return templates.TemplateResponse(template_name, final_context)
 
@@ -887,7 +919,7 @@ async def test_user_redirect(token: str, username: str):
         }});
         
         // Set the new test user token
-        document.cookie = "access_token={token}; path=/; max-age=1800";
+        document.cookie = "access_token={token}; path=/; max-age=14400";
         
         // Redirect to home page after clearing auth state
         setTimeout(function() {{
@@ -1016,9 +1048,9 @@ async def filter_database_category(
         from app.models.plex_library_item import PlexLibraryItem
         from datetime import datetime, timedelta
         
-        one_week_ago = datetime.utcnow() - timedelta(days=7)
+        one_month_ago = datetime.utcnow() - timedelta(days=30)
         recent_statement = select(PlexLibraryItem).where(
-            PlexLibraryItem.added_at >= one_week_ago,
+            PlexLibraryItem.added_at >= one_month_ago,
             PlexLibraryItem.added_at.is_not(None)
         ).order_by(PlexLibraryItem.added_at.desc()).limit(100)  # Get more to filter from
         
@@ -1444,8 +1476,16 @@ async def discover_page(
                 year_from, year_to, studios, streaming, current_user, session
             )
             
-        # Convert genres list to comma-separated string for TMDB
+        # Convert genres list to comma-separated string for TMDB with proper mapping
         genre_filter = ",".join(genres) if genres else None
+        
+        # CRITICAL FIX: Map genres correctly for TV-only content
+        if actual_media_type == "tv" and genre_filter:
+            print(f"🔄 TV-only genre mapping: Input genres: {genre_filter}")
+            # Map movie genre IDs to TV genre IDs for TV-only content
+            _, tv_mapped_genres = tmdb_service._map_genres_for_mixed_content(genre_filter)
+            genre_filter = tv_mapped_genres
+            print(f"🔄 TV-only genre mapping: Mapped to TV genres: {genre_filter}")
         
         # Convert rating to TMDB format for API filtering
         rating_filter = convert_rating_to_tmdb_filter(rating_min, rating_source)
@@ -1649,6 +1689,10 @@ async def discover_page(
                 total_pages = max(movie_pages, tv_pages)  # Continue until both sources are exhausted
                 total_results = movie_response.get('total_results', 0) + tv_response.get('total_results', 0)
                 
+                print(f"🔍 MIXED PAGINATION DEBUG - Movie Pages: {movie_pages}, TV Pages: {tv_pages}, Max: {total_pages}")
+                if streaming_filter:
+                    print(f"🔍 MIXED STREAMING PAGINATION - Streaming filter: {streaming_filter}, Final pages: {total_pages}")
+                
                 print(f"🎯 Mixed media page {page}: combined {len(combined_results)} items (movies: {len(movie_results)}, TV: {len(tv_results)}), sorted by popularity")
                 
                 # Show top popular items for debugging
@@ -1681,10 +1725,18 @@ async def discover_page(
                         )
                     else:  # tv
                         print(f"🎯 Single TV mode: Calling discover_tv with vote_average_gte={rating_filter}")
+                        
+                        # CRITICAL FIX: Map movie genre IDs to TV genre IDs for TV-only content
+                        tv_genre_filter = genre_filter
+                        if genre_filter:
+                            print(f"🔄 MAIN DISCOVER TV-only genre mapping: Input genres: {genre_filter}")
+                            _, tv_genre_filter = tmdb_service._map_genres_for_mixed_content(genre_filter)
+                            print(f"🔄 MAIN DISCOVER TV-only genre mapping: Mapped to TV genres: {tv_genre_filter}")
+                        
                         discover_results = tmdb_service.discover_tv(
                             page=page,
                             sort_by="popularity.desc",
-                            with_genres=genre_filter,
+                            with_genres=tv_genre_filter,
                             vote_average_gte=rating_filter,
                             with_watch_providers=streaming_filter,
                             with_networks=tv_networks_filter,
@@ -1704,6 +1756,9 @@ async def discover_page(
                     total_results = discover_results.get('total_results', 0)
                     
                     print(f"🎯 Discover {media_type} page {page} returned {len(discover_results.get('results', []))} items")
+                    print(f"🔍 PAGINATION DEBUG - Page: {page}, Total Pages: {total_pages}, Total Results: {total_results}")
+                    if streaming_filter:
+                        print(f"🔍 STREAMING PAGINATION - Streaming filter: {streaming_filter}, Pages available: {total_pages}")
                     
                 except Exception as e:
                     print(f"❌ Error using discover endpoint for {media_type}: {e}")
@@ -1902,9 +1957,55 @@ async def discover_page(
         
         # Content negotiation - check if this is an HTMX request for fragments
         hx_target = request.headers.get("HX-Target", "")
-        print(f"🔍 DISCOVER DEBUG - HX-Request: {request.headers.get('HX-Request')}, HX-Target: '{hx_target}'")
+        print(f"🔍 DISCOVER DEBUG - HX-Request: {request.headers.get('HX-Request')}, HX-Target: '{hx_target}', Page: {page}")
+        print(f"🔍 DISCOVER DEBUG - Total Pages: {results.get('total_pages', 1)}, Has More: {results.get('total_pages', 1) > page}")
+        if streaming:
+            print(f"🔍 STREAMING DEBUG - Streaming filters: {streaming}, Results count: {len(results.get('results', []))}")
         if request.headers.get("HX-Request"):
-            if hx_target in ["discover-results", "content-results", "search-results-content", "filtered-results-content"] or (hx_target == "" and page > 1):
+            # For infinite scroll requests (page > 1), always return movie cards only
+            if page > 1 or hx_target == "results-grid":
+                print(f"🔍 INFINITE SCROLL - Returning movie_cards_only.html for page {page}, target: {hx_target}")
+                # Return only the media cards for infinite scroll
+                return await create_template_response_with_instances(
+                    "components/movie_cards_only.html",
+                    {
+                        "request": request, 
+                        "results": results.get('results', []),
+                        "current_user": current_user,
+                        "media_type": media_type,
+                        "page": page,
+                        "total_pages": results.get('total_pages', 1),
+                        "has_more": results.get('total_pages', 1) > page,
+                        "current_page": page,
+                        # Debug for infinite scroll
+                        "debug_pagination": f"P{page}/{results.get('total_pages', 1)}, More: {results.get('total_pages', 1) > page}",
+                        "current_media_type": media_type,
+                        "current_content_sources": content_sources,
+                        "current_genres": genres,
+                        "current_rating_min": rating_min,
+                        "current_rating_source": rating_source,
+                        "current_year_from": year_from,
+                        "current_year_to": year_to,
+                        "current_studios": studios,
+                        "current_streaming": streaming,
+                        # Build query params for infinite scroll using standardized function
+                        "current_query_params": build_discover_query_params(
+                            media_type=actual_media_type,
+                            content_sources=content_sources,
+                            genres=genres,
+                            rating_source=rating_source,
+                            rating_min=rating_min,
+                            year_from=year_from,
+                            year_to=year_to,
+                            studios=studios,
+                            streaming=streaming,
+                            limit=limit
+                        ),
+                        "base_url": SettingsService.get_base_url(session),
+                        "available_instances": available_instances
+                    }
+                )
+            elif hx_target in ["discover-results", "content-results", "search-results-content", "filtered-results-content"]:
                 # Return only the discover results fragment
                 return await create_template_response_with_instances(
                     "discover_results.html",
@@ -1946,47 +2047,6 @@ async def discover_page(
                             )
                         ),
                         "base_url": base_url,
-                        "available_instances": available_instances
-                    }
-                )
-            elif hx_target == "results-grid":
-                # Return only the media cards for infinite scroll
-                return await create_template_response_with_instances(
-                    "components/movie_cards_only.html",
-                    {
-                        "request": request, 
-                        "results": results.get('results', []),
-                        "current_user": current_user,
-                        "media_type": media_type,
-                        "page": page,
-                        "total_pages": results.get('total_pages', 1),
-                        "has_more": results.get('total_pages', 1) > page,
-                        "current_page": page,
-                        "current_media_type": media_type,
-                        "current_content_sources": content_sources,
-                        "current_genres": genres,
-                        "current_rating_min": rating_min,
-                        "current_rating_source": rating_source,
-                        "current_year_from": year_from,
-                        "current_year_to": year_to,
-                        "current_studios": studios,
-                        "current_streaming": streaming,
-                        # Build query params for infinite scroll using standardized function
-                        "current_query_params": (lambda params: (print(f"🔍 QUERY PARAMS DEBUG: {params}"), params)[1])(
-                            build_discover_query_params(
-                                media_type=actual_media_type,
-                                content_sources=content_sources,
-                                genres=genres,
-                                rating_source=rating_source,
-                                rating_min=rating_min,
-                                year_from=year_from,
-                                year_to=year_to,
-                                studios=studios,
-                                streaming=streaming,
-                                limit=limit
-                            )
-                        ),
-                        "base_url": SettingsService.get_base_url(session),
                         "available_instances": available_instances
                     }
                 )
@@ -2190,9 +2250,9 @@ async def discover_category(
                 from app.models.plex_library_item import PlexLibraryItem
                 from datetime import datetime, timedelta
                 
-                one_week_ago = datetime.utcnow() - timedelta(days=7)
+                one_month_ago = datetime.utcnow() - timedelta(days=30)
                 recent_statement = select(PlexLibraryItem).where(
-                    PlexLibraryItem.added_at >= one_week_ago,
+                    PlexLibraryItem.added_at >= one_month_ago,
                     PlexLibraryItem.added_at.is_not(None)  # Only items with valid added_at timestamps
                 ).order_by(
                     PlexLibraryItem.added_at.desc()
@@ -2203,7 +2263,7 @@ async def discover_category(
                 
                 # Check if there are more items for pagination
                 count_statement = select(PlexLibraryItem).where(
-                    PlexLibraryItem.added_at >= one_week_ago,
+                    PlexLibraryItem.added_at >= one_month_ago,
                     PlexLibraryItem.added_at.is_not(None)
                 )
                 total_count = len(session.exec(count_statement).all())
@@ -3202,9 +3262,10 @@ def get_user_categories(user_id: int, session: Session):
             # Use user's custom order
             category['order'] = user_pref.display_order
         else:
-            # For default categories (first 7), show by default
-            # For additional categories (8+), hide by default unless user explicitly enabled
-            if category['order'] > 7:
+            # Use admin-configured default visibility settings
+            from .services.settings_service import SettingsService
+            settings = SettingsService.get_settings(session)
+            if not settings.is_category_visible_by_default(cat_id):
                 continue
         
         customized_categories.append(category)
@@ -3841,6 +3902,7 @@ async def save_custom_category(
 async def discover_category_expanded(
     request: Request,
     type: str = "movie",
+    media_type: str = "",  # Support both type and media_type for consistency
     sort: str = "trending",
     content_sources: list[str] = Query(default=[]),
     genres: list[str] = Query(default=[]),
@@ -3872,8 +3934,11 @@ async def discover_category_expanded(
         return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
     
     # Debug: Print the parameters being received
+    # CRITICAL FIX: Handle media_type parameter precedence (same as category/more endpoint)
+    # If media_type is provided, use it; otherwise fall back to type parameter
+    actual_media_type = media_type if media_type else type
     print(f"🔍 ===== CATEGORY EXPANDED FUNCTION CALLED =====")
-    print(f"🔍 CATEGORY EXPANDED DEBUG: type='{type}', sort='{sort}', page={page}")
+    print(f"🔍 CATEGORY EXPANDED DEBUG: type='{type}', media_type='{media_type}', actual='{actual_media_type}', sort='{sort}', page={page}")
     print(f"🔍 CUSTOM CATEGORY ID: '{custom_category_id}'")
     print(f"🔍 DB CATEGORY: type='{db_category_type}', sort='{db_category_sort}'")
     print(f"🔍 USER: {current_user.id if current_user else 'None'}")
@@ -3896,7 +3961,7 @@ async def discover_category_expanded(
             print(f"🔍 DB Category: type={db_category_type}, sort={db_category_sort}")
             # Database categories (recent requests, recommendations, recently added)
             return await filter_database_category(
-                request, db_category_type, db_category_sort, type, 
+                request, db_category_type, db_category_sort, actual_media_type, 
                 genres, rating_min, page, limit,
                 current_user, session, tmdb_service,
                 rating_source, year_from, year_to, studios, streaming
@@ -4299,14 +4364,14 @@ async def discover_category_expanded(
             # Pure filtered content (no specific category)
             print(f"🔍 EXPANDED: Pure filtered content search")
             
-            if type == "movie":
+            if actual_media_type == "movie":
                 results = tmdb_service.discover_movies(
                     page=page, sort_by="popularity.desc",
                     with_genres=genre_filter, vote_average_gte=rating_filter,
                     with_companies=studios_filter, with_watch_providers=streaming_filter,
                     primary_release_date_gte=year_from_filter, primary_release_date_lte=year_to_filter
                 )
-            elif type == "tv":
+            elif actual_media_type == "tv":
                 # Smart studio filtering for TV shows - separate networks from production companies
                 tv_networks_filter = None
                 tv_companies_filter = None
@@ -4391,7 +4456,7 @@ async def discover_category_expanded(
                 
                 results = {"results": limited_results}
             
-            if type != "mixed":
+            if actual_media_type != "mixed":
                 limited_results = results.get('results', [])
                 has_more = results.get('total_pages', 1) > page
         
@@ -4463,7 +4528,22 @@ async def discover_category_expanded(
                 "current_year_from": year_from,
                 "current_year_to": year_to,
                 "current_studios": studios,
-                "current_streaming": streaming
+                "current_streaming": streaming,
+                # Add query params for infinite scroll consistency
+                "current_query_params": build_discover_query_params(
+                    media_type=actual_media_type,
+                    type=actual_media_type,
+                    sort=sort,
+                    content_sources=content_sources,
+                    genres=genres,
+                    rating_source=rating_source,
+                    rating_min=rating_min,
+                    year_from=year_from,
+                    year_to=year_to,
+                    studios=studios,
+                    streaming=streaming,
+                    limit=limit
+                )
             }
         )
         
@@ -4719,8 +4799,33 @@ async def discover_category_more(
         print(f"❌ CRITICAL: Import error in discover_category_more: {import_error}")
         return HTMLResponse('<div class="text-center py-8 text-red-600">Service temporarily unavailable. Please refresh the page.</div>')
     
+    # Enhanced authentication check for HTMX requests
     if not current_user:
-        return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
+        print(f"🔍 INFINITE SCROLL AUTH DEBUG:")
+        print(f"🔍 - Request headers: {dict(request.headers)}")
+        print(f"🔍 - Request cookies: {dict(request.cookies)}")
+        print(f"🔍 - Auth header: {request.headers.get('authorization')}")
+        print(f"🔍 - Access token cookie: {request.cookies.get('access_token')}")
+        print(f"🔍 - HX-Request: {request.headers.get('HX-Request')}")
+        
+        # For HTMX requests, try alternative authentication methods
+        is_htmx_request = request.headers.get("HX-Request") == "true"
+        
+        if is_htmx_request:
+            print(f"🔍 This is an HTMX request - attempting alternative authentication")
+            # Try to get user from session using flexible auth (retrying)
+            try:
+                from .api.auth import get_current_user_flexible
+                current_user = await get_current_user_flexible(request, session)
+                print(f"✅ Alternative authentication successful for HTMX user: {current_user.username}")
+            except Exception as alt_auth_error:
+                print(f"❌ Alternative authentication also failed: {alt_auth_error}")
+                # For HTMX requests, return a more user-friendly error
+                return HTMLResponse('<div class="text-center py-8 text-orange-600"><p class="mb-2">Session expired</p><button onclick="location.reload()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded">Refresh Page</button></div>')
+        
+        # If still no user after all attempts
+        if not current_user:
+            return HTMLResponse('<div class="text-center py-8 text-red-600">Please log in to view content.</div>')
     
     try:
         # Initialize services with error handling
@@ -5333,7 +5438,7 @@ async def discover_category_more(
             # Pass all filter parameters for the next page using standardized function
             "current_query_params": build_discover_query_params(
                 media_type=actual_media_type,  # Use actual_media_type for consistency
-                type=type,  # Keep original type parameter for backwards compatibility
+                type=actual_media_type,  # Also pass as type for backwards compatibility
                 sort=sort,
                 content_sources=content_sources,
                 genres=genres,
@@ -5384,6 +5489,15 @@ async def search_page(
     q: str = "",
     page: int = 1,
     offset: int = 0,
+    # Filter parameters (same as discover endpoint)
+    media_type: str = "mixed",
+    genres: list[str] = Query(default=[]),
+    rating_source: str = "tmdb", 
+    rating_min: str = "",
+    year_from: str = "",
+    year_to: str = "",
+    studios: list[str] = Query(default=[]),
+    streaming: list[str] = Query(default=[]),
     current_user: User | None = Depends(get_current_user_optional),
     session: Session = Depends(get_session)
 ):
@@ -5428,6 +5542,54 @@ async def search_page(
         
         print(f"🔍 SEARCH DEBUG: TMDB returned {len(search_results.get('results', []))} results, page {search_results.get('page', 1)} of {search_results.get('total_pages', 1)}")
         print(f"🔍 SEARCH DEBUG: First few result IDs: {[item.get('id') for item in search_results.get('results', [])][:3]}")
+        
+        # Apply filters to search results
+        if search_results.get('results'):
+            filtered_results = []
+            for item in search_results.get('results', []):
+                # Media type filtering
+                if media_type != "mixed":
+                    if media_type == "movie" and item.get('media_type') != 'movie':
+                        continue
+                    elif media_type == "tv" and item.get('media_type') != 'tv':
+                        continue
+                
+                # Year filtering
+                if year_from or year_to:
+                    item_year = None
+                    if item.get('media_type') == 'movie' and item.get('release_date'):
+                        item_year = int(item['release_date'][:4]) if len(item['release_date']) >= 4 else None
+                    elif item.get('media_type') == 'tv' and item.get('first_air_date'):
+                        item_year = int(item['first_air_date'][:4]) if len(item['first_air_date']) >= 4 else None
+                    
+                    if item_year:
+                        if year_from and item_year < int(year_from):
+                            continue
+                        if year_to and item_year > int(year_to):
+                            continue
+                
+                # Rating filtering
+                if rating_min and item.get('vote_average'):
+                    try:
+                        if float(item['vote_average']) < float(rating_min):
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Genre filtering
+                if genres and item.get('genre_ids'):
+                    # Convert genre names to IDs for filtering
+                    genre_ids = [int(g) for g in genres if g.isdigit()]
+                    if genre_ids:
+                        # Check if item has any of the selected genres
+                        if not any(genre_id in item['genre_ids'] for genre_id in genre_ids):
+                            continue
+                
+                filtered_results.append(item)
+            
+            # Update results with filtered data
+            search_results['results'] = filtered_results
+            print(f"🔍 SEARCH DEBUG: After filtering: {len(filtered_results)} results remain")
         
         # Debug: Check if we're actually getting different results
         if offset > 0:
@@ -6143,13 +6305,52 @@ async def person_detail(
         if person.get('profile_path'):
             person['profile_url'] = f"https://image.tmdb.org/t/p/w500{person['profile_path']}"
         
+        # Get user permissions for template using the same pattern as other endpoints
+        class TemplatePermissions:
+            def __init__(self, user: User, session: Session):
+                self.user = user
+                # Admin/Server Owner users get all permissions
+                if user.is_admin or user.is_server_owner:
+                    self.can_manage_settings = True
+                    self.can_manage_users = True  
+                    self.can_approve_requests = True
+                    self.can_library_sync = True
+                    self.can_request_movies = True
+                    self.can_request_tv = True
+                else:
+                    # For regular users, check their role permissions
+                    from app.services.permissions_service import PermissionsService
+                    permissions_service = PermissionsService(session)
+                    user_perms = permissions_service.get_user_permissions(user.id)
+                    user_role = permissions_service.get_user_role(user.id)
+                    
+                    # Default to False, then check role permissions
+                    self.can_manage_settings = False
+                    self.can_manage_users = False  
+                    self.can_approve_requests = False
+                    self.can_library_sync = False
+                    self.can_request_movies = user_perms.can_request_movies if user_perms and user_perms.can_request_movies is not None else True
+                    self.can_request_tv = user_perms.can_request_tv if user_perms and user_perms.can_request_tv is not None else True
+                    
+                    if user_role:
+                        role_perms = user_role.get_permissions()
+                        from app.models.role import PermissionFlags
+                        self.can_manage_settings = role_perms.get(PermissionFlags.ADMIN_MANAGE_SETTINGS, False)
+                        self.can_manage_users = role_perms.get(PermissionFlags.ADMIN_MANAGE_USERS, False)
+                        self.can_approve_requests = role_perms.get(PermissionFlags.ADMIN_APPROVE_REQUESTS, False)
+                        self.can_library_sync = role_perms.get(PermissionFlags.ADMIN_LIBRARY_SYNC, False)
+        
+        user_permissions = TemplatePermissions(current_user, session)
+        
         return await create_template_response_with_instances(
             "person_detail.html",
             {
                 "request": request,
                 "person": person,
                 "credits": all_credits,
-                "current_user": current_user
+                "current_user": current_user,
+                "user_permissions": user_permissions,
+                "media_type": "mixed"  # Person pages show both movies and TV shows
             }
         )
         
@@ -6297,4 +6498,33 @@ async def make_current_user_admin(
         return {
             "error": "Admin users already exist",
             "existing_admins": [user.username for user in admin_users]
+        }
+
+
+@app.post("/user/toggle-dark-mode")
+async def toggle_dark_mode(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Toggle dark mode preference for the current user"""
+    try:
+        # Toggle the dark mode setting
+        current_user.dark_mode = not current_user.dark_mode
+        current_user.updated_at = datetime.utcnow()
+        
+        session.add(current_user)
+        session.commit()
+        session.refresh(current_user)
+        
+        return {
+            "success": True,
+            "dark_mode": current_user.dark_mode,
+            "message": f"Dark mode {'enabled' if current_user.dark_mode else 'disabled'}"
+        }
+        
+    except Exception as e:
+        session.rollback()
+        return {
+            "success": False,
+            "error": f"Failed to toggle dark mode: {str(e)}"
         }

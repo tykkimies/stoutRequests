@@ -27,22 +27,6 @@ class PermissionsService:
                 'is_default': False
             },
             {
-                'name': 'moderator',
-                'display_name': 'Moderator',
-                'description': 'Can manage requests and moderate content with limited admin access',
-                'permissions': PermissionFlags.get_moderator_permissions(),
-                'is_system': True,
-                'is_default': False
-            },
-            {
-                'name': 'power_user',
-                'display_name': 'Power User',
-                'description': 'Advanced user with auto-approval and 4K access',
-                'permissions': PermissionFlags.get_power_user_permissions(),
-                'is_system': True,
-                'is_default': False
-            },
-            {
                 'name': 'basic_user',
                 'display_name': 'Basic User',
                 'description': 'Standard user with basic request privileges',
@@ -51,10 +35,10 @@ class PermissionsService:
                 'is_default': True
             },
             {
-                'name': 'limited',
-                'display_name': 'Limited User',
-                'description': 'Restricted user with minimal permissions',
-                'permissions': [PermissionFlags.ACCOUNT_EDIT_PROFILE, PermissionFlags.ACCOUNT_VIEW_ACTIVITY, PermissionFlags.DISCOVER_BROWSE],
+                'name': 'server_admin',
+                'display_name': 'Server Admin',
+                'description': 'Server owner with all administrative privileges',
+                'permissions': PermissionFlags.get_admin_permissions(),
                 'is_system': True,
                 'is_default': False
             }
@@ -105,15 +89,25 @@ class PermissionsService:
         statement = select(Role).where(Role.is_default == True)
         return self.session.exec(statement).first()
     
-    def create_default_user_permissions(self, user_id: int, commit: bool = True) -> UserPermissions:
+    def create_default_user_permissions(self, user_id: int, commit: bool = True, is_admin: bool = False) -> UserPermissions:
         """Create default permissions for a user"""
-        default_role = self.get_default_role()
+        # If user is admin, assign admin role; otherwise use default role
+        if is_admin:
+            # Get admin role
+            admin_role = self.session.exec(select(Role).where(Role.name == 'admin')).first()
+            target_role = admin_role if admin_role else self.get_default_role()
+        else:
+            target_role = self.get_default_role()
         
         user_perms = UserPermissions(
             user_id=user_id,
-            role_id=default_role.id if default_role else None,
+            role_id=target_role.id if target_role else None,
             created_at=datetime.utcnow()
         )
+        
+        # Auto-assign default instance access for Basic Users and Administrators
+        if target_role and target_role.name in ['basic_user', 'admin', 'server_admin']:
+            self._assign_default_instance_access(user_perms, is_admin=(target_role.name in ['admin', 'server_admin']))
         
         self.session.add(user_perms)
         if commit:
@@ -298,8 +292,9 @@ class PermissionsService:
             return False
     
     def get_all_roles(self) -> List[Role]:
-        """Get all available roles"""
-        statement = select(Role).order_by(Role.name)
+        """Get all available roles (only allowed roles)"""
+        allowed_roles = ['basic_user', 'admin', 'server_admin']
+        statement = select(Role).where(Role.name.in_(allowed_roles)).order_by(Role.name)
         return list(self.session.exec(statement).all())
     
     def get_user_effective_permissions(self, user_id: int) -> Dict[str, bool]:
@@ -323,3 +318,79 @@ class PermissionsService:
             permissions.update(admin_perms)
         
         return permissions
+    
+    def _assign_default_instance_access(self, user_perms: UserPermissions, is_admin: bool = False) -> None:
+        """Assign default instance access for Basic Users (exclude 4K instances) or all instances for Administrators"""
+        from ..models.service_instance import ServiceInstance
+        
+        if is_admin:
+            # Administrators get access to ALL instances
+            statement = select(ServiceInstance).where(ServiceInstance.is_enabled == True)
+        else:
+            # Basic Users get access to non-4K default instances only
+            statement = select(ServiceInstance).where(
+                ServiceInstance.is_enabled == True,
+                ServiceInstance.is_4k_default == False,
+                (ServiceInstance.is_default_movie == True) | (ServiceInstance.is_default_tv == True)
+            )
+        
+        instances = self.session.exec(statement).all()
+        
+        instance_permissions = {}
+        for instance in instances:
+            instance_permissions[f"instance_{instance.id}"] = True
+        
+        user_perms.set_instance_permissions(instance_permissions)
+    
+    def assign_instance_access_for_new_instance(self, instance_id: int) -> None:
+        """Auto-assign instance access when new default instances are created"""
+        from ..models.service_instance import ServiceInstance
+        
+        # Get the instance
+        statement = select(ServiceInstance).where(ServiceInstance.id == instance_id)
+        instance = self.session.exec(statement).first()
+        
+        if not instance:
+            return
+        
+        # Only auto-assign if it's a default instance (includes 4K defaults for admins)
+        if not (instance.is_default_movie or instance.is_default_tv or instance.is_4k_default):
+            return
+        
+        # Get all Basic Users, Administrators, and Server Admins
+        basic_role = self.session.exec(select(Role).where(Role.name == 'basic_user')).first()
+        admin_role = self.session.exec(select(Role).where(Role.name == 'admin')).first()
+        server_admin_role = self.session.exec(select(Role).where(Role.name == 'server_admin')).first()
+        
+        # For 4K instances, only assign to Administrators and Server Admins
+        # For default instances, assign to Basic Users, Administrators, and Server Admins
+        target_role_ids = []
+        if instance.is_4k_default:
+            if admin_role:
+                target_role_ids.append(admin_role.id)
+            if server_admin_role:
+                target_role_ids.append(server_admin_role.id)
+        else:
+            if basic_role:
+                target_role_ids.append(basic_role.id)
+            if admin_role:
+                target_role_ids.append(admin_role.id)
+            if server_admin_role:
+                target_role_ids.append(server_admin_role.id)
+        
+        if not target_role_ids:
+            return
+        
+        # Get all users with these roles
+        statement = select(UserPermissions).where(UserPermissions.role_id.in_(target_role_ids))
+        user_permissions = self.session.exec(statement).all()
+        
+        # Assign access to the new instance
+        for user_perm in user_permissions:
+            instance_perms = user_perm.get_instance_permissions()
+            instance_perms[f"instance_{instance_id}"] = True
+            user_perm.set_instance_permissions(instance_perms)
+            user_perm.updated_at = datetime.utcnow()
+            self.session.add(user_perm)
+        
+        self.session.commit()
