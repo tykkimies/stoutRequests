@@ -1,7 +1,7 @@
-# Stout Requests - Architecture & Development Guidelines
+# CuePlex - Architecture & Development Guidelines
 
 ## 📋 Project Overview
-Stout Requests is a web application for managing media requests with Plex integration. Users can request movies and TV shows, which admins can approve and automatically add to Plex via Radarr/Sonarr.
+CuePlex is a web application for managing media requests with Plex integration. Users can request movies and TV shows, which admins can approve and automatically add to Plex via Radarr/Sonarr.
 
 ## 🏗️ Core Architecture Decision: Hybrid HTMX + API
 

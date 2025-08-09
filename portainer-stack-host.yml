@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  cueplex:
+    image: cueplex-test:latest
+    container_name: cueplex-test
+    restart: unless-stopped
+    network_mode: host  # Uses host networking - can access everything
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@localhost:5433/cueplex  # Note different port
+      - SECRET_KEY=test-secret-key-change-in-production
+      - ENVIRONMENT=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cueplex_test_logs:/app/logs
+      - cueplex_test_data:/app/data
+
+  postgres:
+    image: postgres:15
+    container_name: cueplex-test-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=CuePlexSecure2024!
+    volumes:
+      - cueplex_test_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  cueplex_test_postgres:
+  cueplex_test_logs:
+  cueplex_test_data:

@@ -30,12 +30,12 @@
         {%- set padding = 'px-4 py-2' -%}
     {%- endif -%}
 
-    <!-- Handle non-available statuses (delegate to original macro) -->
-    {%- if computed_status not in ['available', 'partial_plex'] -%}
+    <!-- Handle non-available statuses and partial_plex overlays (delegate to status macro) -->
+    {%- if computed_status not in ['available', 'partial_plex'] or (computed_status == 'partial_plex' and display_style == 'overlay') -%}
         {% from 'macros/status_display.html' import media_status_badge %}
         {{ media_status_badge(item, style, size, status, tmdb_id, media_type, base_url) }}
     {%- else -%}
-        <!-- Available or partial status - show multi-instance request buttons -->
+        <!-- Available or partial status (non-overlay) - show multi-instance request buttons -->
         
         {%- if filtered_instances and filtered_instances|length > 1 -%}
             <!-- Multiple instances available - show dropdown selector -->

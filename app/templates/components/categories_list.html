@@ -67,7 +67,14 @@
         const element = event.target;
         const cacheKey = element.getAttribute('data-cache-key');
         
-        if (cacheKey && element.classList.contains('horizontal-scroll')) {
+        // Skip caching for personalized/dynamic content
+        const isPersonalizedCategory = cacheKey && (
+            cacheKey.includes('recommendations-personalized') || 
+            cacheKey.includes('requests-recent') || 
+            cacheKey.includes('plex-recently_added')
+        );
+        
+        if (cacheKey && element.classList.contains('horizontal-scroll') && !isPersonalizedCategory) {
             const cachedContent = sessionStorage.getItem('category-cache-' + cacheKey);
             if (cachedContent) {
                 console.log('📋 Using cached content for:', cacheKey);
@@ -79,6 +86,8 @@
                 }
                 return;
             }
+        } else if (isPersonalizedCategory) {
+            console.log('🚫 Skipping cache for personalized category:', cacheKey);
         }
     });
     
@@ -87,9 +96,18 @@
         const element = event.target;
         const cacheKey = element.getAttribute('data-cache-key');
         
-        if (event.detail.successful && cacheKey && element.classList.contains('horizontal-scroll')) {
+        // Skip caching for personalized/dynamic content
+        const isPersonalizedCategory = cacheKey && (
+            cacheKey.includes('recommendations-personalized') || 
+            cacheKey.includes('requests-recent') || 
+            cacheKey.includes('plex-recently_added')
+        );
+        
+        if (event.detail.successful && cacheKey && element.classList.contains('horizontal-scroll') && !isPersonalizedCategory) {
             console.log('💾 Caching content for:', cacheKey);
             sessionStorage.setItem('category-cache-' + cacheKey, element.innerHTML);
+        } else if (isPersonalizedCategory && event.detail.successful) {
+            console.log('🚫 Not caching personalized category:', cacheKey);
         }
     });
     
@@ -106,10 +124,8 @@
         console.log(`🔄 Triggering ${categoryContainers.length} categories to load in parallel`);
         
         categoryContainers.forEach((container, index) => {
-            // Add a small stagger (50ms between each) to avoid overwhelming the server
-            setTimeout(() => {
-                htmx.trigger(container, 'loadCategories');
-            }, index * 50);
+            // Trigger all categories immediately in parallel - server can handle it
+            htmx.trigger(container, 'loadCategories');
         });
     }, 100);
 })();

@@ -370,7 +370,7 @@ async def test_login(
             value=access_token, 
             httponly=True, 
             path="/",
-            max_age=30 * 60  # 30 minutes
+            max_age=86400  # 24 hours to match token expiration
         )
         
         return response
@@ -1521,9 +1521,11 @@ async def save_user_permissions(
         # Handle new permission fields via custom_permissions JSON
         custom_perms = user_permissions.get_custom_permissions()
         print(f"🔍 BEFORE updating custom permissions: {custom_perms}")
-        custom_perms['can_view_other_users_requests'] = permissions_data.can_view_other_users_requests
-        custom_perms['can_see_requester_username'] = permissions_data.can_see_requester_username
+        # Convert None to False for checkbox fields (None = unchecked)
+        custom_perms['can_view_other_users_requests'] = permissions_data.can_view_other_users_requests if permissions_data.can_view_other_users_requests is not None else False
+        custom_perms['can_see_requester_username'] = permissions_data.can_see_requester_username if permissions_data.can_see_requester_username is not None else False
         print(f"🔍 AFTER updating custom permissions: {custom_perms}")
+        print(f"🔍 Raw permissions_data values: view_other={permissions_data.can_view_other_users_requests}, see_username={permissions_data.can_see_requester_username}")
         user_permissions.set_custom_permissions(custom_perms)
         print(f"🔍 Custom permissions JSON string set to: {user_permissions.custom_permissions}")
         
@@ -1847,9 +1849,10 @@ async def trigger_library_sync_job(
 ):
     """Manually trigger library sync job"""
     try:
-        from ..services.background_jobs import trigger_library_sync
+        from ..services.background_jobs import queue_library_sync_immediate
         
-        result = await trigger_library_sync()
+        # Use immediate queue method for web triggers - no await needed
+        result = queue_library_sync_immediate()
         
         # Content negotiation
         if request.headers.get("HX-Request"):
@@ -1857,23 +1860,18 @@ async def trigger_library_sync_job(
             base_url = SettingsService.get_base_url(session)
             
             if result.get('success'):
-                stats = result.get('stats', {})
-                movies = stats.get('movies_processed', 0)
-                shows = stats.get('shows_processed', 0) 
-                added = stats.get('items_added', 0)
-                updated = stats.get('items_updated', 0)
-                
+                # For non-blocking mode, we get a "job started" response instead of completion stats
                 return HTMLResponse(f"""
-                    <div class="p-4 bg-green-50 border border-green-200 rounded-md" 
+                    <div class="p-4 bg-blue-50 border border-blue-200 rounded-md" 
                          hx-get="{base_url}/admin/clear-feedback"
                          hx-trigger="load delay:5s">
                         <div class="flex">
-                            <svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            <svg class="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-7-4a1 1 0 011.414 0L10 9.586l5.586-5.586a1 1 0 011.414 1.414l-6 6a1 1 0 01-1.414 0l-6-6A1 1 0 013 14z" clip-rule="evenodd"></path>
                             </svg>
-                            <div class="ml-3 text-sm text-green-700">
-                                <p><strong>Library sync completed!</strong></p>
-                                <p>Processed {movies} movies and {shows} TV shows. Added {added}, updated {updated} items.</p>
+                            <div class="ml-3 text-sm text-blue-700">
+                                <p><strong>Library sync started!</strong></p>
+                                <p>Library synchronization is running in the background. Check the jobs status below for progress updates.</p>
                             </div>
                         </div>
                     </div>

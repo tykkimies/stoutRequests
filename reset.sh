@@ -4,7 +4,7 @@ echo "🔄 Resetting CuePlex for testing..."
 # Check if the server is running and suggest stopping it
 if pgrep -f "uvicorn.*main:app" > /dev/null; then
     echo "⚠️  Warning: CuePlex server appears to be running!"
-    echo "   Please stop it first with: sudo systemctl stop stoutrequests"
+    echo "   Please stop it first with: sudo systemctl stop cueplex"
     echo "   Or if running manually: pkill -f uvicorn"
     echo ""
     read -p "Continue anyway? (y/N): " -n 1 -r
@@ -33,5 +33,5 @@ echo ""
 echo "✅ Reset complete! Ready for testing."
 echo ""
 echo "🚀 To start the server:"
-echo "   sudo systemctl start stoutrequests"
+echo "   sudo systemctl start cueplex"
 echo "   OR manually: uvicorn app.main:app --host 0.0.0.0 --port 8000"

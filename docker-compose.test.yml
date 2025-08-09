@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  cueplex-test:
+    image: cueplex/cueplex:latest
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@postgres:5432/cueplex
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./test-logs:/app/logs
+      - test-data:/app/data
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=CuePlexSecure2024!
+    volumes:
+      - test-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  test-postgres:
+  test-data:

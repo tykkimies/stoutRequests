@@ -1,5 +1,7 @@
 import requests
-from typing import Dict, Optional
+import aiohttp
+import asyncio
+from typing import Dict, Optional, List
 from sqlmodel import Session
 from datetime import datetime, timedelta
 
@@ -7,8 +9,8 @@ from ..services.settings_service import SettingsService
 
 
 class TMDBService:
-    # Default TMDB API key (like Ombi uses) - allows app to work out of the box
-    DEFAULT_API_KEY = "b8eabaf5608b88d0298aa189dd90bf00"
+    # Default TMDB API key - shared across all CuePlex installations
+    DEFAULT_API_KEY = "27c398b400410d75da7a78e31d8f4c74"
     
     def __init__(self, session: Session = None):
         if session is None:
@@ -117,14 +119,42 @@ class TMDBService:
         return response.json()
     
     def get_tv_details(self, tv_id: int) -> Dict:
-        """Get detailed TV show information"""
+        """Get detailed TV show information including seasons/episodes"""
         url = f"{self.base_url}/tv/{tv_id}"
-        params = {'api_key': self.api_key}
+        params = {
+            'api_key': self.api_key,
+            'append_to_response': 'credits,external_ids'
+        }
         
         response = requests.get(url, params=params)
         response.raise_for_status()
         
-        return response.json()
+        data = response.json()
+        
+        # Get detailed season information with episodes
+        if 'seasons' in data:
+            detailed_seasons = []
+            for season in data['seasons']:
+                season_number = season.get('season_number', 0)
+                
+                # Get detailed season info with episodes
+                season_url = f"{self.base_url}/tv/{tv_id}/season/{season_number}"
+                season_params = {'api_key': self.api_key}
+                
+                try:
+                    season_response = requests.get(season_url, params=season_params)
+                    season_response.raise_for_status()
+                    detailed_season = season_response.json()
+                    detailed_seasons.append(detailed_season)
+                except Exception as e:
+                    print(f"⚠️ Error fetching season {season_number} details: {e}")
+                    # Fallback to basic season info
+                    detailed_seasons.append(season)
+            
+            # Replace seasons with detailed data
+            data['seasons'] = detailed_seasons
+        
+        return data
     
     def get_movie_credits(self, movie_id: int) -> Dict:
         """Get movie cast and crew information"""
@@ -1131,3 +1161,332 @@ class TMDBService:
         response.raise_for_status()
         
         return response.json()
+    
+    # ==========================================
+    # ASYNC METHODS for PARALLEL API CALLS
+    # ==========================================
+    
+    async def get_multiple_details_async(self, items: List[Dict], media_type: str = None) -> List[Dict]:
+        """
+        Fetch details for multiple items in parallel using async requests.
+        Significantly faster than sequential requests for recommendations.
+        
+        Args:
+            items: List of items with 'id' and optionally 'media_type'
+            media_type: Default media type if not specified in items
+            
+        Returns:
+            List of detailed item data from TMDB
+        """
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            
+            for item in items:
+                item_media_type = item.get('media_type', media_type)
+                item_id = item.get('id')
+                
+                if item_id and item_media_type:
+                    task = self._fetch_item_details_async(session, item_id, item_media_type)
+                    tasks.append(task)
+            
+            # Execute all requests in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Filter out exceptions and None results
+            valid_results = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    print(f"⚠️ Error fetching details for item {items[i].get('id')}: {result}")
+                elif result:
+                    valid_results.append(result)
+            
+            return valid_results
+    
+    async def _fetch_item_details_async(self, session: aiohttp.ClientSession, item_id: int, media_type: str) -> Dict:
+        """Fetch individual item details using async HTTP"""
+        endpoint = "movie" if media_type == "movie" else "tv"
+        url = f"{self.base_url}/{endpoint}/{item_id}"
+        params = {'api_key': self.api_key}
+        
+        try:
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Process images like sync version
+                    if data.get('poster_path'):
+                        data['poster_url'] = f"{self.image_base_url}{data['poster_path']}"
+                    if data.get('backdrop_path'):
+                        data['backdrop_url'] = f"{self.image_base_url}{data['backdrop_path']}"
+                    return data
+                else:
+                    print(f"⚠️ TMDB API error {response.status} for {media_type} {item_id}")
+                    return None
+        except Exception as e:
+            print(f"⚠️ Network error fetching {media_type} {item_id}: {e}")
+            return None
+    
+    async def get_category_content_async(self, media_type: str, category: str, page: int = 1) -> Dict:
+        """Truly async version of get_category_content for parallel loading"""
+        try:
+            # Check cache first for page 1 requests
+            if page == 1:
+                try:
+                    from ..services.category_cache_service import CategoryCacheService
+                    cache_service = CategoryCacheService(self.session)
+                    cached_data = cache_service.get_cached_category(
+                        media_type=media_type,
+                        category=category,
+                        page=page,
+                        fallback_to_api=False
+                    )
+                    if cached_data:
+                        print(f"🚀 Cache hit for {media_type}/{category} page {page}")
+                        return cached_data
+                except Exception as e:
+                    print(f"⚠️ Cache lookup failed: {e}")
+            
+            # Async API call using aiohttp
+            async with aiohttp.ClientSession() as session:
+                url, params = self._build_category_url(media_type, category, page)
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        print(f"🚀 Async API call successful for {media_type}/{category} page {page}")
+                        return data
+                    else:
+                        print(f"⚠️ TMDB API error {response.status} for {media_type}/{category}")
+                        return {'results': [], 'total_pages': 0, 'total_results': 0}
+                        
+        except Exception as e:
+            print(f"⚠️ Error in async category content: {e}")
+            return {'results': [], 'total_pages': 0, 'total_results': 0}
+    
+    def _build_category_url(self, media_type: str, category: str, page: int = 1) -> tuple:
+        """Build TMDB API URL and params for a category"""
+        params = {
+            'api_key': self.api_key,
+            'page': page,
+            'region': 'US'
+        }
+        
+        # Map category to appropriate endpoint and params
+        mapping = self.category_mappings.get(media_type, {}).get(category, {})
+        
+        if mapping.get('use_discover'):
+            # Use discover endpoint
+            url = f"{self.base_url}/discover/{media_type}"
+            params['sort_by'] = mapping.get('sort_by', 'popularity.desc')
+            params.update(mapping.get('additional_params', {}))
+        elif category == 'trending':
+            # Use trending endpoint
+            url = f"{self.base_url}/trending/{media_type}/week"
+        else:
+            # Use standard endpoints
+            url = f"{self.base_url}/{media_type}/{category}"
+            
+        return url, params
+    
+    async def get_personalized_recommendations_async(self, user_requests: List, limit: int = 30) -> List[Dict]:
+        """
+        Generate personalized recommendations based on user requests using parallel API calls.
+        This replaces the sequential TMDB API calls with parallel processing.
+        
+        Args:
+            user_requests: List of MediaRequest objects from database  
+            limit: Maximum number of recommendations to return
+            
+        Returns:
+            List of recommendation items with media_type and recommendation_reason
+        """
+        print(f"🚀 Starting parallel recommendations for {len(user_requests)} user requests")
+        import time
+        start_time = time.time()
+        
+        if not user_requests:
+            # No request history, fall back to popular content
+            print("📊 No request history, falling back to popular content")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    # Fetch popular movies and TV in parallel
+                    movie_task = self._fetch_category_async(session, 'movie', 'popular', 1)
+                    tv_task = self._fetch_category_async(session, 'tv', 'popular', 1)
+                    
+                    movie_results, tv_results = await asyncio.gather(movie_task, tv_task, return_exceptions=True)
+                    
+                    all_results = []
+                    if not isinstance(movie_results, Exception) and movie_results:
+                        for item in movie_results.get('results', [])[:15]:
+                            item['media_type'] = 'movie'
+                            item['recommendation_reason'] = 'Popular content'
+                            all_results.append(item)
+                    
+                    if not isinstance(tv_results, Exception) and tv_results:
+                        for item in tv_results.get('results', [])[:15]:
+                            item['media_type'] = 'tv'
+                            item['recommendation_reason'] = 'Popular content'
+                            all_results.append(item)
+                    
+                    return all_results[:limit]
+            except Exception as e:
+                print(f"⚠️ Error in fallback recommendations: {e}")
+                return []
+        
+        # Prepare items for parallel fetching
+        items_to_fetch = []
+        request_info = {}
+        
+        print(f"🔍 Processing up to 10 user requests for recommendations...")
+        for i, user_request in enumerate(user_requests[:10]):  # Limit to 10 to avoid overwhelming
+            try:
+                request_media_type = user_request.media_type.value if hasattr(user_request.media_type, 'value') else str(user_request.media_type)
+                print(f"  {i+1}. Processing: {user_request.title} (TMDB: {user_request.tmdb_id}, Type: {request_media_type})")
+                
+                # Add the original requested item to get its recommendations
+                item_key = f"{user_request.tmdb_id}_{request_media_type}"
+                items_to_fetch.append({
+                    'id': user_request.tmdb_id,
+                    'media_type': request_media_type
+                })
+                request_info[item_key] = {
+                    'title': user_request.title,
+                    'media_type': request_media_type
+                }
+                
+            except Exception as request_error:
+                print(f"⚠️ Error processing request {user_request.title}: {request_error}")
+                continue
+        
+        # Fetch all items in parallel
+        print(f"🔍 Fetching details for {len(items_to_fetch)} items...")
+        try:
+            detailed_items = await self.get_multiple_details_async(items_to_fetch)
+            print(f"🔍 Got details for {len(detailed_items) if detailed_items else 0} items")
+            
+            if not detailed_items:
+                print("⚠️ No detailed items received from TMDB, cannot generate recommendations")
+                return []
+            
+            # Now get similar/recommended items for each in parallel
+            recommendation_tasks = []
+            async with aiohttp.ClientSession() as session:
+                for i, item in enumerate(detailed_items):
+                    if item and item.get('id'):
+                        media_type = item.get('media_type', 'movie')
+                        title = item.get('title') or item.get('name', 'Unknown')
+                        print(f"  {i+1}. Creating recommendation tasks for: {title} (ID: {item['id']}, Type: {media_type})")
+                        
+                        # Get similar items
+                        similar_task = self._fetch_similar_async(session, item['id'], media_type)
+                        recommendation_tasks.append((similar_task, item, 'similar'))
+                        
+                        # Get recommended items
+                        rec_task = self._fetch_recommendations_async(session, item['id'], media_type)
+                        recommendation_tasks.append((rec_task, item, 'recommended'))
+                    else:
+                        print(f"  {i+1}. Skipping invalid item: {item}")
+                
+                print(f"🔍 Created {len(recommendation_tasks)} recommendation tasks")
+                
+                # Execute all recommendation fetches in parallel
+                if recommendation_tasks:
+                    task_list = [task[0] for task in recommendation_tasks]
+                    task_metadata = [(task[1], task[2]) for task in recommendation_tasks]
+                    
+                    print(f"🔍 Executing {len(task_list)} recommendation API calls...")
+                    results = await asyncio.gather(*task_list, return_exceptions=True)
+                    print(f"🔍 Got {len(results)} results from recommendation API calls")
+                    
+                    # Process results
+                    recommendation_items = []
+                    seen_ids = set()
+                    successful_results = 0
+                    failed_results = 0
+                    
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            failed_results += 1
+                            print(f"⚠️ Exception in result {i+1}: {result}")
+                            continue
+                            
+                        original_item, rec_type = task_metadata[i]
+                        original_title = original_item.get('title') or original_item.get('name', 'Unknown')
+                        
+                        if result and 'results' in result:
+                            successful_results += 1
+                            items_found = len(result['results'])
+                            print(f"  Result {i+1}: {items_found} {rec_type} items for {original_title}")
+                            
+                            for rec_item in result['results'][:5]:  # Top 5 from each
+                                item_id = f"{rec_item['id']}_{original_item['media_type']}"
+                                if item_id not in seen_ids and len(recommendation_items) < limit:
+                                    rec_item['media_type'] = original_item['media_type']
+                                    rec_item['recommendation_reason'] = f"{'Similar to' if rec_type == 'similar' else 'Recommended for'} {original_title}"
+                                    recommendation_items.append(rec_item)
+                                    seen_ids.add(item_id)
+                        else:
+                            failed_results += 1
+                            print(f"  Result {i+1}: Empty or invalid result for {original_title} ({rec_type})")
+                    
+                    fetch_time = time.time() - start_time
+                    print(f"📊 Recommendation results summary:")
+                    print(f"  - Successful API calls: {successful_results}")
+                    print(f"  - Failed API calls: {failed_results}")
+                    print(f"  - Total recommendations found: {len(recommendation_items)}")
+                    print(f"  - Time taken: {fetch_time:.2f}s")
+                    print(f"✅ Parallel recommendations completed - returning {len(recommendation_items)} items")
+                    return recommendation_items[:limit]
+                    
+        except Exception as parallel_error:
+            print(f"⚠️ Parallel recommendations failed: {parallel_error}")
+            return []
+        
+        return []
+    
+    async def _fetch_category_async(self, session: aiohttp.ClientSession, media_type: str, category: str, page: int) -> Dict:
+        """Fetch category content using async HTTP"""
+        endpoint = "movie" if media_type == "movie" else "tv"
+        url = f"{self.base_url}/{endpoint}/{category}"
+        params = {'api_key': self.api_key, 'page': page}
+        
+        try:
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    print(f"⚠️ TMDB API error {response.status} for {media_type} {category}")
+                    return {'results': []}
+        except Exception as e:
+            print(f"⚠️ Network error fetching {media_type} {category}: {e}")
+            return {'results': []}
+    
+    async def _fetch_similar_async(self, session: aiohttp.ClientSession, item_id: int, media_type: str) -> Dict:
+        """Fetch similar items using async HTTP"""
+        endpoint = "movie" if media_type == "movie" else "tv"
+        url = f"{self.base_url}/{endpoint}/{item_id}/similar"
+        params = {'api_key': self.api_key}
+        
+        try:
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    return {'results': []}
+        except Exception as e:
+            print(f"⚠️ Error fetching similar for {media_type} {item_id}: {e}")
+            return {'results': []}
+    
+    async def _fetch_recommendations_async(self, session: aiohttp.ClientSession, item_id: int, media_type: str) -> Dict:
+        """Fetch recommendations using async HTTP"""
+        endpoint = "movie" if media_type == "movie" else "tv"  
+        url = f"{self.base_url}/{endpoint}/{item_id}/recommendations"
+        params = {'api_key': self.api_key}
+        
+        try:
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    return {'results': []}
+        except Exception as e:
+            print(f"⚠️ Error fetching recommendations for {media_type} {item_id}: {e}")
+            return {'results': []}

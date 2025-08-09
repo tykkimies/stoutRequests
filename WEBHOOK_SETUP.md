@@ -2,7 +2,7 @@
 
 ## Setting up Real-time Download Status Updates
 
-Stout Requests now supports **real-time updates** from Radarr and Sonarr via webhooks, with background polling as fallback.
+CuePlex now supports **real-time updates** from Radarr and Sonarr via webhooks, with background polling as fallback.
 
 ### 📡 **How It Works**
 
@@ -16,13 +16,13 @@ Stout Requests now supports **real-time updates** from Radarr and Sonarr via web
 2. **Add Connection** → Webhook
 3. **Configure:**
    ```
-   Name: Stout Requests
+   Name: CuePlex
    On Grab: ✅ (Download starts)
    On Download: ✅ (Download completes) 
    On Rename: ✅ (Optional)
    On Movie Added: ✅ (Optional)
    
-   URL: http://your-stout-requests-url/webhooks/radarr
+   URL: http://your-cueplex-url/webhooks/radarr
    Method: POST
    Username: (leave empty)
    Password: (leave empty)
@@ -34,13 +34,13 @@ Stout Requests now supports **real-time updates** from Radarr and Sonarr via web
 2. **Add Connection** → Webhook
 3. **Configure:**
    ```
-   Name: Stout Requests
+   Name: CuePlex
    On Grab: ✅ (Download starts)
    On Download: ✅ (Episode downloads)
    On Rename: ✅ (Optional)
    On Series Added: ✅ (Optional)
    
-   URL: http://your-stout-requests-url/webhooks/sonarr
+   URL: http://your-cueplex-url/webhooks/sonarr
    Method: POST
    Username: (leave empty) 
    Password: (leave empty)
@@ -72,7 +72,7 @@ If webhooks fail:
 **Webhooks not working?**
 - Check Radarr/Sonarr logs for webhook errors
 - Verify URL is accessible from Radarr/Sonarr
-- Check Stout Requests logs for webhook events
+- Check CuePlex logs for webhook events
 
 **Status not updating?**
 - Manual trigger: Admin → Check Download Status  

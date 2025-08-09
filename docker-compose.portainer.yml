@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  cueplex:
+    image: cueplex-test:latest  # Uses locally built image
+    container_name: cueplex-test
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@postgres:5432/cueplex
+      - SECRET_KEY=your-test-secret-key-here-change-in-production
+      - ENVIRONMENT=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cueplex_test_logs:/app/logs
+      - cueplex_test_data:/app/data
+    networks:
+      - cueplex-test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:15
+    container_name: cueplex-test-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=CuePlexSecure2024!
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - cueplex_test_postgres:/var/lib/postgresql/data
+    networks:
+      - cueplex-test
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: cueplex-test-redis
+    restart: unless-stopped
+    volumes:
+      - cueplex_test_redis:/data
+    networks:
+      - cueplex-test
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  cueplex_test_postgres:
+    driver: local
+  cueplex_test_redis:
+    driver: local
+  cueplex_test_logs:
+    driver: local
+  cueplex_test_data:
+    driver: local
+
+networks:
+  cueplex-test:
+    driver: bridge

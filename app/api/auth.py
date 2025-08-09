@@ -15,8 +15,8 @@ from ..services.plex_service import PlexService
 router = APIRouter(prefix="/auth", tags=["authentication"])
 security = HTTPBearer()
 
-# Store for PIN verification (in production, use Redis)
-pin_store = {}
+# Import file-based PIN store for Docker persistence
+from ..core.pin_store import pin_store
 
 
 async def get_current_user(

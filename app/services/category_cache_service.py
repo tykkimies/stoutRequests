@@ -47,17 +47,17 @@ class CategoryCacheService:
             cache_entry = self.session.exec(stmt).first()
             
             if cache_entry and not cache_entry.is_expired:
-                logger.debug(f"Cache hit for {cache_key}")
+                logger.info(f"🚀 Cache hit for {cache_key} (cached {cache_entry.item_count} items)")
                 return cache_entry.get_data()
             
             if cache_entry and cache_entry.is_expired:
-                logger.debug(f"Cache expired for {cache_key}")
+                logger.warning(f"⚠️ Cache expired for {cache_key} (expired at {cache_entry.expires_at})")
             else:
-                logger.debug(f"Cache miss for {cache_key}")
+                logger.warning(f"❌ Cache miss for {cache_key} (no cache entry found)")
             
             # Fallback to API if enabled and no valid cache
             if fallback_to_api:
-                logger.info(f"Fetching fresh data from TMDB for {cache_key}")
+                logger.warning(f"🔄 Fetching fresh data from TMDB API for {cache_key} (cache unavailable)")
                 return self._fetch_from_api(media_type, category, page)
             
             return None

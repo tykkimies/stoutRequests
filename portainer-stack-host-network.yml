@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  cueplex:
+    image: cueplex-test:latest
+    container_name: cueplex-test
+    restart: unless-stopped
+    network_mode: host  # Uses host network directly
+    environment:
+      # Direct localhost connection since using host networking
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@localhost:5432/cueplex
+      - SECRET_KEY=test-secret-key-change-in-production
+      - ENVIRONMENT=production
+    volumes:
+      - cueplex_test_logs:/app/logs
+      - cueplex_test_data:/app/data
+
+volumes:
+  cueplex_test_logs:
+  cueplex_test_data:

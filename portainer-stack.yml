@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  cueplex:
+    image: cueplex-test:latest
+    container_name: cueplex-test
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@postgres:5432/cueplex
+      - SECRET_KEY=test-secret-key-change-in-production
+      - ENVIRONMENT=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cueplex_test_logs:/app/logs
+      - cueplex_test_data:/app/data
+    networks:
+      - cueplex-test
+      - servarr
+      - bridge
+
+  postgres:
+    image: postgres:15
+    container_name: cueplex-test-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=CuePlexSecure2024!
+    volumes:
+      - cueplex_test_postgres:/var/lib/postgresql/data
+    networks:
+      - cueplex-test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  cueplex_test_postgres:
+  cueplex_test_logs:
+  cueplex_test_data:
+
+networks:
+  cueplex-test:
+  servarr:  # Add the network your Radarr/Sonarr containers are on
+    external: true
+  bridge:
+    external: true

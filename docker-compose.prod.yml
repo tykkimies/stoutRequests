@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  cueplex:
+    image: cueplex/cueplex:latest
+    container_name: cueplex-app
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:${DB_PASSWORD:-CuePlexSecure2024!}@postgres:5432/cueplex
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - ENVIRONMENT=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cueplex_logs:/app/logs
+      - cueplex_data:/app/data
+    networks:
+      - cueplex
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:15
+    container_name: cueplex-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-CuePlexSecure2024!}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - cueplex
+    ports:
+      - "5432:5432"  # Remove this line in production if not needed
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: cueplex-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - cueplex
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  cueplex_logs:
+    driver: local
+  cueplex_data:
+    driver: local
+
+networks:
+  cueplex:
+    driver: bridge

@@ -1,4 +1,4 @@
-# 🚀 Stout Requests Setup Guide
+# 🚀 CuePlex Setup Guide
 
 ## Quick Start
 
@@ -12,9 +12,9 @@ pip install -r requirements.txt
 ### 2. Database Setup
 Install PostgreSQL and create database:
 ```sql
-CREATE DATABASE stout_requests;
-CREATE USER stout WITH PASSWORD 'password';
-GRANT ALL PRIVILEGES ON DATABASE stout_requests TO stout;
+CREATE DATABASE cueplex;
+CREATE USER cueplex_user WITH PASSWORD 'CuePlexSecure2024!';
+GRANT ALL PRIVILEGES ON DATABASE cueplex TO cueplex_user;
 ```
 
 ### 3. Environment Configuration
@@ -24,7 +24,7 @@ cp .env.example .env
 
 Edit `.env` with your settings:
 ```env
-DATABASE_URL=postgresql://stout:password@localhost/stout_requests
+DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@localhost/cueplex
 PLEX_URL=http://your-plex-server:32400
 PLEX_TOKEN=your-plex-token
 PLEX_CLIENT_ID=stout-requests

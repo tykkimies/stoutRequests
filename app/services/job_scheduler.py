@@ -39,7 +39,7 @@ class JobScheduler:
         try:
             # Configure job stores - PostgreSQL for persistence
             jobstores = {
-                'default': SQLAlchemyJobStore(url=database_url, tablename='apscheduler_jobs')
+                'default': SQLAlchemyJobStore(url=database_url, tablename='cueplex_jobs')
             }
             
             # Configure executors - AsyncIO for non-blocking execution
@@ -307,9 +307,18 @@ class JobScheduler:
         if not self.scheduler:
             return {"success": False, "error": "Scheduler not initialized"}
         
-        # Job function mapping for manual triggers
+        # For library_sync, use the non-blocking queue method
+        if job_id == 'library_sync':
+            try:
+                from ..services.background_jobs import queue_library_sync_immediate
+                result = queue_library_sync_immediate()
+                return result
+            except Exception as e:
+                logger.error(f"Failed to queue library sync: {e}")
+                return {"success": False, "error": str(e)}
+        
+        # Job function mapping for other manual triggers
         job_functions = {
-            'library_sync': library_sync_job,
             'download_status_check': download_status_job,
             'request_submission': request_submission_job,
             'request_cleanup': request_cleanup_job,
@@ -425,6 +434,15 @@ async def library_sync_job():
         plex_service = PlexSyncService()
         result = await plex_service.sync_library()
         logger.info(f"Library sync completed: {result}")
+        
+        # After library sync, refresh category cache to update Plex status
+        try:
+            logger.info("🔄 Refreshing category cache after library sync...")
+            cache_result = await category_cache_job()
+            logger.info(f"✅ Category cache refreshed: {cache_result}")
+        except Exception as cache_error:
+            logger.warning(f"⚠️ Failed to refresh category cache after library sync: {cache_error}")
+        
         return result
     except Exception as e:
         logger.error(f"Library sync job failed: {e}")
@@ -534,7 +552,12 @@ async def request_cleanup_job():
         raise
 
 async def category_cache_job():
-    """Category cache refresh job implementation - stores data in database for reuse"""
+    """
+    🚀 OPTIMIZED: Category cache refresh job - uses performance optimizations
+    - Uses new database indexes for faster queries
+    - Integrates with batch instance loading and request status caching
+    - Clears performance caches to ensure fresh data
+    """
     import logging
     logger = logging.getLogger(__name__)
     
@@ -546,6 +569,22 @@ async def category_cache_job():
         from datetime import datetime, timedelta
         
         with Session(engine) as session:
+            # 🚀 Clear performance caches before refresh to ensure fresh data
+            try:
+                from ..services.request_status_service import get_request_status_service
+                from ..services.instance_selection_service import _user_instance_cache
+                
+                # Clear request status cache
+                status_service = get_request_status_service(session)
+                status_service.invalidate_cache()
+                
+                # Clear instance permissions cache
+                _user_instance_cache.clear()
+                
+                logger.info("🧹 Cleared performance caches before refresh")
+            except Exception as cache_clear_error:
+                logger.warning(f"⚠️ Failed to clear performance caches: {cache_clear_error}")
+            
             tmdb_service = TMDBService(session)
             
             # Categories to cache for homepage performance
@@ -560,15 +599,15 @@ async def category_cache_job():
                 ("tv", "trending")
             ]
             
-            stats = {"cached_count": 0, "cache_size": 0, "updated": 0, "created": 0}
-            cache_duration_hours = 4  # Cache expires after 4 hours
+            stats = {"cached_count": 0, "cache_size": 0, "updated": 0, "created": 0, "cache_cleared": True}
+            cache_duration_hours = 24  # Cache expires after 24 hours (1 day)
             
             for media_type, category in categories:
                 try:
                     # Generate cache key
                     cache_key = CategoryCache.generate_cache_key(media_type, category, page=1)
                     
-                    # Check if we have existing cache entry
+                    # 🚀 Use optimized query with new indexes
                     stmt = select(CategoryCache).where(CategoryCache.cache_key == cache_key)
                     existing_cache = session.exec(stmt).first()
                     
@@ -589,6 +628,34 @@ async def category_cache_job():
                     if data and "results" in data:
                         expires_at = datetime.utcnow() + timedelta(hours=cache_duration_hours)
                         
+                        # 🚀 PERFORMANCE: Pre-process the data with Plex status information
+                        # This allows cached data to include status information and eliminates real-time checking
+                        try:
+                            # Add Plex status to all items in the cache data
+                            from ..services.plex_sync_service import PlexSyncService
+                            sync_service = PlexSyncService(session)
+                            
+                            # Extract TMDB IDs for batch status checking
+                            tmdb_ids = [item.get('id') for item in data.get('results', [])]
+                            
+                            if tmdb_ids:
+                                # Use fast status checking (skip expensive TV completion for cache)
+                                skip_tv_completion = (media_type == 'tv')
+                                status_map = sync_service.check_items_status(tmdb_ids, media_type, skip_tv_completion=skip_tv_completion)
+                                
+                                # Add status and in_plex properties to each item
+                                for item in data.get('results', []):
+                                    tmdb_id = item.get('id')
+                                    status = status_map.get(tmdb_id, 'available')
+                                    item['status'] = status
+                                    item['in_plex'] = (status == 'in_plex')
+                                    item['media_type'] = media_type  # Ensure media_type is set
+                                
+                                logger.info(f"🚀 Added Plex status to {len(tmdb_ids)} {media_type}/{category} items in cache")
+                                
+                        except Exception as preprocess_error:
+                            logger.warning(f"⚠️ Failed to add Plex status to cache {media_type}/{category}: {preprocess_error}")
+                        
                         if existing_cache:
                             # Update existing cache entry
                             existing_cache.set_data(data)
@@ -596,7 +663,7 @@ async def category_cache_job():
                             existing_cache.expires_at = expires_at
                             session.add(existing_cache)
                             stats["updated"] += 1
-                            logger.info(f"Updated cache for {media_type}/{category}: {len(data['results'])} items")
+                            logger.info(f"✅ Updated cache for {media_type}/{category}: {len(data['results'])} items")
                         else:
                             # Create new cache entry
                             cache_entry = CategoryCache(
@@ -610,18 +677,18 @@ async def category_cache_job():
                             cache_entry.set_data(data)
                             session.add(cache_entry)
                             stats["created"] += 1
-                            logger.info(f"Created cache for {media_type}/{category}: {len(data['results'])} items")
+                            logger.info(f"✅ Created cache for {media_type}/{category}: {len(data['results'])} items")
                         
                         stats["cached_count"] += 1
                         stats["cache_size"] += len(data["results"])
                         
                 except Exception as e:
-                    logger.error(f"Failed to cache {media_type}/{category}: {e}")
+                    logger.error(f"❌ Failed to cache {media_type}/{category}: {e}")
             
             # Commit all cache updates
             session.commit()
             
-            # Clean up expired cache entries
+            # 🚀 OPTIMIZED: Clean up expired cache entries using new indexes
             expired_stmt = select(CategoryCache).where(CategoryCache.expires_at < datetime.utcnow())
             expired_entries = session.exec(expired_stmt).all()
             for expired in expired_entries:
@@ -629,12 +696,12 @@ async def category_cache_job():
             
             if expired_entries:
                 session.commit()
-                logger.info(f"Cleaned up {len(expired_entries)} expired cache entries")
+                logger.info(f"🧹 Cleaned up {len(expired_entries)} expired cache entries")
             
-            logger.info(f"Category cache refresh completed: {stats}")
+            logger.info(f"🚀 Optimized category cache refresh completed: {stats}")
             return {"success": True, "stats": stats}
     except Exception as e:
-        logger.error(f"Category cache job failed: {e}")
+        logger.error(f"❌ Category cache job failed: {e}")
         raise
 
 

@@ -424,6 +424,10 @@ async def get_instance_selection_service() -> InstanceSelectionService:
     session = next(get_session())
     return InstanceSelectionService(session)
 
+# 🚀 PERFORMANCE: Cache for batch instance loading
+_user_instance_cache = {}
+_cache_session_id = None
+
 # Convenience functions for common operations
 async def get_user_available_instances(
     user_id: int, 
@@ -433,6 +437,121 @@ async def get_user_available_instances(
     """Get available instances for a user - convenience function"""
     service = await get_instance_selection_service()
     return await service.get_available_instances(user_id, media_type, quality_tier)
+
+async def batch_load_user_instances(
+    user_id: int, 
+    media_types: List[str],
+    session: Session = None,
+    force_refresh: bool = False
+) -> Dict[str, List[ServiceInstance]]:
+    """
+    🚀 PERFORMANCE: Batch load instances for multiple media types in a single query
+    Reduces N+1 queries by preloading all instance data and permissions.
+    
+    Args:
+        user_id: User ID to load instances for
+        media_types: List of media types ("movie", "tv", "mixed")
+        session: Optional database session to reuse
+        force_refresh: Force refresh the cache
+        
+    Returns:
+        Dict mapping media_type -> list of available instances
+    """
+    global _user_instance_cache, _cache_session_id
+    
+    # Create cache key
+    cache_key = f"user_{user_id}_types_{'_'.join(sorted(media_types))}"
+    
+    # Check cache first (unless force refresh)
+    if not force_refresh and cache_key in _user_instance_cache:
+        print(f"🚀 Using cached instances for user {user_id}: {list(_user_instance_cache[cache_key].keys())}")
+        return _user_instance_cache[cache_key]
+    
+    # Use provided session or get a new one
+    if session:
+        service = InstanceSelectionService(session)
+    else:
+        service = await get_instance_selection_service()
+    
+    print(f"🚀 Batch loading instances for user {user_id}, media_types: {media_types}")
+    
+    # Load user and permissions once
+    user = service.session.get(User, user_id)
+    user_permissions = await service._get_user_permissions(user_id)
+    
+    # Load ALL enabled instances once
+    all_instances_query = select(ServiceInstance).where(
+        ServiceInstance.is_enabled == True
+    ).order_by(ServiceInstance.name)
+    
+    all_instances = service.session.exec(all_instances_query).all()
+    print(f"🚀 Loaded {len(all_instances)} total enabled instances")
+    
+    # Group instances by service type
+    radarr_instances = [i for i in all_instances if i.service_type == ServiceType.RADARR]
+    sonarr_instances = [i for i in all_instances if i.service_type == ServiceType.SONARR]
+    
+    # Build result for each requested media type
+    result = {}
+    
+    for media_type_str in media_types:
+        if media_type_str == "movie":
+            media_type_enum = MediaType.MOVIE
+            instances_to_check = radarr_instances
+        elif media_type_str in ["tv", "show"]:
+            media_type_enum = MediaType.TV  
+            instances_to_check = sonarr_instances
+        elif media_type_str in ["mixed", "all"]:
+            # For mixed content, combine both types
+            movie_instances = await service._apply_smart_defaults(user, user_permissions, radarr_instances, MediaType.MOVIE, "standard")
+            tv_instances = await service._apply_smart_defaults(user, user_permissions, sonarr_instances, MediaType.TV, "standard")
+            
+            # Combine and deduplicate
+            seen_ids = set()
+            combined = []
+            for instance in movie_instances + tv_instances:
+                if instance.id not in seen_ids:
+                    combined.append(instance)
+                    seen_ids.add(instance.id)
+            
+            result[media_type_str] = combined
+            continue
+        else:
+            result[media_type_str] = []
+            continue
+        
+        # Apply permissions for this media type
+        available_instances = await service._apply_smart_defaults(
+            user, user_permissions, instances_to_check, media_type_enum, "standard"
+        )
+        
+        result[media_type_str] = available_instances
+        print(f"🚀 {media_type_str}: {len(available_instances)} instances available: {[i.name for i in available_instances]}")
+    
+    # Cache the result 
+    _user_instance_cache[cache_key] = result
+    _cache_session_id = id(service.session) if service.session else None
+    
+    print(f"🚀 Cached instances for user {user_id}")
+    return result
+
+async def get_user_available_instances_cached(
+    user_id: int, 
+    media_type: MediaType, 
+    session: Session = None
+) -> List[ServiceInstance]:
+    """
+    🚀 PERFORMANCE: Get available instances using batch cache when possible
+    Falls back to individual lookup if not cached
+    """
+    media_type_str = media_type.value  # Convert enum to string
+    
+    # Try batch cache first
+    batch_result = await batch_load_user_instances(
+        user_id, [media_type_str], session, force_refresh=False
+    )
+    
+    return batch_result.get(media_type_str, [])
 
 async def select_instance_for_request(
     user_id: int, 

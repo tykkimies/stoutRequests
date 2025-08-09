@@ -1,0 +1,53 @@
+version: '3.8'
+
+name: cueplex
+
+services:
+  cueplex:
+    build: .
+    container_name: cueplex-app
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@postgres:5432/cueplex
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - cueplex_data:/app/data
+    networks:
+      - plexapps
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    container_name: cueplex-postgres
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=CuePlexSecure2024!
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    # Remove external port mapping - only accessible from other containers
+    expose:
+      - "5432"
+    networks:
+      - plexapps
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  cueplex_data:
+
+networks:
+  plexapps:
+    external: true

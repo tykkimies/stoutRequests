@@ -26,7 +26,7 @@ class PlexService:
             # Use override parameters if provided (for setup library loading)
             self.plex_url = override_url
             self.plex_token = override_token
-            self.client_id = "plexstoutrequests"
+            self.client_id = "plexcueplex"
 
         else:
             print("🔧 PlexService initialized in normal mode")
@@ -35,9 +35,9 @@ class PlexService:
             # Clean token immediately when loading from config to handle encoding issues
             raw_token = config["token"]
             self.plex_token = str(raw_token).encode('ascii', errors='ignore').decode('ascii').strip() if raw_token else None
-            self.client_id = config.get("client_id", "stout-requests-dev")
+            self.client_id = config.get("client_id", "cueplex-dev")
 
-        self.product = "plexstoutrequests"
+        self.product = "plexcueplex"
 
     def __del__(self):
         if hasattr(self, "_owns_session") and self._owns_session and hasattr(self, "session"):

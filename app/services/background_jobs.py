@@ -416,7 +416,109 @@ class BackgroundJobManager:
         """Get status of all jobs"""
         return {name: self.get_job_status(name) for name in self.jobs.keys()}
     
-    async def trigger_library_sync(self, triggered_by: str = "manual") -> Dict[str, Any]:
+    def queue_library_sync_immediate(self, triggered_by: str = "manual") -> Dict[str, Any]:
+        """
+        Queue a library sync job to run immediately via ThreadPoolExecutor.
+        This returns immediately without waiting for completion.
+        Used for web UI manual triggers to avoid blocking.
+        """
+        with self._lock:
+            is_running = self.jobs['library_sync']['running']
+        
+        if is_running:
+            print("⚠️ Library sync already running - rejecting new sync request")
+            return {
+                'success': False,
+                'message': 'Library sync already running',
+                'job_id': None
+            }
+        
+        # Create job execution record
+        execution_id = self._create_job_execution('library_sync', triggered_by)
+        
+        # Mark job as running
+        with self._lock:
+            self.jobs['library_sync']['running'] = True
+            self.jobs['library_sync']['last_run'] = get_utc_now()
+        
+        # Trigger HTMX update to show job started
+        self._trigger_status_update('library_sync')
+        
+        try:
+            print("🔄 Queuing immediate library sync job...")
+            
+            # Check executor state before submission
+            with self._lock:
+                if self._executor_shutdown or self._executor is None or self._executor._shutdown:
+                    raise RuntimeError("Cannot execute job - executor is shutting down")
+            
+            # Submit job directly to thread pool and return immediately
+            future = self._executor.submit(self._run_library_sync_sync)
+            
+            # Set up completion callback to update status when done
+            def job_completed(task):
+                try:
+                    result = task.result()
+                    success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
+                    
+                    # Update job execution record
+                    self._update_job_execution(
+                        execution_id, 
+                        success=success, 
+                        result_data=result if isinstance(result, dict) else {'result': str(result)},
+                        error_message=result.get('error') if isinstance(result, dict) else None
+                    )
+                    
+                    # Update job status
+                    with self._lock:
+                        self.jobs['library_sync']['stats'] = result
+                        self.jobs['library_sync']['running'] = False
+                        self.last_library_sync = get_utc_now()
+                        if self.jobs['library_sync'].get('enabled', True) and self.jobs['library_sync'].get('auto_run', True):
+                            self.jobs['library_sync']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['library_sync']['interval_seconds'])
+                    
+                    print(f"✅ Queued library sync completed: {result}")
+                    self._trigger_status_update('library_sync')
+                except Exception as e:
+                    print(f"❌ Error in library sync completion callback: {e}")
+                    # Mark job as no longer running even on error
+                    with self._lock:
+                        self.jobs['library_sync']['running'] = False
+                    
+                    # Update execution record with error
+                    self._update_job_execution(execution_id, success=False, error_message=str(e))
+                    self._trigger_status_update('library_sync')
+            
+            future.add_done_callback(job_completed)
+            
+            print("🚀 Library sync queued - returning immediately to web UI")
+            
+            return {
+                'success': True,
+                'message': 'Library sync queued and started in background',
+                'job_id': execution_id
+            }
+        except Exception as e:
+            # Mark job as no longer running on error
+            with self._lock:
+                self.jobs['library_sync']['running'] = False
+            self._trigger_status_update('library_sync')
+            
+            # Update execution record with error
+            self._update_job_execution(
+                execution_id,
+                success=False,
+                error_message=str(e)
+            )
+            
+            print(f"❌ Error queuing library sync: {e}")
+            return {
+                'success': False,
+                'message': f'Error queuing library sync: {str(e)}',
+                'job_id': execution_id
+            }
+
+    async def trigger_library_sync(self, triggered_by: str = "manual", wait_for_completion: bool = False) -> Dict[str, Any]:
         """
         Manually trigger a library sync job.
         This runs in the background and doesn't block the web request.
@@ -451,52 +553,88 @@ class BackgroundJobManager:
                 if self._executor_shutdown or self._executor is None or self._executor._shutdown:
                     raise RuntimeError("Cannot execute job - executor is shutting down")
             
-            # Run the sync in the thread pool to avoid blocking
+            # Run the sync in the thread pool
             loop = asyncio.get_event_loop()
             
-            # Add timeout to prevent hanging
-            try:
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        self._executor,
-                        self._run_library_sync_sync
-                    ),
-                    timeout=600  # 10 minute timeout
+            if wait_for_completion:
+                # Wait for completion (used by scheduled jobs or API calls that need results)
+                try:
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            self._executor,
+                            self._run_library_sync_sync
+                        ),
+                        timeout=600  # 10 minute timeout
+                    )
+                except asyncio.TimeoutError:
+                    print("❌ Library sync timed out after 10 minutes")
+                    result = {'error': 'Library sync timed out after 10 minutes'}
+                
+                # Update job execution record with completion data
+                success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
+                self._update_job_execution(
+                    execution_id, 
+                    success=success, 
+                    result_data=result if isinstance(result, dict) else {'result': str(result)},
+                    error_message=result.get('error') if isinstance(result, dict) else None
                 )
-            except asyncio.TimeoutError:
-                print("❌ Library sync timed out after 10 minutes")
-                result = {'error': 'Library sync timed out after 10 minutes'}
-            
-            # Determine success based on result
-            success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
-            
-            # Update job execution record
-            self._update_job_execution(
-                execution_id, 
-                success=success, 
-                result_data=result if isinstance(result, dict) else {'result': str(result)},
-                error_message=result.get('error') if isinstance(result, dict) else None
-            )
-            
-            # Update job status
-            with self._lock:
-                self.jobs['library_sync']['stats'] = result
-                self.last_library_sync = get_utc_now()
-                # Update next run time if auto-scheduling is enabled
-                if self.jobs['library_sync'].get('enabled', True) and self.jobs['library_sync'].get('auto_run', True):
-                    self.jobs['library_sync']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['library_sync']['interval_seconds'])
-            
-            # Trigger HTMX update for any connected clients
-            self._trigger_status_update('library_sync')
-            
-            print(f"✅ Background library sync completed: {result}")
-            
-            return {
-                'success': success,
-                'message': 'Library sync completed successfully' if success else 'Library sync completed with errors',
-                'stats': result,
-                'execution_id': execution_id
-            }
+                
+                # Update job status
+                with self._lock:
+                    self.jobs['library_sync']['stats'] = result
+                    self.last_library_sync = get_utc_now()
+                    if self.jobs['library_sync'].get('enabled', True) and self.jobs['library_sync'].get('auto_run', True):
+                        self.jobs['library_sync']['next_run'] = get_utc_now() + timedelta(seconds=self.jobs['library_sync']['interval_seconds'])
+                
+                print(f"✅ Background library sync completed: {result}")
+                
+                return {
+                    'success': success,
+                    'message': f'Library sync completed. Processed {result.get("total_items", 0)} items.',
+                    'stats': result
+                }
+            else:
+                # Non-blocking mode: Start job and return immediately (for web UI)
+                future = loop.run_in_executor(self._executor, self._run_library_sync_sync)
+                
+                # Set up completion callback to update status when done
+                def job_completed(task):
+                    try:
+                        result = task.result()
+                        success = result.get('success', True) if isinstance(result, dict) else not result.get('error')
+                        
+                        # Update job execution record
+                        self._update_job_execution(
+                            execution_id, 
+                            success=success, 
+                            result_data=result if isinstance(result, dict) else {'result': str(result)},
+                            error_message=result.get('error') if isinstance(result, dict) else None
+                        )
+                        
+                        # Update job status
+                        with self._lock:
+                            self.jobs['library_sync']['stats'] = result
+                            self.jobs['library_sync']['running'] = False
+                            self.last_library_sync = get_utc_now()
+                        
+                        print(f"✅ Background library sync completed: {result}")
+                        self._trigger_status_update('library_sync')
+                        
+                    except Exception as e:
+                        print(f"❌ Background library sync failed: {e}")
+                        self._update_job_execution(execution_id, success=False, error_message=str(e))
+                        with self._lock:
+                            self.jobs['library_sync']['running'] = False
+                        self._trigger_status_update('library_sync')
+                
+                future.add_done_callback(job_completed)
+                
+                return {
+                    'success': True,
+                    'message': 'Library sync started in background. Check status for progress.',
+                    'execution_id': execution_id,
+                    'status': 'started'
+                }
             
         except Exception as e:
             print(f"❌ Error in background library sync: {e}")
@@ -511,9 +649,10 @@ class BackgroundJobManager:
                 'execution_id': execution_id
             }
         finally:
-            # Mark job as no longer running
-            with self._lock:
-                self.jobs['library_sync']['running'] = False
+            # Only mark job as no longer running if we waited for completion
+            if wait_for_completion:
+                with self._lock:
+                    self.jobs['library_sync']['running'] = False
     
     def _run_library_sync_sync(self) -> Dict[str, Any]:
         """
@@ -1613,9 +1752,13 @@ background_jobs = BackgroundJobManager()
 
 
 # Functions for compatibility with existing admin code
-async def trigger_library_sync() -> Dict[str, Any]:
-    """Trigger library sync job"""
-    return await background_jobs.trigger_library_sync()
+def queue_library_sync_immediate() -> Dict[str, Any]:
+    """Queue library sync job immediately (non-blocking for web UI)"""
+    return background_jobs.queue_library_sync_immediate()
+
+async def trigger_library_sync(wait_for_completion: bool = False) -> Dict[str, Any]:
+    """Trigger library sync job (non-blocking by default for web UI)"""
+    return await background_jobs.trigger_library_sync(wait_for_completion=wait_for_completion)
 
 
 async def trigger_download_status_check() -> Dict[str, Any]:

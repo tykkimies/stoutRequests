@@ -1,0 +1,70 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+venv/
+.env.backup
+
+# Development
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (we'll create fresh ones in container)
+logs/*
+*.log
+
+# Local data
+data/*
+
+# Development scripts
+migrate_data.sh
+cleanup_old.sh
+complete_migration.sql
+cleanup_old_db.sql
+install.sh
+quick-setup.sh
+
+# Documentation (keep README.md but exclude others)
+INSTALLATION.md
+*.md
+!README.md
+
+# Local database files
+*.db
+*.sqlite
+
+# Test files
+tests/
+test_*
+*_test.py
+
+# Coverage reports
+.coverage
+htmlcov/
+
+# Local config (we use env-template instead)
+.env.local
+
+# Development docker files
+docker-compose.dev.yml
+Dockerfile.dev
+
+# Temporary files
+*.tmp
+*.temp

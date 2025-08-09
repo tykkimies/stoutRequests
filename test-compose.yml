@@ -1,0 +1,52 @@
+# Test Docker Compose for CuePlex with plexapps network
+
+services:
+  cueplex:
+    image: cueplex-test:latest
+    container_name: cueplex-test-app
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:TestPassword123@postgres:5432/cueplex
+      - SECRET_KEY=test-secret-key-32-characters-long
+      - ENVIRONMENT=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cueplex_test_data:/app/data
+      - cueplex_test_logs:/app/logs
+    networks:
+      - plexapps
+
+  postgres:
+    image: postgres:15
+    container_name: cueplex-test-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=TestPassword123
+    volumes:
+      - cueplex_test_postgres_data:/var/lib/postgresql/data
+    networks:
+      - plexapps
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  cueplex_test_postgres_data:
+    driver: local
+  cueplex_test_data:
+    driver: local
+  cueplex_test_logs:
+    driver: local
+
+networks:
+  plexapps:
+    external: true

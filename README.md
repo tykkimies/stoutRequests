@@ -1,4 +1,4 @@
-# 🍺 Stout Requests
+# 🎬 CuePlex
 
 A self-hosted request platform for Plex servers built with FastAPI, HTMX, and Tailwind CSS.
 
@@ -13,10 +13,41 @@ A self-hosted request platform for Plex servers built with FastAPI, HTMX, and Ta
 
 ## Quick Start
 
+### 🐳 Docker Installation (Recommended)
+
+The easiest way to get CuePlex running with all dependencies included:
+
+```bash
+# Download and run the installer
+curl -fsSL https://raw.githubusercontent.com/your-repo/cueplex/main/install.sh | bash
+
+# Or manually with Docker Compose:
+wget https://raw.githubusercontent.com/your-repo/cueplex/main/docker-compose.yml
+docker compose up -d
+```
+
+This automatically includes:
+- PostgreSQL database (pre-configured)
+- Redis for caching  
+- All necessary dependencies
+- Automatic health checks and restarts
+
+Access your instance at `http://localhost:8001`
+
+### 📦 One-Line Installation
+
+```bash
+curl -fsSL https://get.cueplex.com | bash
+```
+
+### 🔧 Manual Installation
+
+For advanced users who prefer manual setup:
+
 ### 1. Install Dependencies
 
 ```bash
-# Activate virtual environment
+# Activate virtual environment  
 source venv/bin/activate
 
 # Install Python packages
@@ -35,7 +66,7 @@ Edit `.env` with your configuration:
 
 ```env
 # Database
-DATABASE_URL=postgresql://username:password@localhost/stout_requests
+DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@localhost/cueplex
 
 # Plex Configuration
 PLEX_URL=http://your-plex-server:32400
@@ -62,9 +93,9 @@ SECRET_KEY=your-secret-key-here
 Install and configure PostgreSQL, then create a database:
 
 ```sql
-CREATE DATABASE stout_requests;
-CREATE USER stout WITH PASSWORD 'password';
-GRANT ALL PRIVILEGES ON DATABASE stout_requests TO stout;
+CREATE DATABASE cueplex;
+CREATE USER cueplex_user WITH PASSWORD 'CuePlexSecure2024!';
+GRANT ALL PRIVILEGES ON DATABASE cueplex TO cueplex_user;
 ```
 
 ### 4. Run the Application

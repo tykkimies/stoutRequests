@@ -1,0 +1,60 @@
+# Docker Compose file for CuePlex auto-installer
+
+services:
+  cueplex:
+    image: ${CUEPLEX_IMAGE:-cueplex-test:latest}
+    container_name: cueplex-app
+    restart: unless-stopped
+    ports:
+      - "${CUEPLEX_PORT:-8001}:8001"
+    environment:
+      - DATABASE_URL=postgresql://cueplex_user:${DB_PASSWORD}@postgres:5432/cueplex
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cueplex_data:/app/data
+      - cueplex_logs:/app/logs
+    networks:
+      - cueplex
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:15
+    container_name: cueplex-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=cueplex
+      - POSTGRES_USER=cueplex_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - cueplex
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueplex_user -d cueplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+    driver: local
+  cueplex_data:
+    driver: local
+  cueplex_logs:
+    driver: local
+
+networks:
+  cueplex:
+    name: ${CUEPLEX_NETWORK:-cueplex}
+    external: true

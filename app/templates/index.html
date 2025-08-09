@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Discover - Stout Requests{% endblock %}
+{% block title %}Discover - CuePlex{% endblock %}
 
 {% block content %}
 <div class="px-4 py-6 sm:px-0">
     {% if not current_user %}
     <!-- Landing page for non-authenticated users -->
     <div class="text-center py-16">
-        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to Stout Requests</h1>
+        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to CuePlex</h1>
         <p class="text-xl text-gray-600 mb-8">Request movies and TV shows for your Plex server</p>
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 max-w-md mx-auto">
             <div class="flex items-center justify-center mb-4">

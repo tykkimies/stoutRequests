@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  cueplex:
+    image: cueplex-test:latest
+    container_name: cueplex-test
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      # Connect to your existing database - replace with your actual details
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@host.docker.internal:5432/cueplex
+      - SECRET_KEY=test-secret-key-change-in-production
+      - ENVIRONMENT=production
+    volumes:
+      - cueplex_test_logs:/app/logs
+      - cueplex_test_data:/app/data
+    networks:
+      - servarr  # Join your existing network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allows access to host services
+
+volumes:
+  cueplex_test_logs:
+  cueplex_test_data:
+
+networks:
+  servarr:
+    external: true

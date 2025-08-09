@@ -744,7 +744,7 @@ class PlexSyncService:
         except Exception as e:
             return {'error': f"Debug error: {str(e)}"}
     
-    def check_items_status(self, tmdb_ids: List[int], media_type: str) -> Dict[int, str]:
+    def check_items_status(self, tmdb_ids: List[int], media_type: str, skip_tv_completion: bool = False) -> Dict[int, str]:
         """
         Fast lookup of status for multiple TMDB IDs.
         Returns dict mapping tmdb_id -> status ('in_plex', 'partial_plex', 'requested_pending', 'requested_approved', 'available')
@@ -766,29 +766,38 @@ class PlexSyncService:
                 print(f"🔍 [PLEX STATUS DEBUG] Checking {len(tmdb_ids)} {media_type} items: {tmdb_ids}")
                 print(f"🔍 [PLEX STATUS DEBUG] Found {len(plex_items)} items in Plex: {plex_items}")
             
-            # For TV shows, check if they're partial
+            # For TV shows, check if they're partial (unless skipped for performance)
             if media_type == 'tv':
-                # Check which TV shows have detailed episode data
-                tv_statement = select(PlexTVItem.show_tmdb_id).where(
-                    PlexTVItem.show_tmdb_id.in_(tmdb_ids)
-                ).distinct()
-                tv_items_with_details = {item for item in self.session.exec(tv_statement)}
-                
-                # For shows with detailed data, check if they're complete
-                for tmdb_id in tmdb_ids:
-                    if tmdb_id in plex_items:
-                        if tmdb_id in tv_items_with_details:
-                            # Check if this show is complete by getting TMDB details
-                            completion_status = self._check_tv_show_completion(tmdb_id)
-                            if completion_status['is_complete']:
-                                status_map[tmdb_id] = 'in_plex'
-                            else:
-                                status_map[tmdb_id] = 'partial_plex'
+                if skip_tv_completion:
+                    # Fast mode: Just check if show exists in Plex, skip completion checking
+                    for tmdb_id in tmdb_ids:
+                        if tmdb_id in plex_items:
+                            status_map[tmdb_id] = 'in_plex'  # Assume complete for performance
                         else:
-                            # No detailed data, assume complete for now
-                            status_map[tmdb_id] = 'in_plex'
-                    else:
-                        status_map[tmdb_id] = 'available'  # Default
+                            status_map[tmdb_id] = 'available'  # Default
+                else:
+                    # Full mode: Check completion status (expensive)
+                    # Check which TV shows have detailed episode data
+                    tv_statement = select(PlexTVItem.show_tmdb_id).where(
+                        PlexTVItem.show_tmdb_id.in_(tmdb_ids)
+                    ).distinct()
+                    tv_items_with_details = {item for item in self.session.exec(tv_statement)}
+                    
+                    # For shows with detailed data, check if they're complete
+                    for tmdb_id in tmdb_ids:
+                        if tmdb_id in plex_items:
+                            if tmdb_id in tv_items_with_details:
+                                # Check if this show is complete by getting TMDB details
+                                completion_status = self._check_tv_show_completion(tmdb_id)
+                                if completion_status['is_complete']:
+                                    status_map[tmdb_id] = 'in_plex'
+                                else:
+                                    status_map[tmdb_id] = 'partial_plex'
+                            else:
+                                # No detailed data, assume complete for now
+                                status_map[tmdb_id] = 'in_plex'
+                        else:
+                            status_map[tmdb_id] = 'available'  # Default
             else:
                 # For movies, simple check
                 for tmdb_id in tmdb_ids:
@@ -810,14 +819,15 @@ class PlexSyncService:
                 MediaRequest.status.in_([RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.AVAILABLE, RequestStatus.REJECTED])
             )
             
-            # Override with request status if exists (but don't override partial_plex)
+            # Override with request status if exists
             for request in self.session.exec(request_statement):
                 if request.status == RequestStatus.AVAILABLE:
-                    if status_map.get(request.tmdb_id) != 'partial_plex':
-                        status_map[request.tmdb_id] = 'in_plex'
+                    # AVAILABLE requests mean the item is fully in Plex
+                    status_map[request.tmdb_id] = 'in_plex'
                 else:
-                    # Only override if not already in plex (complete or partial)
-                    if status_map.get(request.tmdb_id) not in ['in_plex', 'partial_plex']:
+                    # Active requests (PENDING/APPROVED) should show request status
+                    # This includes partial shows that have new requests for missing content
+                    if status_map.get(request.tmdb_id) != 'in_plex':
                         status_map[request.tmdb_id] = f'requested_{request.status.value.lower()}'
             
             return status_map
@@ -903,21 +913,68 @@ class PlexSyncService:
                 tmdb_total_seasons = tmdb_details.get('number_of_seasons', 0)
                 tmdb_total_episodes = tmdb_details.get('number_of_episodes', 0)
                 
-                # Get detailed season info to exclude specials
+                # Get detailed season info and count only AIRED episodes (not future ones)
                 tmdb_regular_seasons = 0
-                tmdb_regular_episodes = 0
+                tmdb_aired_episodes = 0
+                tmdb_total_episodes = 0
                 
                 if tmdb_details.get('seasons'):
+                    from datetime import datetime
+                    today = datetime.now()
+                    
                     for season in tmdb_details['seasons']:
                         season_number = season.get('season_number', 0)
                         if season_number > 0:  # Exclude season 0 (specials)
                             tmdb_regular_seasons += 1
-                            tmdb_regular_episodes += season.get('episode_count', 0)
+                            season_episode_count = season.get('episode_count', 0)
+                            tmdb_total_episodes += season_episode_count
+                            
+                            # Count aired episodes by checking air dates
+                            season_aired = 0
+                            if 'episodes' in season:
+                                for ep in season['episodes']:
+                                    ep_air_date = ep.get('air_date')
+                                    if ep_air_date:
+                                        try:
+                                            air_dt = datetime.strptime(ep_air_date, '%Y-%m-%d')
+                                            if air_dt <= today:
+                                                season_aired += 1
+                                        except:
+                                            # If we can't parse the date, assume it has aired
+                                            season_aired += 1
+                                    else:
+                                        # No air date info, assume it has aired if within reasonable bounds
+                                        season_aired += 1
+                            else:
+                                # No detailed episode data, use conservative estimate
+                                # For ongoing shows, don't assume all episodes have aired
+                                show_status = tmdb_details.get('status', '').lower()
+                                if show_status in ['returning series', 'in production']:
+                                    # For ongoing shows, estimate based on air date patterns
+                                    # Use a weekly schedule assumption (1 episode per week)
+                                    season_air_date = season.get('air_date')
+                                    if season_air_date:
+                                        try:
+                                            season_start = datetime.strptime(season_air_date, '%Y-%m-%d')
+                                            weeks_since_start = (today - season_start).days // 7
+                                            # Conservative estimate: min of weeks passed or total episodes
+                                            season_aired = min(max(0, weeks_since_start), season_episode_count)
+                                        except:
+                                            # Fallback to half the episodes for ongoing shows
+                                            season_aired = season_episode_count // 2
+                                    else:
+                                        # No air date, assume half have aired for ongoing shows
+                                        season_aired = season_episode_count // 2
+                                else:
+                                    # For completed shows, assume all episodes have aired
+                                    season_aired = season_episode_count
+                            
+                            tmdb_aired_episodes += season_aired
                 
-                # Compare our data against TMDB
+                # Compare our data against AIRED episodes (not total planned)
+                # Show is "complete" if we have all aired episodes
                 is_complete = (
-                    available_seasons == tmdb_regular_seasons and 
-                    available_episodes == tmdb_regular_episodes and
+                    available_episodes >= tmdb_aired_episodes and 
                     available_seasons > 0  # Must have at least one season
                 )
                 
@@ -927,8 +984,9 @@ class PlexSyncService:
                     'available_episodes': available_episodes,
                     'season_numbers': available_season_numbers,
                     'tmdb_regular_seasons': tmdb_regular_seasons,
-                    'tmdb_regular_episodes': tmdb_regular_episodes,
-                    'completion_percentage': (available_episodes / tmdb_regular_episodes * 100) if tmdb_regular_episodes > 0 else 0
+                    'tmdb_aired_episodes': tmdb_aired_episodes,
+                    'tmdb_total_episodes': tmdb_total_episodes,
+                    'completion_percentage': (available_episodes / tmdb_aired_episodes * 100) if tmdb_aired_episodes > 0 else 0
                 }
                 
             except Exception as tmdb_error:

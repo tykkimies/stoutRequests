@@ -1,0 +1,34 @@
+FROM docker:24-cli
+
+# Metadata
+LABEL maintainer="CuePlex"
+LABEL version="1.0.0"
+LABEL description="CuePlex Auto-Installer - One-command deployment"
+
+# Install dependencies
+RUN apk add --no-cache \
+    bash \
+    curl \
+    jq \
+    openssl \
+    gettext
+
+# Create installer directory
+WORKDIR /installer
+
+# Copy stack templates and scripts
+COPY installer/ .
+COPY docker-compose.prod.yml ./templates/
+COPY init-db.sql ./templates/
+
+# Make scripts executable
+RUN chmod +x *.sh
+
+# Set default environment variables
+ENV CUEPLEX_PORT=8001
+ENV CUEPLEX_NETWORK=cueplex
+ENV INSTALL_MODE=auto
+ENV DATA_PATH=/opt/cueplex
+
+# Default command
+CMD ["./install.sh"]

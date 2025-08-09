@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, Request, Depends, status, Query
+from fastapi import FastAPI, Request, Depends, status, Query, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBearer
+from fastapi.exception_handlers import http_exception_handler
 from sqlmodel import Session, select
 
 from .core.database import create_db_and_tables, get_session, engine
@@ -118,25 +119,27 @@ def build_discover_query_params(
     return "&".join(params)
 
 
-async def get_instances_for_media_type(user_id: int, media_type: str) -> list:
+async def get_instances_for_media_type(user_id: int, media_type: str, session: Session = None) -> list:
     """
-    Helper function to get available instances for a user and media type.
+    🚀 PERFORMANCE: Helper function to get available instances for a user and media type.
+    Now supports batch loading to reduce N+1 queries.
     Returns empty list if user is None or on error.
     """
     if not user_id:
         return []
     
     try:
-        # Convert string media type to MediaType enum
-        if media_type.lower() == 'movie':
-            media_type_enum = MediaType.MOVIE
-        elif media_type.lower() in ['tv', 'show']:
-            media_type_enum = MediaType.TV
-        else:
-            # For mixed content, return both movie and TV instances
-            movie_instances = await get_user_available_instances(user_id, MediaType.MOVIE)
-            tv_instances = await get_user_available_instances(user_id, MediaType.TV)
-            # Return combined list, removing duplicates based on instance ID
+        # Use batch loading for better performance
+        from .services.instance_selection_service import batch_load_user_instances
+        
+        # Normalize media type
+        if media_type.lower() in ['mixed', 'all']:
+            batch_result = await batch_load_user_instances(
+                user_id, ['movie', 'tv'], session, force_refresh=False
+            )
+            # Combine movie and TV instances, removing duplicates
+            movie_instances = batch_result.get('movie', [])
+            tv_instances = batch_result.get('tv', [])
             seen_ids = set()
             combined = []
             for instance in movie_instances + tv_instances:
@@ -144,8 +147,14 @@ async def get_instances_for_media_type(user_id: int, media_type: str) -> list:
                     combined.append(instance)
                     seen_ids.add(instance.id)
             return combined
-        
-        return await get_user_available_instances(user_id, media_type_enum)
+        else:
+            # Single media type
+            normalized_type = media_type.lower() if media_type.lower() in ['movie', 'tv'] else 'movie'
+            batch_result = await batch_load_user_instances(
+                user_id, [normalized_type], session, force_refresh=False
+            )
+            return batch_result.get(normalized_type, [])
+            
     except Exception as e:
         print(f"Warning: Failed to get available instances for user {user_id}, media_type {media_type}: {e}")
         return []
@@ -272,6 +281,29 @@ async def base_url_routing_middleware(request: Request, call_next):
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
+# Health check endpoint for Docker
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker and monitoring"""
+    try:
+        # Test database connection
+        with Session(engine) as session:
+            session.exec(select(1))
+        
+        return {
+            "status": "healthy",
+            "service": "cueplex",
+            "timestamp": datetime.utcnow().isoformat(),
+            "database": "connected"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy", 
+            "service": "cueplex",
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": str(e)
+        }
+
 # Include API routers
 app.include_router(auth_router)
 app.include_router(search_router)
@@ -280,6 +312,26 @@ app.include_router(admin_router)
 app.include_router(setup_router)
 app.include_router(services_router)
 # app.include_router(setup.router)
+
+# Custom exception handler for 401 errors - redirect to login instead of JSON
+@app.exception_handler(401)
+async def custom_401_handler(request: Request, exc: HTTPException):
+    """Handle 401 Unauthorized errors with user-friendly redirects"""
+    # Check if this is an HTMX request (already handled by JavaScript in base.html)
+    if request.headers.get("HX-Request"):
+        # For HTMX requests, return the default JSON response and let the JavaScript handle it
+        return await http_exception_handler(request, exc)
+    
+    # For regular browser requests, redirect to login
+    from .services.settings_service import SettingsService
+    try:
+        with Session(engine) as session:
+            base_url = SettingsService.get_base_url(session)
+            login_url = f"{base_url}/login" if base_url else "/login"
+    except:
+        login_url = "/login"
+    
+    return RedirectResponse(url=login_url, status_code=302)
 
 # Setup templates
 templates = Jinja2Templates(directory="app/templates")
@@ -959,7 +1011,7 @@ async def emergency_admin_login(session: Session = Depends(get_session)):
             key="access_token", 
             value=access_token, 
             httponly=True, 
-            max_age=2 * 60 * 60  # 2 hours
+            max_age=86400  # 24 hours to match token expiration
         )
         
         return response
@@ -1128,56 +1180,12 @@ async def filter_database_category(
                 
                 has_more = False
             else:
-                # Generate recommendations based on user's request history
-                recommendation_items = []
-                seen_ids = set()
-                
-                for user_request in user_requests[:15]:  # Use top 15 requests for recommendations
-                    try:
-                        # Handle enum values safely
-                        request_media_type = user_request.media_type.value if hasattr(user_request.media_type, 'value') else str(user_request.media_type)
-                        
-                        # Get similar and recommended items
-                        if request_media_type == 'movie':
-                            similar_results = tmdb_service.get_movie_similar(user_request.tmdb_id, 1)
-                            rec_results = tmdb_service.get_movie_recommendations(user_request.tmdb_id, 1)
-                        else:
-                            similar_results = tmdb_service.get_tv_similar(user_request.tmdb_id, 1)
-                            rec_results = tmdb_service.get_tv_recommendations(user_request.tmdb_id, 1)
-                        
-                        # Add similar items
-                        for item in similar_results.get('results', [])[:4]:  # Top 4 similar
-                            item_id = f"{item['id']}_{request_media_type}"
-                            if item_id not in seen_ids:
-                                seen_ids.add(item_id)
-                                item['media_type'] = request_media_type
-                                item['recommendation_reason'] = f"Similar to {user_request.title}"
-                                recommendation_items.append(item)
-                        
-                        # Add recommended items
-                        for item in rec_results.get('results', [])[:3]:  # Top 3 recommendations
-                            item_id = f"{item['id']}_{request_media_type}"
-                            if item_id not in seen_ids:
-                                seen_ids.add(item_id)
-                                item['media_type'] = request_media_type
-                                item['recommendation_reason'] = f"Recommended for {user_request.title}"
-                                recommendation_items.append(item)
-                    
-                    except Exception as rec_error:
-                        print(f"⚠️ Error getting recommendations for {user_request.title}: {rec_error}")
-                        continue
-                
-                # Sort by popularity and limit results
-                recommendation_items.sort(key=lambda x: x.get('popularity', 0), reverse=True)
-                
-                # Apply pagination (using offset from page number)
-                offset = (page - 1) * limit
-                start_idx = offset
-                end_idx = offset + limit
-                all_results = recommendation_items[start_idx:end_idx]
-                
-                has_more = end_idx < len(recommendation_items)
-                print(f"📊 Generated {len(recommendation_items)} total recommendations, returning {len(all_results)}")
+                # 🚀 PERFORMANCE FIX: Use optimized async recommendations service
+                print("🚀 Using async personalized recommendations service")
+                recommendation_items = await tmdb_service.get_personalized_recommendations_async(user_requests, limit=30)
+                all_results = recommendation_items
+                has_more = False
+                print(f"📊 Generated {len(recommendation_items)} total recommendations using async service")
             
             # Add Plex status to all recommendations
             movie_ids = [item['id'] for item in all_results if item.get('media_type') == 'movie']
@@ -1185,7 +1193,7 @@ async def filter_database_category(
             
             sync_service = PlexSyncService(session)
             movie_status = sync_service.check_items_status(movie_ids, 'movie') if movie_ids else {}
-            tv_status = sync_service.check_items_status(tv_ids, 'tv') if tv_ids else {}
+            tv_status = sync_service.check_items_status(tv_ids, 'tv', skip_tv_completion=True) if tv_ids else {}
             
             for item in all_results:
                 if item.get('media_type') == 'movie':
@@ -1266,17 +1274,41 @@ async def filter_database_category(
             from fastapi.responses import HTMLResponse
             return HTMLResponse('<div class="text-center py-8 text-red-600">Error loading recommendations</div>')
     
-    # Fetch TMDB details and apply filters
+    # 🚀 PERFORMANCE FIX: Fast filtering for database categories
     filtered_results = []
     base_url = SettingsService.get_base_url(session)
+    
+    # Check if we need detailed TMDB data for filtering
+    needs_tmdb_filtering = bool(genres or rating_min)
     
     for db_item in database_items:
         try:
             # Skip if media type filter doesn't match
             if media_type != "mixed" and db_item['media_type'] != media_type:
                 continue
-                
-            # Fetch TMDB details
+            
+            # 🚀 SKIP TMDB API calls if no filtering is needed (major speedup)
+            if not needs_tmdb_filtering:
+                # Use database info directly - no TMDB API call needed
+                item = {
+                    'id': db_item['tmdb_id'],
+                    'title': db_item['title'] if db_item['media_type'] == 'movie' else None,
+                    'name': db_item['title'] if db_item['media_type'] == 'tv' else None,
+                    'overview': 'From your Plex library' if db_item.get('in_plex') else 'Previously requested',
+                    'poster_path': None,
+                    'poster_url': None,  # Skip for speed
+                    'release_date': '',
+                    'first_air_date': '',
+                    'vote_average': 0,
+                    'media_type': db_item['media_type'],
+                    'in_plex': db_item['in_plex'],
+                    'status': db_item['status'],
+                    'base_url': base_url
+                }
+                filtered_results.append(item)
+                continue
+            
+            # Only fetch TMDB details when filtering is actually needed
             if db_item['media_type'] == 'movie':
                 tmdb_data = tmdb_service.get_movie_details(db_item['tmdb_id'])
             else:
@@ -1441,7 +1473,7 @@ async def discover_page(
     base_url = SettingsService.get_base_url(session)
     
     # Get available instances for the user and media type
-    available_instances = await get_instances_for_media_type(current_user.id if current_user else None, media_type)
+    available_instances = await get_instances_for_media_type(current_user.id if current_user else None, media_type, session)
     
     # CRITICAL FIX: Define actual_media_type variable and handle "all" conversion
     # Convert "all" media type to "mixed" for internal processing
@@ -2226,15 +2258,60 @@ async def discover_category(
     from .services.tmdb_service import TMDBService
     from .services.plex_service import PlexService
     from .services.settings_service import SettingsService
+    from .services.category_cache_service import CategoryCacheService
         
     base_url = SettingsService.get_base_url(session)
     tmdb_service = TMDBService(session)
     plex_service = PlexService(session)
+    cache_service = CategoryCacheService(session)
     
     # Get available instances for the user and media type
-    available_instances = await get_instances_for_media_type(current_user.id if current_user else None, type)
+    available_instances = await get_instances_for_media_type(current_user.id if current_user else None, type, session)
     
     try:
+        # Check for cached content first for better performance (but skip personalized categories)
+        cache_key = f"{type}_{sort}_p{page}"
+        use_cache = not (type == "recommendations" or type == "requests" or type == "plex")  # Skip cache for personalized/dynamic content
+        print(f"🔍 Cache decision for {type}/{sort}: use_cache={use_cache}")
+        cached_content = cache_service.get_cached_category(type, sort, page, fallback_to_api=False) if use_cache else None
+        
+        if cached_content and isinstance(cached_content, dict) and 'results' in cached_content and use_cache:
+            print(f"🚀 Using cached content for {type}_{sort} (page {page}) - status already included")
+            try:
+                # Cached content now includes Plex status from background job - no real-time checking needed!
+                cached_results = cached_content.get('results', [])
+                
+                # Just ensure poster URLs are complete
+                for item in cached_results:
+                    if item.get('poster_path') and not item.get('poster_url'):
+                        item['poster_url'] = f"{tmdb_service.image_base_url}{item['poster_path']}"
+                    
+                    # Ensure status defaults are set if somehow missing from cache
+                    if 'status' not in item:
+                        item['status'] = 'available'
+                    if 'in_plex' not in item:
+                        item['in_plex'] = False
+                    if 'media_type' not in item:
+                        item['media_type'] = type
+                
+                print(f"🚀 Serving {len(cached_results)} cached {type} items with pre-computed status")
+                
+                # Render cached content with pre-computed Plex status
+                template_name = "components/category_horizontal.html" if view == "horizontal" else "components/expanded_results.html"
+                return templates.TemplateResponse(template_name, {
+                    "request": request,
+                    "results": cached_results,
+                    "has_more": cached_content.get('has_more', False),
+                    "current_page": page,
+                    "base_url": base_url,
+                    "category_type": type,
+                    "category_sort": sort,
+                    "total_results": cached_content.get('total_results', 0),
+                    "current_user": current_user
+                })
+            except Exception as cache_render_error:
+                print(f"⚠️ Cache render error, falling back to fresh data: {cache_render_error}")
+        
         # Initialize default values for all category types
         has_more = False
         recently_added = []
@@ -2270,16 +2347,17 @@ async def discover_category(
                 has_more = (offset + len(recent_plex_items)) < total_count
                 
                 recently_added = []
+                # 🚀 PERFORMANCE FIX: Create items with database info first (non-blocking)
+                plex_items_for_posters = []
                 for plex_item in recent_plex_items:
                     if plex_item.tmdb_id:
-                        # Use database info first, only fetch TMDB for missing posters
                         item = {
                             'id': plex_item.tmdb_id,
                             'title': plex_item.title if plex_item.media_type == 'movie' else None,
                             'name': plex_item.title if plex_item.media_type == 'tv' else None,
                             'overview': 'Recently added to your Plex server',
-                            'poster_path': None,
-                            'poster_url': None,
+                            'poster_path': None,  # Will be filled by batch lookup
+                            'poster_url': None,   # Will be filled by batch lookup
                             'release_date': str(plex_item.year) if plex_item.year else '',
                             'first_air_date': str(plex_item.year) if plex_item.year else '',
                             'vote_average': 0,
@@ -2288,34 +2366,60 @@ async def discover_category(
                             'status': 'in_plex',
                             "base_url": base_url,
                         }
-                        
-                        # Get full TMDB data for poster/details
-                        try:
-                            if plex_item.media_type == 'movie':
-                                tmdb_data = tmdb_service.get_movie_details(plex_item.tmdb_id)
-                            else:
-                                tmdb_data = tmdb_service.get_tv_details(plex_item.tmdb_id)
-                            
-                            # Only update if we got good data
-                            if tmdb_data:
-                                item.update({
-                                    'title': tmdb_data.get('title') if plex_item.media_type == 'movie' else item['title'],
-                                    'name': tmdb_data.get('name') if plex_item.media_type == 'tv' else item['name'],
-                                    'overview': tmdb_data.get('overview', item['overview']),
-                                    'poster_path': tmdb_data.get('poster_path'),
-                                    'poster_url': f"{tmdb_service.image_base_url}{tmdb_data['poster_path']}" if tmdb_data.get('poster_path') else None,
-                                    'release_date': tmdb_data.get('release_date', item['release_date']),
-                                    'first_air_date': tmdb_data.get('first_air_date', item['first_air_date']),
-                                    'vote_average': tmdb_data.get('vote_average', 0),
-                                    "base_url": base_url,
-                                })
-                                
-                        except Exception as tmdb_error:
-                            print(f"⚠️ TMDB lookup failed for {plex_item.title}: {tmdb_error}")
-                            # Continue with database info
-                        
-                        print(f"📊 Added Plex item: {item['title'] or item['name']} ({item['media_type']}) - Status: {item['status']}, In Plex: {item['in_plex']}")
                         recently_added.append(item)
+                        plex_items_for_posters.append((plex_item, item))
+                
+                # 🖼️ OPTIMIZED POSTER LOOKUP: Always try to get posters for better UX
+                if len(plex_items_for_posters) > 0:
+                    try:
+                        print(f"🖼️ Attempting poster lookup for {len(plex_items_for_posters)} Plex items")
+                        
+                        # Collect all items for batch processing
+                        items_for_api = []
+                        item_mapping = {}  # Maps index to (plex_item, display_item)
+                        
+                        for i, (plex_item, item) in enumerate(plex_items_for_posters):
+                            api_item = {'id': plex_item.tmdb_id, 'media_type': plex_item.media_type}
+                            items_for_api.append(api_item)
+                            item_mapping[i] = (plex_item, item)
+                        
+                        # Use batch async method for all items at once
+                        if hasattr(tmdb_service, 'get_multiple_details_async') and len(items_for_api) <= 20:
+                            print(f"🖼️ Fetching posters for {len(items_for_api)} items via batch async")
+                            poster_data = await tmdb_service.get_multiple_details_async(items_for_api)
+                            
+                            if poster_data and len(poster_data) > 0:
+                                print(f"🖼️ Received poster data for {len(poster_data)} items")
+                                for i, tmdb_data in enumerate(poster_data):
+                                    if i in item_mapping and tmdb_data and tmdb_data.get('poster_path'):
+                                        plex_item, item = item_mapping[i]
+                                        item['poster_path'] = tmdb_data['poster_path']
+                                        item['poster_url'] = f"{tmdb_service.image_base_url}{tmdb_data['poster_path']}"
+                                        # Also update title and overview if available from TMDB
+                                        if tmdb_data.get('title') and plex_item.media_type == 'movie':
+                                            item['title'] = tmdb_data['title']
+                                        elif tmdb_data.get('name') and plex_item.media_type == 'tv':
+                                            item['name'] = tmdb_data['name']
+                                        if tmdb_data.get('overview'):
+                                            item['overview'] = tmdb_data['overview']
+                                        if tmdb_data.get('vote_average'):
+                                            item['vote_average'] = tmdb_data['vote_average']
+                                    elif i in item_mapping:
+                                        plex_item, item = item_mapping[i]
+                                        print(f"⚠️ No poster data for {plex_item.media_type} {plex_item.tmdb_id}")
+                                        
+                                poster_count = sum(1 for _, item in plex_items_for_posters if item.get('poster_url'))
+                                print(f"🖼️ Successfully set posters for {poster_count}/{len(plex_items_for_posters)} items")
+                            else:
+                                print("⚠️ No poster data received from TMDB batch call")
+                        else:
+                            print(f"🖼️ Batch method unavailable or too many items ({len(items_for_api)}), items will show without posters")
+                            
+                    except Exception as poster_error:
+                        print(f"⚠️ Poster lookup failed (non-blocking): {poster_error}")
+                        import traceback
+                        traceback.print_exc()
+                        # Continue without posters - performance is more important
                 
                 if not recently_added:
                     debug_info = f"""
@@ -2409,6 +2513,12 @@ async def discover_category(
                 can_view_all_requests = user_is_admin or custom_perms.get('can_view_other_users_requests', False)
                 can_view_request_user = user_is_admin or custom_perms.get('can_see_requester_username', False)
                 
+                print(f"🔍 Permissions check for {current_user.username}:")
+                print(f"  - user_is_admin: {user_is_admin}")
+                print(f"  - custom_perms: {custom_perms}")
+                print(f"  - can_view_all_requests: {can_view_all_requests}")
+                print(f"  - can_view_request_user: {can_view_request_user}")
+                
                 # Import the status enum to filter properly
                 from app.models.media_request import RequestStatus
                 
@@ -2437,6 +2547,13 @@ async def discover_category(
                     ).order_by(MediaRequest.created_at.desc()).limit(max_limit)
                 
                 recent_results = session.exec(recent_statement).all()
+                print(f"🔍 Found {len(recent_results)} recent request results")
+                
+                # Log a few examples for debugging
+                for i, result in enumerate(recent_results[:3]):
+                    request_item = result[0]
+                    user = result[1] if len(result) > 1 else None
+                    print(f"  - Request {i+1}: {request_item.title} by {user.username if user else 'Unknown'} (Status: {request_item.status})")
                 
                 # Prepare batch TMDB requests for better performance
                 movie_ids = []
@@ -2615,7 +2732,8 @@ async def discover_category(
         
         # Handle Personalized Recommendations based on user's request history
         elif type == "recommendations" and sort == "personalized":
-            print(f"🎯 Fetching personalized recommendations for user: {current_user.username}")
+            print(f"🎯 HORIZONTAL SCROLL: Fetching personalized recommendations for user: {current_user.username}")
+            print(f"🎯 Parameters: type={type}, sort={sort}, limit={limit}, offset={offset}, page={page}")
             
             try:
                 # Get user's recent requests to base recommendations on
@@ -2632,74 +2750,54 @@ async def discover_category(
                 user_requests = session.exec(user_requests_statement).all()
                 print(f"📊 Found {len(user_requests)} recent requests for recommendations")
                 
-                if not user_requests:
-                    # No request history, fall back to popular content
-                    print("📊 No request history, falling back to popular content")
-                    fallback_results = tmdb_service.get_popular("movie", 1)
-                    fallback_tv = tmdb_service.get_popular("tv", 1)
+                if len(user_requests) == 0:
+                    print("⚠️ No recent requests found for recommendations - user may need to make some requests first")
+                    # Return empty results but still show the category
+                    return create_template_response("category_horizontal.html", {
+                        "request": request, 
+                        "results": [],
+                        "current_user": current_user,
+                        "media_type": "mixed",
+                        "sort_by": sort,
+                        "has_more": False,
+                        "next_offset": 0,
+                        "current_offset": 0,
+                        "base_url": base_url,
+                        "available_instances": available_instances
+                    })
+                
+                # Debug: Print details about user requests
+                print(f"🔍 User requests found for recommendations:")
+                for i, req in enumerate(user_requests[:5]):  # Show first 5 for debugging
+                    print(f"  {i+1}. {req.title} ({req.media_type}) - TMDB: {req.tmdb_id} - Created: {req.created_at}")
+                
+                # 🚀 OPTIMIZED: Use new parallel recommendations service
+                print("🚀 Calling get_personalized_recommendations_async...")
+                try:
+                    recommendation_items = await tmdb_service.get_personalized_recommendations_async(user_requests, limit=30)
+                    print(f"🚀 Recommendations service returned {len(recommendation_items) if recommendation_items else 0} items")
                     
-                    all_results = []
-                    for item in fallback_results.get('results', [])[:15]:
-                        item['media_type'] = 'movie'
-                        item['recommendation_reason'] = 'Popular content'
-                        all_results.append(item)
-                    
-                    for item in fallback_tv.get('results', [])[:15]:
-                        item['media_type'] = 'tv'
-                        item['recommendation_reason'] = 'Popular content'
-                        all_results.append(item)
-                    
-                    has_more = False
-                else:
-                    # Generate recommendations based on user's request history
-                    recommendation_items = []
-                    seen_ids = set()
-                    
-                    for user_request in user_requests[:15]:  # Use top 15 requests for recommendations
-                        try:
-                            # Handle enum values safely
-                            request_media_type = user_request.media_type.value if hasattr(user_request.media_type, 'value') else str(user_request.media_type)
-                            
-                            # Get similar and recommended items
-                            if request_media_type == 'movie':
-                                similar_results = tmdb_service.get_movie_similar(user_request.tmdb_id, 1)
-                                rec_results = tmdb_service.get_movie_recommendations(user_request.tmdb_id, 1)
-                            else:
-                                similar_results = tmdb_service.get_tv_similar(user_request.tmdb_id, 1)
-                                rec_results = tmdb_service.get_tv_recommendations(user_request.tmdb_id, 1)
-                            
-                            # Add similar items
-                            for item in similar_results.get('results', [])[:10]:  # Top 10 similar (increased from 4)
-                                item_id = f"{item['id']}_{request_media_type}"
-                                if item_id not in seen_ids:
-                                    seen_ids.add(item_id)
-                                    item['media_type'] = request_media_type
-                                    item['recommendation_reason'] = f"Similar to {user_request.title}"
-                                    recommendation_items.append(item)
-                            
-                            # Add recommended items
-                            for item in rec_results.get('results', [])[:10]:  # Top 10 recommendations (increased from 3)
-                                item_id = f"{item['id']}_{request_media_type}"
-                                if item_id not in seen_ids:
-                                    seen_ids.add(item_id)
-                                    item['media_type'] = request_media_type
-                                    item['recommendation_reason'] = f"Recommended for {user_request.title}"
-                                    recommendation_items.append(item)
+                    if recommendation_items:
+                        print("🔍 Sample recommendations:")
+                        for i, item in enumerate(recommendation_items[:3]):
+                            print(f"  {i+1}. {item.get('title') or item.get('name', 'Unknown')} ({item.get('media_type')}) - Reason: {item.get('recommendation_reason', 'Unknown')}")
+                    else:
+                        print("⚠️ Recommendations service returned empty list or None")
+                        recommendation_items = []
                         
-                        except Exception as rec_error:
-                            print(f"⚠️ Error getting recommendations for {user_request.title}: {rec_error}")
-                            continue
-                    
-                    # Sort by popularity and limit results
-                    recommendation_items.sort(key=lambda x: x.get('popularity', 0), reverse=True)
-                    
-                    # Apply pagination
-                    start_idx = offset
-                    end_idx = offset + limit
-                    all_results = recommendation_items[start_idx:end_idx]
-                    
-                    has_more = end_idx < len(recommendation_items)
-                    print(f"📊 Generated {len(recommendation_items)} total recommendations, returning {len(all_results)}")
+                except Exception as rec_error:
+                    print(f"❌ Error calling recommendations service: {rec_error}")
+                    import traceback
+                    traceback.print_exc()
+                    recommendation_items = []
+                
+                # Apply pagination
+                start_idx = offset
+                end_idx = offset + limit
+                all_results = recommendation_items[start_idx:end_idx]
+                
+                has_more = end_idx < len(recommendation_items)
+                print(f"📊 Generated {len(recommendation_items)} total recommendations, returning {len(all_results)}")
                 
                 # Add Plex status to all recommendations
                 movie_ids = [item['id'] for item in all_results if item.get('media_type') == 'movie']
@@ -2707,7 +2805,7 @@ async def discover_category(
                 
                 sync_service = PlexSyncService(session)
                 movie_status = sync_service.check_items_status(movie_ids, 'movie') if movie_ids else {}
-                tv_status = sync_service.check_items_status(tv_ids, 'tv') if tv_ids else {}
+                tv_status = sync_service.check_items_status(tv_ids, 'tv', skip_tv_completion=True) if tv_ids else {}
                 
                 for item in all_results:
                     if item.get('media_type') == 'movie':
@@ -2941,7 +3039,9 @@ async def discover_category(
                 try:
                     sync_service = PlexSyncService(session)
                     tmdb_ids = [item['id'] for item in limited_results]
-                    status_map = sync_service.check_items_status(tmdb_ids, custom_media_type)
+                    # Use fast TV status checking for custom categories too
+                    skip_tv_completion = (custom_media_type == 'tv')
+                    status_map = sync_service.check_items_status(tmdb_ids, custom_media_type, skip_tv_completion=skip_tv_completion)
                     
                     for item in limited_results:
                         item['media_type'] = custom_media_type
@@ -3010,8 +3110,9 @@ async def discover_category(
         
         for page_num in range(start_page, min(end_page + 1, 26)):  # TMDB usually limits to 25 pages (500 results)
             try:
-                # Use unified category system for consistency with expanded views
-                page_results = tmdb_service.get_category_content(
+                # Use async TMDB API calls for parallel loading performance
+                print(f"🚀 Fetching page {page_num} for {type}/{sort} async")
+                page_results = await tmdb_service.get_category_content_async(
                     media_type=type,
                     category=sort,
                     page=page_num
@@ -3055,7 +3156,9 @@ async def discover_category(
             print(f"🔍 Creating PlexSyncService for user: {current_user.username if current_user else 'None'}")
             sync_service = PlexSyncService(session)
             tmdb_ids = [item['id'] for item in limited_results]
-            status_map = sync_service.check_items_status(tmdb_ids, type)
+            # Use fast TV status checking to avoid expensive episode completion checks
+            skip_tv_completion = (type == 'tv')
+            status_map = sync_service.check_items_status(tmdb_ids, type, skip_tv_completion=skip_tv_completion)
             
             # Add status information to each item
             for item in limited_results:
@@ -3116,6 +3219,21 @@ async def discover_category(
                 "current_streaming": []
             })
         
+        # Cache the results for future requests (only cache successful results with data)
+        if limited_results and len(limited_results) > 0:
+            try:
+                cache_data = {
+                    'results': limited_results,
+                    'has_more': has_more,
+                    'total_results': len(limited_results),
+                    'page': page,
+                    'cached_at': datetime.utcnow().isoformat()
+                }
+                cache_service.cache_category_data(type, sort, page, cache_data)
+                print(f"💾 Cached {len(limited_results)} results for {type}_{sort} (page {page})")
+            except Exception as cache_error:
+                print(f"⚠️ Failed to cache results: {cache_error}")
+
         # Use instance-aware response for templates that need multi-instance support
         if template_name in ["components/movie_cards_only.html", "discover_results.html", "components/expanded_results.html"]:
             return await create_template_response_with_instances(template_name, context)
@@ -3323,6 +3441,13 @@ async def customize_user_categories(
     # Get form data
     form = await request.form()
     
+    # Debug logging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔍 Category customization form data for user {current_user.id}:")
+    for key, value in form.items():
+        logger.info(f"  {key}: {value}")
+    
     # Parse the category preferences from form data
     # Expected format: category_id_visible, category_id_order
     category_updates = {}
@@ -3342,6 +3467,11 @@ async def customize_user_categories(
             except (ValueError, TypeError):
                 category_updates[cat_id]['order'] = 0
     
+    # Debug logging for processed category updates
+    logger.info(f"📝 Processing category updates for user {current_user.id}:")
+    for cat_id, prefs in category_updates.items():
+        logger.info(f"  {cat_id}: visible={prefs['visible']}, order={prefs['order']}")
+    
     # Update database with new preferences
     for cat_id, prefs in category_updates.items():
         # Check if preference exists
@@ -3353,11 +3483,13 @@ async def customize_user_categories(
         
         if existing_pref:
             # Update existing preference
+            logger.info(f"🔄 Updating existing pref for {cat_id}: visible {existing_pref.is_visible} → {prefs['visible']}, order {existing_pref.display_order} → {prefs['order']}")
             existing_pref.is_visible = prefs['visible']
             existing_pref.display_order = prefs['order']
             existing_pref.updated_at = datetime.utcnow()
         else:
             # Create new preference
+            logger.info(f"✨ Creating new pref for {cat_id}: visible={prefs['visible']}, order={prefs['order']}")
             new_pref = UserCategoryPreferences(
                 user_id=current_user.id,
                 category_id=cat_id,
@@ -4794,6 +4926,7 @@ async def discover_category_more(
         from .services.plex_service import PlexService
         from .services.settings_service import SettingsService
         from .services.plex_sync_service import PlexSyncService
+        from .services.category_cache_service import CategoryCacheService
         from fastapi.templating import Jinja2Templates
     except ImportError as import_error:
         print(f"❌ CRITICAL: Import error in discover_category_more: {import_error}")
@@ -4847,6 +4980,12 @@ async def discover_category_more(
             print(f"❌ Template error in discover_category_more: {template_error}")
             return HTMLResponse('<div class="text-center py-8 text-red-600">Template service temporarily unavailable.</div>')
         
+        try:
+            cache_service = CategoryCacheService(session)
+        except Exception as cache_error:
+            print(f"⚠️ CategoryCacheService error: {cache_error}")
+            cache_service = None
+        
         # CRITICAL FIX: Handle media_type parameter precedence
         # If media_type is provided, use it; otherwise fall back to type parameter
         actual_media_type = media_type if media_type else type
@@ -4859,6 +4998,28 @@ async def discover_category_more(
         print(f"  - Is mixed content? {actual_media_type == 'mixed'}")
         print(f"  - Page: {page}")
         print(f"  - Applied filters: genres={genres}, rating_min={rating_min}, year_from={year_from}, year_to={year_to}")
+        
+        # Check cache for simple TMDB categories (no complex filters, no custom categories)
+        has_filters = (genres or rating_min or year_from or year_to or studios or streaming or content_sources)
+        is_simple_tmdb = not (db_category_type or custom_category_id or has_filters)
+        
+        if cache_service and is_simple_tmdb and page <= 5:  # Only cache first few pages
+            try:
+                cached_content = cache_service.get_cached_category(actual_media_type, sort, page, fallback_to_api=False)
+                if cached_content and isinstance(cached_content, dict) and 'results' in cached_content:
+                    print(f"🚀 Using cached infinite scroll content for {actual_media_type}_{sort} (page {page})")
+                    return templates.TemplateResponse("components/movie_cards_only.html", {
+                        "request": request,
+                        "results": cached_content.get('results', []),
+                        "has_more": cached_content.get('has_more', False),
+                        "current_page": page,
+                        "base_url": base_url,
+                        "current_user": current_user,
+                        "media_type": actual_media_type,
+                        "current_query_params": f"type={actual_media_type}&sort={sort}"
+                    })
+            except Exception as cache_check_error:
+                print(f"⚠️ Cache check failed, continuing with fresh data: {cache_check_error}")
         
         # Handle different category types first (same as expanded endpoint)
         if db_category_type and db_category_sort:
@@ -5522,7 +5683,7 @@ async def search_page(
     from .services.plex_service import PlexService
     from .services.settings_service import SettingsService
     
-    # TMDB now works out of the box with default API key
+    # TMDB requires API key configuration during setup
     
     tmdb_service = TMDBService(session)
     plex_service = PlexService(session)
@@ -6068,7 +6229,7 @@ async def media_detail(
             print(f"🔍 [PLEX WATCH LINK DEBUG] Media not in Plex, skipping watch link generation")
         
         # Get available instances for this user and media type
-        available_instances = await get_instances_for_media_type(current_user.id if current_user else None, media_type)
+        available_instances = await get_instances_for_media_type(current_user.id if current_user else None, media_type, session)
         
         context = {
             "request": request,

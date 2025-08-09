@@ -959,7 +959,7 @@ async def setup_auto_login(request: Request, session: Session = Depends(get_sess
         response.set_cookie(
             key="access_token",
             value=access_token,
-            max_age=14400,  # 4 hours to match token expiration
+            max_age=86400,  # 24 hours to match token expiration
             httponly=False,  # Allow JavaScript access for HTMX headers
             secure=False,  # Set to True in production with HTTPS
             path="/",

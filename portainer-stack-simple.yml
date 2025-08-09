@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  cueplex:
+    image: cueplex-test:latest
+    container_name: cueplex-test
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      # Use your existing database on host
+      - DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@172.17.0.1:5432/cueplex
+      - SECRET_KEY=test-secret-key-change-in-production
+      - ENVIRONMENT=production
+    volumes:
+      - cueplex_test_logs:/app/logs
+      - cueplex_test_data:/app/data
+    networks:
+      - bridge
+      - servarr  # Your Radarr/Sonarr network
+    # Allow container to reach host services
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+volumes:
+  cueplex_test_logs:
+  cueplex_test_data:
+
+networks:
+  bridge:
+    external: true
+  servarr:
+    external: true

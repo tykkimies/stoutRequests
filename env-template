@@ -1,0 +1,17 @@
+# Database Configuration
+DATABASE_URL=postgresql://cueplex_user:CuePlexSecure2024!@localhost:5432/cueplex
+
+# Application Security
+SECRET_KEY=CHANGE_THIS_TO_A_RANDOM_STRING_32_CHARS_MIN
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Environment
+ENVIRONMENT=production
+
+# Note: API keys and service URLs are configured through the web interface
+# Visit http://localhost:8001/setup on first run to configure:
+# - Plex server connection  
+# - Radarr/Sonarr integration (optional)
+#
+# TMDB integration works automatically with built-in API key

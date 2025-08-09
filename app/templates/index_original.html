@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Search - Stout Requests{% endblock %}
+{% block title %}Search - CuePlex{% endblock %}
 
 {% block content %}
 <div class="px-4 py-6 sm:px-0">
     {% if not current_user %}
     <!-- Landing page for non-authenticated users -->
     <div class="text-center py-16">
-        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to Stout Requests</h1>
+        <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to CuePlex</h1>
         <p class="text-xl text-gray-600 mb-8">Request movies and TV shows for your Plex server</p>
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 max-w-md mx-auto">
             <div class="flex items-center justify-center mb-4">
@@ -1207,7 +1207,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Push state to browser history for proper back button behavior
         window.history.pushState(
             { view: 'category', categoryId: 'filtered-results' }, 
-            'Filtered Results - Stout Requests', 
+            'Filtered Results - CuePlex', 
             buildAppUrlWithParams('/', { view: 'filtered-results' })
         );
         
@@ -1360,7 +1360,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update browser history to clear all parameters
         window.history.pushState(
             { view: 'categories' }, 
-            'Stout Requests', 
+            'CuePlex', 
             buildAppUrl('/')
         );
         
@@ -1505,7 +1505,7 @@ function showFilteredResultsAsCategory(categoryId, mediaType, selectedContentSou
     // Push state to browser history for proper back button behavior (using same pattern as category expansion)
     window.history.pushState(
         { view: 'category', categoryId: categoryId }, 
-        `${config.displayName || getCategoryDisplayName(categoryId)} - Stout Requests`, 
+        `${config.displayName || getCategoryDisplayName(categoryId)} - CuePlex`, 
         buildAppUrlWithParams('/', { view: categoryId })
     );
     
@@ -1642,7 +1642,7 @@ function doExpandCategoryLegacy(categoryId) {
     // Push state to browser history for proper back button behavior
     window.history.pushState(
         { view: 'category', categoryId: categoryId }, 
-        `${getCategoryDisplayName(categoryId)} - Stout Requests`, 
+        `${getCategoryDisplayName(categoryId)} - CuePlex`, 
         buildAppUrlWithParams('/', { view: categoryId })
     );
     
@@ -1695,7 +1695,7 @@ function collapseCategory(categoryId) {
     // Update browser history to remove the view parameter
     window.history.pushState(
         { view: 'categories' }, 
-        'Stout Requests', 
+        'CuePlex', 
         buildAppUrl('/')
     );
     
@@ -2249,7 +2249,7 @@ window.addEventListener('popstate', function(event) {
         if (urlParams.has('view')) {
             urlParams.delete('view');
             const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
-            window.history.replaceState({ view: 'categories' }, 'Stout Requests', newUrl);
+            window.history.replaceState({ view: 'categories' }, 'CuePlex', newUrl);
         }
         
         // Collapse any expanded category (filtered or regular) 

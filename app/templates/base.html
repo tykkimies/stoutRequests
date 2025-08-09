@@ -16,7 +16,7 @@
     
     <!-- HTMX HTTPS Fix and Authentication -->
     <script>
-        // Fix HTMX mixed content issues and ensure proper authentication
+        // Consolidated HTMX configuration for authentication, URL handling, and credentials
         document.addEventListener('htmx:configRequest', function(evt) {
             // Get the current URL and check if it starts with a relative path
             let url = evt.detail.path;
@@ -24,9 +24,7 @@
             // Get the base URL from the current page's configuration
             const baseUrl = '{{ base_url }}';
             
-            
-            // If it's a relative URL starting with our base_url path, 
-            // convert it to an absolute URL with current protocol
+            // URL handling for base_url configuration
             if (url && baseUrl && url.startsWith(baseUrl)) {
                 const newUrl = window.location.origin + url;
                 evt.detail.path = newUrl;
@@ -37,11 +35,32 @@
                 evt.detail.path = newUrl;
             }
             
-            // Ensure credentials are included in HTMX requests for authentication
-            evt.detail.xhr.withCredentials = true;
+            // Ensure credentials are included in HTMX requests for authentication (with null check)
+            if (evt.detail.xhr) {
+                evt.detail.xhr.withCredentials = true;
+            }
             
-            // Add debug logging for authentication issues
-            if (evt.detail.path.includes('/discover/category/more')) {
+            // Add Authorization header for token-based authentication
+            let token = localStorage.getItem('access_token');
+            
+            // Fallback to cookie if localStorage is empty
+            if (!token) {
+                token = document.cookie
+                    .split('; ')
+                    .find(row => row.startsWith('access_token='))
+                    ?.split('=')[1];
+                
+                if (token) {
+                    localStorage.setItem('access_token', token);
+                }
+            }
+            
+            if (token) {
+                evt.detail.headers['Authorization'] = 'Bearer ' + token;
+            }
+            
+            // Debug logging for category requests
+            if (evt.detail.path.includes('/discover/category/more') && evt.detail.xhr) {
                 console.log('🔍 HTMX Request Config:', {
                     url: evt.detail.path,
                     withCredentials: evt.detail.xhr.withCredentials,
@@ -299,26 +318,48 @@
             }
         });
 
-        // Add Authorization header to all HTMX requests
-        document.addEventListener('htmx:configRequest', function(event) {
-            let token = localStorage.getItem('access_token');
+        // Activity-based token refresh to prevent sessions from expiring during active use
+        let lastActivity = Date.now();
+        
+        function updateActivity() {
+            lastActivity = Date.now();
+        }
+        
+        function checkTokenRefresh() {
+            const now = Date.now();
+            const timeSinceActivity = now - lastActivity;
+            const TOKEN_REFRESH_INTERVAL = 20 * 60 * 1000; // 20 minutes
+            const ACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes of inactivity
             
-            // Fallback to cookie if localStorage is empty
-            if (!token) {
-                token = document.cookie
-                    .split('; ')
-                    .find(row => row.startsWith('access_token='))
-                    ?.split('=')[1];
+            // If user has been active recently (within 30 min) and we haven't refreshed in 20 min
+            if (timeSinceActivity < ACTIVITY_TIMEOUT && 
+                (!window.lastTokenRefresh || (now - window.lastTokenRefresh) > TOKEN_REFRESH_INTERVAL)) {
                 
-                if (token) {
-                    localStorage.setItem('access_token', token);
-                }
+                // Make a simple request to refresh the token (reuse existing endpoint)
+                fetch('{{ base_url }}/', {
+                    method: 'HEAD',
+                    credentials: 'include'
+                }).then(response => {
+                    if (response.ok) {
+                        window.lastTokenRefresh = now;
+                        console.log('🔄 Session activity verified');
+                    }
+                }).catch(e => {
+                    // Silently fail - normal expiration handling will take over
+                    console.log('Session check failed:', e);
+                });
             }
-            
-            if (token) {
-                event.detail.headers['Authorization'] = 'Bearer ' + token;
-            }
+        }
+        
+        // Track user activity
+        ['click', 'keypress', 'mousemove', 'scroll'].forEach(event => {
+            document.addEventListener(event, updateActivity, { passive: true });
         });
+        
+        // Check for token refresh every 5 minutes
+        setInterval(checkTokenRefresh, 5 * 60 * 1000);
+        
+        // Removed duplicate HTMX configRequest listener - consolidated above
 
         // HTMX event listeners
         document.addEventListener('htmx:responseError', function(event) {
@@ -331,10 +372,10 @@
                 document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
                 
                 // Show specific message and redirect to login
-                showToast('Your session has expired. Please log in again.', 'warning');
+                showToast('Your session has expired. Redirecting to login...', 'warning');
                 setTimeout(() => {
                     window.location.href = '{{ base_url }}/login';
-                }, 2000);
+                }, 1000);
                 return;
             }
             
